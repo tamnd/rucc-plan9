@@ -62,6 +62,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["row"],
             switches: &[],
         },
+        "census" => Accepts {
+            positional: true,
+            values: &["side"],
+            switches: &[],
+        },
         _ => return None,
     })
 }
@@ -95,6 +100,11 @@ usage:
       attaches a blank disk of MIB MiB after it. In the guest, $r9in names the input disk and
       $r9collect the collect disk. A tar archive that the guest writes to $r9collect is
       unpacked into DIR/collected.
+  r9 census FILE [--side R|G]
+      Count what reached the compiler slot in one build, from the compile.jsonl that r9-cc
+      wrote: the calls by origin and by compiler, the calls that failed, the calls from pcc,
+      the time by directory, and the sources compiled more than once. The census of an R build
+      fails when a call went to kencc. The side comes from the records when --side is not given.
 
 The repository is found by walking up to sets.toml, or from R9_ROOT. Downloads, images and
 fetched trees go to R9_CACHE, or ~/.cache/r9.
