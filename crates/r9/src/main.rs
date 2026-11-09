@@ -119,6 +119,28 @@ fn run(args: &Args) -> Result<ExitCode, String> {
 /// Run a command that reads the compile records of a build.
 fn run_records(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
+        "tree-diff" => {
+            let a = args
+                .target
+                .as_deref()
+                .ok_or("give the directory of the first build")?;
+            let b = args
+                .get("with")
+                .ok_or("give --with, the directory of the second build")?;
+            let top = args
+                .get("top")
+                .map_or(Ok(20), str::parse)
+                .map_err(|e| format!("--top: {e}"))?;
+            let a = r9::treediff::load(std::path::Path::new(a))?;
+            let b = r9::treediff::load(std::path::Path::new(b))?;
+            let d = r9::treediff::diff(&a, &b);
+            print!("{}", r9::treediff::report(&d, top));
+            Ok(if d.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
         "census" => {
             let path = args
                 .target

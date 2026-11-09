@@ -1,0 +1,83 @@
+# The g-base image and two G builds for amd64 (plan 05.2, 16.1). The hosted runners have KVM,
+# and the Linux machines of machines.toml do not at present, so the amd64 G baseline runs here.
+#
+# The job makes the g-base image of the pinned tree with r9 image build, runs r9 build --side G
+# twice from it, and compares the two builds with r9 tree-diff. The summaries, the compile
+# records and the hash lists go to an artifact. arm64 runs on the M4 under HVF, because TCG on
+# an x86-64 runner is too slow for a full build.
+
+name: g-base
+
+on:
+  pull_request:
+    paths:
+      - crates/r9/src/image.rs
+      - crates/r9/src/build.rs
+      - crates/r9/src/treediff.rs
+      - guest/**
+      - .github/workflows/g-base.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  R9_CACHE: /mnt/r9
+
+jobs:
+  g-base:
+    name: g-base amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: Swatinem/rust-cache@v2.9.2
+      - name: let the runner user open /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -qy --no-install-recommends qemu-utils qemu-system-x86
+          sudo mkdir -p /mnt/r9 && sudo chown "$USER" /mnt/r9
+      - name: cargo build
+        run: cargo build --release --locked -p r9
+      - uses: actions/cache@v6.1.0
+        with:
+          path: /mnt/r9/images
+          key: r9-images-amd64-${{ hashFiles('pins.toml') }}
+          restore-keys: r9-images-amd64-
+      - name: r9 fetch
+        run: target/release/r9 fetch --row amd64
+      - name: r9 image build
+        run: target/release/r9 image build --row amd64 --accel kvm --out "$RUNNER_TEMP/image"
+      - name: r9 build, first
+        run: target/release/r9 build --side G --row amd64 --accel kvm --out "$RUNNER_TEMP/g1"
+      - name: r9 build, second
+        run: target/release/r9 build --side G --row amd64 --accel kvm --out "$RUNNER_TEMP/g2"
+      - name: r9 tree-diff
+        run: target/release/r9 tree-diff "$RUNNER_TEMP/g1" --with "$RUNNER_TEMP/g2" --top 200
+      - name: gather the results
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cp baselines/*.toml "$RUNNER_TEMP/out/" || true
+          for d in image g1 g2; do
+            mkdir -p "$RUNNER_TEMP/out/$d"
+            cp "$RUNNER_TEMP/$d"/*.toml "$RUNNER_TEMP/$d"/console.log "$RUNNER_TEMP/out/$d/" || true
+            cp -r "$RUNNER_TEMP/$d/collected" "$RUNNER_TEMP/out/$d/" || true
+            rm -f "$RUNNER_TEMP/out/$d/collected/gen.tar"
+          done
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: g-base-amd64
+          path: ${{ runner.temp }}/out
+          retention-days: 30
