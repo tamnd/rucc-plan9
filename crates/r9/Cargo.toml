@@ -12,6 +12,7 @@ publish = false
 r9-pins = { path = "../r9-pins" }
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [lints]
 workspace = true

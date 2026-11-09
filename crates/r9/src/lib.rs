@@ -9,6 +9,7 @@ pub mod census;
 pub mod check;
 pub mod cli;
 pub mod console;
+pub mod demands;
 pub mod disk;
 pub mod fetch;
 pub mod repo;

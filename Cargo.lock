@@ -121,6 +121,7 @@ dependencies = [
  "r9-pins",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
