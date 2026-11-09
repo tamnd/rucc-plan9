@@ -54,6 +54,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             positional: true,
             values: &[
                 "row", "accel", "timeout", "run", "bootargs", "out", "firmware", "in", "collect",
+                "image", "disk",
             ],
             switches: &["keep"],
         },
@@ -106,7 +107,8 @@ usage:
       Fetch a pin into the cache and check its hash: a tree by commit, or the images of a release.
       --row fetches the image of one row only. With no name, fetch the pins of the current set.
   r9 boot [NAME] [--row OBJTYPE] [--accel kvm|hvf|tcg] [--run FILE] [--timeout SECS]
-          [--bootargs ARGS] [--firmware PATH] [--in PATH] [--collect MIB] [--out DIR] [--keep]
+          [--bootargs ARGS] [--firmware PATH] [--in PATH] [--collect MIB] [--image FILE]
+          [--disk FILE] [--out DIR] [--keep]
       Boot a release image under QEMU on a fresh overlay. Answer the boot prompts, type each
       command of FILE (smoke/boot.rc by default) at the shell prompt, and halt the guest. The
       console goes to DIR/console.log and the results to DIR/steps.json. With no name, boot the
@@ -114,7 +116,9 @@ usage:
       --in attaches a directory or a tar file as a raw tar disk after the root disk. --collect
       attaches a blank disk of MIB MiB after it. In the guest, $r9in names the input disk and
       $r9collect the collect disk. A tar archive that the guest writes to $r9collect is
-      unpacked into DIR/collected.
+      unpacked into DIR/collected. --image boots another qcow2 file, such as a kept overlay,
+      in place of the release image, with a fresh overlay on top. --disk attaches a qcow2 file
+      after the root disk. The writes of the guest to it are not kept.
   r9 build [NAME] --side G [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
           [--firmware PATH] [--out DIR] [--keep]
       Boot a release image and run mk install in DIR (/sys/src by default) with r9-cc in the

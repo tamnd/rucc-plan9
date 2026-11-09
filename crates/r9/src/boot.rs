@@ -33,7 +33,10 @@ pub struct Request {
     pub bootargs: String,
     /// The commands to type at the shell prompt.
     pub commands: Vec<String>,
-    /// More raw disks, attached after the root disk in this order.
+    /// A qcow2 disk, such as the overlay of an earlier boot, attached after the root disk. QEMU
+    /// keeps the writes of the guest in a temporary file, so the disk does not change.
+    pub extra: Option<PathBuf>,
+    /// More raw disks, attached after the root disk and `extra` in this order.
     pub disks: Vec<PathBuf>,
     /// A directory or a tar file for the guest, attached as a raw tar disk after `disks`.
     pub input: Option<PathBuf>,
@@ -132,6 +135,15 @@ pub fn qemu_command(req: &Request) -> Vec<String> {
     ));
     c.push("-device".into());
     c.push(device("root"));
+    if let Some(extra) = &req.extra {
+        c.push("-drive".into());
+        c.push(format!(
+            "file={},if=none,id=extra,format=qcow2,snapshot=on",
+            extra.display()
+        ));
+        c.push("-device".into());
+        c.push(device("extra"));
+    }
     for (i, disk) in req.disks.iter().enumerate() {
         let id = format!("d{}", i + 1);
         c.push("-drive".into());
@@ -253,15 +265,7 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
         }
         if let Action::Type(text) = session.prompt(&lines.partial()) {
             lines.answered();
-            // The console reads one character at a time; a short pause between characters keeps
-            // the 16550's FIFO from overflowing under TCG.
-            for chunk in text.as_bytes().chunks(16) {
-                stdin
-                    .write_all(chunk)
-                    .and_then(|()| stdin.flush())
-                    .map_err(|e| format!("cannot type into QEMU: {e}"))?;
-                std::thread::sleep(Duration::from_millis(5));
-            }
+            type_text(&text, &mut stdin, &rx, &mut log, &mut lines, &mut session)?;
         }
     }
     let _ = child.kill();
@@ -280,6 +284,40 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
     };
     write_steps(&req.work.join("steps.json"), &outcome)?;
     Ok(outcome)
+}
+
+/// Type `text` into the console. The guest drops characters when they come faster than it reads
+/// them, which a fixed pause does not prevent under TCG. So each chunk waits for the echo of the
+/// chunk before it, up to a limit. The output that comes meanwhile goes to the log and the
+/// session as usual.
+fn type_text(
+    text: &str,
+    stdin: &mut impl Write,
+    rx: &mpsc::Receiver<Vec<u8>>,
+    log: &mut impl Write,
+    lines: &mut Lines,
+    session: &mut Session,
+) -> Result<(), String> {
+    let mut typed = 0;
+    let mut echoed = 0;
+    for chunk in text.as_bytes().chunks(8) {
+        stdin
+            .write_all(chunk)
+            .and_then(|()| stdin.flush())
+            .map_err(|e| format!("cannot type into QEMU: {e}"))?;
+        typed += chunk.len();
+        let limit = Instant::now() + Duration::from_secs(2);
+        while echoed < typed && Instant::now() < limit {
+            if let Ok(bytes) = rx.recv_timeout(Duration::from_millis(50)) {
+                let _ = log.write_all(&bytes);
+                echoed += bytes.len();
+                for line in lines.push(&bytes) {
+                    session.line(&line);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Unpack the collect disk, and remove the overlay and the input disk unless `--keep` was given.
@@ -437,7 +475,12 @@ pub fn request_from(repo: &crate::repo::Repo, args: &crate::cli::Args) -> Result
         .iter()
         .find(|i| i.file == file_name)
         .ok_or_else(|| format!("release {name} has no {file_name}"))?;
-    let base = r9_pins::fetch::image_path(image, &repo.cache);
+    // --image boots another qcow2 file, such as the overlay of an earlier boot, in place of the
+    // release image. A fresh overlay still goes on top, so the file is not written.
+    let base = args.get("image").map_or_else(
+        || r9_pins::fetch::image_path(image, &repo.cache),
+        PathBuf::from,
+    );
     if !base.is_file() {
         return Err(format!(
             "{} is not in the cache; run r9 fetch {name} --row {objtype}",
@@ -491,6 +534,7 @@ pub fn request_from(repo: &crate::repo::Repo, args: &crate::cli::Args) -> Result
         firmware,
         bootargs: args.get("bootargs").unwrap_or_default().to_string(),
         commands,
+        extra: args.get("disk").map(PathBuf::from),
         disks: Vec::new(),
         input: args.get("in").map(PathBuf::from),
         collect_mib: args
@@ -538,6 +582,7 @@ mod tests {
             firmware: None,
             bootargs: String::new(),
             commands: vec![],
+            extra: None,
             disks: vec!["/w/data.tar".into()],
             input: None,
             collect_mib: None,
