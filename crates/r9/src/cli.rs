@@ -53,7 +53,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         "boot" => Accepts {
             positional: true,
             values: &[
-                "row", "accel", "timeout", "run", "bootargs", "out", "firmware",
+                "row", "accel", "timeout", "run", "bootargs", "out", "firmware", "in", "collect",
             ],
             switches: &["keep"],
         },
@@ -86,11 +86,15 @@ usage:
       Fetch a pin into the cache and check its hash: a tree by commit, or the images of a release.
       --row fetches the image of one row only. With no name, fetch the pins of the current set.
   r9 boot [NAME] [--row OBJTYPE] [--accel kvm|hvf|tcg] [--run FILE] [--timeout SECS]
-          [--bootargs ARGS] [--firmware PATH] [--out DIR] [--keep]
+          [--bootargs ARGS] [--firmware PATH] [--in PATH] [--collect MIB] [--out DIR] [--keep]
       Boot a release image under QEMU on a fresh overlay. Answer the boot prompts, type each
       command of FILE (smoke/boot.rc by default) at the shell prompt, and halt the guest. The
       console goes to DIR/console.log and the results to DIR/steps.json. With no name, boot the
       newest release of the current set. The row is amd64 by default. --keep keeps the overlay.
+      --in attaches a directory or a tar file as a raw tar disk after the root disk. --collect
+      attaches a blank disk of MIB MiB after it. In the guest, $r9in names the input disk and
+      $r9collect the collect disk. A tar archive that the guest writes to $r9collect is
+      unpacked into DIR/collected.
 
 The repository is found by walking up to sets.toml, or from R9_ROOT. Downloads, images and
 fetched trees go to R9_CACHE, or ~/.cache/r9.

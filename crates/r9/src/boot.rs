@@ -35,6 +35,11 @@ pub struct Request {
     pub commands: Vec<String>,
     /// More raw disks, attached after the root disk in this order.
     pub disks: Vec<PathBuf>,
+    /// A directory or a tar file for the guest, attached as a raw tar disk after `disks`.
+    pub input: Option<PathBuf>,
+    /// The size in MiB of a blank disk for the guest to write a tar archive to. It is attached
+    /// last, and unpacked into `work/collected` after the boot.
+    pub collect_mib: Option<u64>,
     /// The limit of the whole boot.
     pub timeout: Duration,
     /// Keep the overlay after the boot.
@@ -178,6 +183,7 @@ pub fn find_uboot() -> Option<PathBuf> {
 pub fn run(req: &Request) -> Result<Outcome, String> {
     std::fs::create_dir_all(&req.work).map_err(|e| format!("{}: {e}", req.work.display()))?;
     let _ = std::fs::remove_file(overlay(req));
+    let req = &with_tar_disks(req)?;
     let oc = overlay_command(req);
     let status = Command::new(&oc[0])
         .args(&oc[1..])
@@ -261,9 +267,7 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
     let _ = child.kill();
     let _ = child.wait();
     let _ = reader.join();
-    if !req.keep {
-        let _ = std::fs::remove_file(overlay(req));
-    }
+    clean_up(req)?;
     let passed = session.passed() && session.phase == Phase::Halted && !timed_out;
     let outcome = Outcome {
         steps: session.steps.clone(),
@@ -276,6 +280,67 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
     };
     write_steps(&req.work.join("steps.json"), &outcome)?;
     Ok(outcome)
+}
+
+/// Unpack the collect disk, and remove the overlay and the input disk unless `--keep` was given.
+fn clean_up(req: &Request) -> Result<(), String> {
+    if req.collect_mib.is_some() {
+        let disk = crate::disk::collect_disk(&req.work);
+        crate::disk::unpack(&disk, &req.work.join("collected"))?;
+        let _ = std::fs::remove_file(disk);
+    }
+    if !req.keep {
+        let _ = std::fs::remove_file(overlay(req));
+        let _ = std::fs::remove_file(crate::disk::in_disk(&req.work));
+    }
+    Ok(())
+}
+
+/// The request with the disks of `input` and `collect_mib` made and added to `disks`.
+fn with_tar_disks(req: &Request) -> Result<Request, String> {
+    let mut req = req.clone();
+    if let Some(input) = &req.input {
+        let disk = crate::disk::in_disk(&req.work);
+        crate::disk::pack(input, &disk)?;
+        req.disks.push(disk);
+    }
+    if let Some(mib) = req.collect_mib {
+        let disk = crate::disk::collect_disk(&req.work);
+        crate::disk::blank(&disk, mib)?;
+        req.disks.push(disk);
+    }
+    let mut setup = disk_names(&req);
+    setup.append(&mut req.commands);
+    req.commands = setup;
+    Ok(req)
+}
+
+/// The commands that name the raw disks in the guest. A controller letter depends on the
+/// disk interface and on the kernel, so the guest finds the disks itself: a raw disk has a
+/// `data` file and no `fs` or `plan9` partition, and the disks are listed in the order they
+/// were attached. `$r9disks` lists them all, `$r9in` is the input disk, and `$r9collect` is the
+/// collect disk.
+#[must_use]
+pub fn disk_names(req: &Request) -> Vec<String> {
+    if req.disks.is_empty() {
+        return Vec::new();
+    }
+    // The status of a for loop is the status of its last test, so the count check ends the
+    // same command.
+    let mut c = vec![format!(
+        "r9disks=(); for(d in /dev/sd*) if(test -f $d/data && ! test -f $d/fs && ! test -f $d/plan9) r9disks=($r9disks $d/data); test $#r9disks -eq {}",
+        req.disks.len()
+    )];
+    if req.input.is_some() {
+        c.push(format!(
+            "r9in=$r9disks({})",
+            req.disks.len() - usize::from(req.collect_mib.is_some())
+        ));
+    }
+    if req.collect_mib.is_some() {
+        c.push("r9collect=$r9disks($#r9disks)".to_string());
+    }
+    c
 }
 
 fn write_steps(path: &Path, o: &Outcome) -> Result<(), String> {
@@ -427,6 +492,14 @@ pub fn request_from(repo: &crate::repo::Repo, args: &crate::cli::Args) -> Result
         bootargs: args.get("bootargs").unwrap_or_default().to_string(),
         commands,
         disks: Vec::new(),
+        input: args.get("in").map(PathBuf::from),
+        collect_mib: args
+            .get("collect")
+            .map(|m| {
+                m.parse()
+                    .map_err(|_| format!("--collect {m}: give a size in MiB"))
+            })
+            .transpose()?,
         timeout,
         keep: args.has("keep"),
     })
@@ -466,6 +539,8 @@ mod tests {
             bootargs: String::new(),
             commands: vec![],
             disks: vec!["/w/data.tar".into()],
+            input: None,
+            collect_mib: None,
             timeout: Duration::from_secs(60),
             keep: false,
         }
@@ -499,6 +574,20 @@ mod tests {
             c,
             "qemu-img create -q -f qcow2 -F qcow2 -b /c/images/9front-11952.amd64.qcow2 /w/root.qcow2"
         );
+    }
+
+    #[test]
+    fn the_guest_names_the_tar_disks() {
+        let mut req = request(row("qemu-system-x86_64", "virtio"), "kvm");
+        req.disks.clear();
+        assert!(disk_names(&req).is_empty());
+        req.input = Some("guest".into());
+        req.collect_mib = Some(16);
+        req.disks = vec!["/w/in.tar".into(), "/w/collect.tar".into()];
+        let c = disk_names(&req);
+        assert!(c[0].ends_with("; test $#r9disks -eq 2"));
+        assert_eq!(c[1], "r9in=$r9disks(1)");
+        assert_eq!(c[2], "r9collect=$r9disks($#r9disks)");
     }
 
     #[test]

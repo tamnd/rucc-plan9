@@ -8,6 +8,7 @@ pub mod boot;
 pub mod check;
 pub mod cli;
 pub mod console;
+pub mod disk;
 pub mod fetch;
 pub mod repo;
 pub mod sets;
