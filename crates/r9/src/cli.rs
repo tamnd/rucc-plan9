@@ -67,6 +67,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["side"],
             switches: &[],
         },
+        "locate" => Accepts {
+            positional: true,
+            values: &["tree", "days"],
+            switches: &[],
+        },
         "demands" => Accepts {
             positional: true,
             values: &["root", "out", "top", "flags"],
@@ -116,6 +121,12 @@ usage:
       holds the guest's sys/src, sys/include and OBJTYPE/include. The ranks go to --out
       (demands.toml by default), and the first N (20 by default) are printed. rucc comes from
       R9_RUCC, or from the path. --flags gives more rucc flags, separated by spaces.
+  r9 locate NAME --tree DIR [--days N]
+      Find the commit that the release NAME was cut from. DIR holds the release's sys/src and
+      sys/include, as a boot with --collect gives them. Each file is hashed as git hashes it, and
+      compared with each commit of the pinned branch in the N days (90 by default) up to the day
+      after the release date. Print the commit with the fewest different files, and the files
+      that differ. The history is a blobless clone in the cache.
 
 The repository is found by walking up to sets.toml, or from R9_ROOT. Downloads, images and
 fetched trees go to R9_CACHE, or ~/.cache/r9.

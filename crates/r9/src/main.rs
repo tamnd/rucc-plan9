@@ -73,6 +73,32 @@ fn run(args: &Args) -> Result<ExitCode, String> {
             );
             Ok(ExitCode::SUCCESS)
         }
+        "locate" => {
+            let repo = Repo::find()?;
+            let name = args
+                .target
+                .as_deref()
+                .ok_or("give the release, such as 11952")?;
+            let tree = args
+                .get("tree")
+                .ok_or("give --tree, the release's tree on the host")?;
+            let window = args
+                .get("days")
+                .map_or(Ok(90), str::parse)
+                .map_err(|e| format!("--days: {e}"))?;
+            print!(
+                "{}",
+                r9::locate::run(&repo, name, std::path::Path::new(tree), window)?
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        _ => run_records(args),
+    }
+}
+
+/// Run a command that reads the compile records of a build.
+fn run_records(args: &Args) -> Result<ExitCode, String> {
+    match args.command.as_str() {
         "census" => {
             let path = args
                 .target
