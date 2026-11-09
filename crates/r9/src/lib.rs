@@ -5,6 +5,7 @@
 //! module, and the binary only parses the command line and calls it.
 
 pub mod boot;
+pub mod build;
 pub mod census;
 pub mod check;
 pub mod cli;

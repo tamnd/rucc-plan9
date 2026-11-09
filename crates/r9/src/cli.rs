@@ -57,6 +57,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             ],
             switches: &["keep"],
         },
+        "build" => Accepts {
+            positional: true,
+            values: &["side", "row", "accel", "timeout", "firmware", "dir", "out"],
+            switches: &["keep"],
+        },
         "fetch" => Accepts {
             positional: true,
             values: &["row"],
@@ -110,6 +115,12 @@ usage:
       attaches a blank disk of MIB MiB after it. In the guest, $r9in names the input disk and
       $r9collect the collect disk. A tar archive that the guest writes to $r9collect is
       unpacked into DIR/collected.
+  r9 build [NAME] --side G [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
+          [--firmware PATH] [--out DIR] [--keep]
+      Boot a release image and run mk install in DIR (/sys/src by default) with r9-cc in the
+      compiler slot. Collect the compile records, the mk log, the files that the build wrote
+      with their SHA-256, and the generated C sources and headers into DIR/collected. Write the
+      summary to build.toml and print the census. Side R comes at P1.
   r9 census FILE [--side R|G]
       Count what reached the compiler slot in one build, from the compile.jsonl that r9-cc
       wrote: the calls by origin and by compiler, the calls that failed, the calls from pcc,
