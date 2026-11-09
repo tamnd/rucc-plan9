@@ -1,0 +1,12 @@
+# The boot smoke test (plan 12.2). r9 boot types each line at the shell prompt of a release
+# image and checks that rc gives an empty status. Each line must work on an unchanged image.
+cat /dev/sysname
+cat /dev/osversion
+cat /dev/user
+echo $cputype $objtype $service
+ls /dev/sd*
+cat /env/bootargs
+ls -d /sys/src/cmd/cc /sys/src/cmd/6c /sys/src/cmd/7c
+test -x /$cputype/bin/6c && test -x /$cputype/bin/7c
+test -x /$cputype/bin/mk && test -x /$cputype/bin/rc
+du -s /sys/src
