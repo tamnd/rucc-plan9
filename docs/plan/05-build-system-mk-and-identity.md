@@ -35,6 +35,10 @@ A build runs in a throwaway guest disk made by `r9 image build`:
 3. Build G's tools (04.2) and install them.
 4. Save the result as `g-base.qcow2`, one per pin and `objtype`, with its hash in `baselines/`.
 
+At P0, step 2 does not use 9P. `r9 image build` fetches the blobs of the tree from the history clone in one batch and writes them with `git archive` to a tar file on the input disk. The guest extracts the tar over the old directories. The tar never goes on a host directory, so the paths that differ only by case stay correct. Then the guest removes the files that the image has and the tree does not have, but only under `/sys/src`, `/sys/include` and the include directories. In the release 11952 image at the pin, these are 141 files: generated sources such as `enam.c` and `systab.h`, the old awk tests, and `factotum/ecdsa.c`, which 9front deleted. The files under `/sys/src/boot` stay, because the firmware there is not in git. The files under `/lib`, `/rc`, `/sys/lib` and `/sys/man` that git does not have also stay, because `/lib/ndb` holds the settings of the machine.
+
+Step 3 builds `6c`, `6l`, `6a`, `7c`, `7l` and `7a` three times. Each stage builds the tools with the tools of the stage before it. `baselines/g-base-<commit>-<objtype>.toml` keeps the hash of each tool at each stage. The fixed point holds when stage 2 and stage 3 give the same files. For arm64 at the pin, all three stages give the same files. Thus the tools of the release and the tools of the pin give the same output for these sources.
+
 R and G builds both start from a copy-on-write overlay of `g-base`. They run `mk install` and `mk kernels`, and the overlay is thrown away after its outputs are collected. Collecting means taking:
 - the installed tree;
 - the `.6`/`.7` files, kept beside their sources;
