@@ -422,6 +422,7 @@ pub fn run(
     name: &str,
     tree: &Path,
     window: i64,
+    write: bool,
 ) -> Result<String, String> {
     let pins = r9_pins::pins::PinsFile::load(&repo.root)?
         .ok_or("there is no pins.toml; run r9 sets --write")?;
@@ -452,7 +453,43 @@ pub fn run(
         &files,
         PREFIXES,
     )?;
-    Ok(located.report(20))
+    let mut report = located.report(20);
+    if write {
+        let _ = writeln!(report, "{}", record(repo, name, &located)?);
+    }
+    Ok(report)
+}
+
+/// Write the commit of `located` to the release `name` in `pins.toml`. A commit is written only
+/// when no file has different contents and no other commit ties with it. Files that only the
+/// image has, or only the commit has, do not stop it: a release image has files that its build
+/// made, and it can leave out files of the tree.
+pub fn record(repo: &crate::repo::Repo, name: &str, located: &Located) -> Result<String, String> {
+    if !located.diff.changed.is_empty() {
+        return Err(format!(
+            "{} files have different contents, so the commit is not written",
+            located.diff.changed.len()
+        ));
+    }
+    if !located.ties.is_empty() {
+        return Err(format!(
+            "{} other commits tie, so the commit is not written",
+            located.ties.len()
+        ));
+    }
+    let mut pins = r9_pins::pins::PinsFile::load(&repo.root)?
+        .ok_or("there is no pins.toml; run r9 sets --write")?;
+    let release = pins
+        .release
+        .get_mut(name)
+        .ok_or_else(|| format!("no release {name} in pins.toml"))?;
+    release.commit.clone_from(&located.commit);
+    let path = repo.root.join(r9_pins::pins::FILE_NAME);
+    std::fs::write(&path, pins.render()?).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(format!(
+        "wrote the commit of {name} to {}",
+        r9_pins::pins::FILE_NAME
+    ))
 }
 
 #[cfg(test)]
