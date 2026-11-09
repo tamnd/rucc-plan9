@@ -214,6 +214,8 @@ pub struct Located {
     pub subject: String,
     /// How the tree differs from it.
     pub diff: Diff,
+    /// The other commits with as few different files, which the tree cannot tell apart.
+    pub ties: Vec<String>,
     /// The number of commits compared.
     pub compared: usize,
     /// The number of files in the tree.
@@ -244,9 +246,12 @@ pub fn locate(
                 date,
                 subject,
                 diff: d,
+                ties: Vec::new(),
                 compared,
                 files: tree.len(),
             });
+        } else if let Some(b) = best.as_mut().filter(|b| b.diff.len() == d.len()) {
+            b.ties.push(commit);
         }
         if exact {
             break;
@@ -275,6 +280,18 @@ impl Located {
                 ""
             }
         );
+        if !self.ties.is_empty() {
+            let _ = writeln!(
+                out,
+                "{} other commits differ in as few files: {}",
+                self.ties.len(),
+                self.ties
+                    .iter()
+                    .map(|c| c.get(..12).unwrap_or(c))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
         for (what, paths) in [
             ("only in the tree", &self.diff.only_tree),
             ("only in the commit", &self.diff.only_commit),
