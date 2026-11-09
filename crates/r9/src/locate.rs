@@ -69,8 +69,48 @@ pub fn hash_tree(root: &Path, prefixes: &[&str]) -> Result<Files, String> {
         walk(root, &root.join(prefix), &mut paths)?;
     }
     paths.sort();
+    let hashes = hash_paths(root, &paths)?;
+    Ok(paths.into_iter().zip(hashes).collect())
+}
+
+/// Hash the regular files of the tar archive `tar` whose paths start with one of `prefixes`, as
+/// git hashes blobs. Each file is copied out under a numbered name, so that two paths that
+/// differ only by case stay two files on a host that ignores case.
+pub fn hash_archive(tar: &Path, prefixes: &[&str]) -> Result<Files, String> {
+    let archive = crate::tar::list(tar)?;
+    let entries: Vec<&crate::tar::Entry> = archive
+        .files
+        .iter()
+        .filter(|e| {
+            prefixes
+                .iter()
+                .any(|p| e.name.starts_with(&format!("{p}/")))
+        })
+        .collect();
+    let dir = std::env::temp_dir().join(format!("r9-hash-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut f = std::fs::File::open(tar).map_err(|e| format!("{}: {e}", tar.display()))?;
+    let mut numbered = Vec::with_capacity(entries.len());
+    for (i, e) in entries.iter().enumerate() {
+        let data = crate::tar::contents(&mut f, e)?;
+        let path = dir.join(i.to_string());
+        std::fs::write(&path, data).map_err(|x| format!("{}: {x}", path.display()))?;
+        numbered.push(i.to_string());
+    }
+    let hashes = hash_paths(&dir, &numbered);
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(entries
+        .into_iter()
+        .map(|e| e.name.clone())
+        .zip(hashes?)
+        .collect())
+}
+
+/// Hash the files `paths` under `root` with `git hash-object`, in order.
+fn hash_paths(root: &Path, paths: &[String]) -> Result<Vec<String>, String> {
     if paths.is_empty() {
-        return Ok(Files::new());
+        return Ok(Vec::new());
     }
     let mut child = Command::new("git")
         .args(["hash-object", "--no-filters", "--stdin-paths"])
@@ -106,7 +146,7 @@ pub fn hash_tree(root: &Path, prefixes: &[&str]) -> Result<Files, String> {
             paths.len()
         ));
     }
-    Ok(paths.into_iter().zip(hashes).collect())
+    Ok(hashes)
 }
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
@@ -396,7 +436,11 @@ pub fn run(
         .ok_or("pins.toml has no tree to walk")?;
     let history = history(&repo.cache, &front.repo)?;
     let day = days(&release.date)?;
-    let files = hash_tree(tree, PREFIXES)?;
+    let files = if tree.is_file() {
+        hash_archive(tree, PREFIXES)?
+    } else {
+        hash_tree(tree, PREFIXES)?
+    };
     if files.is_empty() {
         return Err(format!("{} has no sys/src or sys/include", tree.display()));
     }

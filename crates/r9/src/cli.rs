@@ -166,9 +166,10 @@ usage:
       builds differ.
   r9 locate NAME --tree DIR [--days N]
       Find the commit that the release NAME was cut from. DIR holds the release's sys/src and
-      sys/include, as a boot with --collect gives them. Each file is hashed as git hashes it, and
-      compared with each commit of the pinned branch in the N days (90 by default) up to the day
-      after the release date. Print the commit with the fewest different files, and the files
+      sys/include, as a boot with --collect gives them. DIR can also be the collected.tar of
+      that boot, which keeps the paths that differ only by case on a host that ignores case.
+      Each file is hashed as git hashes it, and compared with each commit of the pinned branch
+      in the N days (90 by default) up to the day after the release date. Print the commit with the fewest different files, and the files
       that differ. The history is a blobless clone in the cache.
 
 The repository is found by walking up to sets.toml, or from R9_ROOT. Downloads, images and
