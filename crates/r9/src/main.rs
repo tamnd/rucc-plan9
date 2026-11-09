@@ -88,6 +88,27 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
+        "demands" => {
+            let path = args
+                .target
+                .as_deref()
+                .ok_or("give the compile.jsonl file of a G build")?;
+            let root = args
+                .get("root")
+                .ok_or("give --root, the guest's tree on the host")?;
+            let top = args
+                .get("top")
+                .map_or(Ok(20), str::parse)
+                .map_err(|e| format!("--top: {e}"))?;
+            let records = r9::census::load(std::path::Path::new(path))?;
+            let rucc = r9::demands::find_rucc(args.get("flags"));
+            let demands = r9::demands::run(&rucc, std::path::Path::new(root), &records);
+            demands.write(std::path::Path::new(
+                args.get("out").unwrap_or("demands.toml"),
+            ))?;
+            print!("{}", demands.report(top));
+            Ok(ExitCode::SUCCESS)
+        }
         other => Err(format!("unknown command {other}; see r9 help")),
     }
 }
