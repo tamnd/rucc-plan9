@@ -10,6 +10,10 @@
 //!
 //! The mkfile of cwfs compiles `conf.c` with the date of the build, so cwfs also differs from
 //! build to build. Its files are in the dated group too.
+//!
+//! The mkfile of gs runs `genarch` to write `$objtype.h`. `genarch` times `memset` on blocks of
+//! growing size to find the sizes of the caches, so the header differs from run to run on the
+//! same machine. It is in the dated group too.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -36,8 +40,8 @@ pub struct Diff {
     pub only_b: Vec<String>,
     /// The files with different contents.
     pub changed: Vec<String>,
-    /// The files that differ only by the date of the build: archives with the same members, and
-    /// the files of cwfs.
+    /// The files that differ only by the date or the speed of the build: archives with the same
+    /// members, the files of cwfs, and the header that gs measures the caches into.
     pub dated: Vec<String>,
     /// The files in both builds.
     pub same: usize,
@@ -118,6 +122,20 @@ fn has_build_date(path: &str) -> bool {
     path.contains("/bin/") && name.starts_with("cwfs")
 }
 
+/// The architectures of 9front, as `objtype` names them.
+const OBJTYPES: &[&str] = &[
+    "386", "68000", "68020", "alpha", "amd64", "arm", "arm64", "mips", "power", "power64", "sparc",
+    "spim",
+];
+
+/// True when `path` is the header that `genarch` writes for gs, `/sys/src/cmd/gs/$objtype.h`.
+/// Its cache sizes come from a timing loop.
+fn measures_the_machine(path: &str) -> bool {
+    path.strip_prefix("/sys/src/cmd/gs/")
+        .and_then(|name| name.strip_suffix(".h"))
+        .is_some_and(|objtype| OBJTYPES.contains(&objtype))
+}
+
 /// Compare two builds.
 #[must_use]
 pub fn diff(a: &Outputs, b: &Outputs) -> Diff {
@@ -129,6 +147,7 @@ pub fn diff(a: &Outputs, b: &Outputs) -> Diff {
             Some(_) => {
                 let ma = members_of(&a.members, path);
                 if has_build_date(path)
+                    || measures_the_machine(path)
                     || (is_archive(path) && !ma.is_empty() && ma == members_of(&b.members, path))
                 {
                     d.dated.push(path.clone());
@@ -228,6 +247,9 @@ mod tests {
         assert!(has_build_date("/sys/src/cmd/cwfs/cwfs64x/conf.7"));
         assert!(!has_build_date("/sys/src/cmd/cwfs/cwfs64x/main.7"));
         assert!(!has_build_date("/arm64/bin/cat"));
+        assert!(measures_the_machine("/sys/src/cmd/gs/amd64.h"));
+        assert!(!measures_the_machine("/sys/src/cmd/gs/arch.h"));
+        assert!(!measures_the_machine("/sys/src/cmd/gs/src/amd64.h"));
     }
 
     #[test]
