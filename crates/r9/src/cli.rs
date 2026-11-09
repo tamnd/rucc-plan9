@@ -87,6 +87,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["tree", "days"],
             switches: &[],
         },
+        "tree-diff" => Accepts {
+            positional: true,
+            values: &["with", "top"],
+            switches: &[],
+        },
         "demands" => Accepts {
             positional: true,
             values: &["root", "out", "top", "flags"],
@@ -153,6 +158,12 @@ usage:
       holds the guest's sys/src, sys/include and OBJTYPE/include. The ranks go to --out
       (demands.toml by default), and the first N (20 by default) are printed. rucc comes from
       R9_RUCC, or from the path. --flags gives more rucc flags, separated by spaces.
+  r9 tree-diff A --with B [--top N]
+      Compare the files that two builds wrote. A and B are the directories of two builds, or
+      their changed.sha256 files. Print the files that only one build wrote, the files with
+      different contents, and the archives whose members are the same but whose dates differ.
+      At most N names (20 by default) are printed in each group. Exit with failure when the
+      builds differ.
   r9 locate NAME --tree DIR [--days N]
       Find the commit that the release NAME was cut from. DIR holds the release's sys/src and
       sys/include, as a boot with --collect gives them. Each file is hashed as git hashes it, and

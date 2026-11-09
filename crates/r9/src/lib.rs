@@ -17,3 +17,4 @@ pub mod image;
 pub mod locate;
 pub mod repo;
 pub mod sets;
+pub mod treediff;

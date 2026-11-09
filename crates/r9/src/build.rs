@@ -30,6 +30,7 @@ pub const COLLECTED: &[&str] = &[
     "walk",
     "changed",
     "changed.sha256",
+    "members.sha256",
     "gen.tar",
 ];
 
@@ -54,6 +55,10 @@ pub fn commands(dir: &str) -> Vec<String> {
         ),
         // t0 is always named, so that an empty list does not make sha1sum read its input.
         format!("sha1sum -2 256 {w}/t0 `{{cat {w}/changed}} > {w}/changed.sha256"),
+        // An archive records the date of each member, so r9 tree-diff compares the members.
+        format!(
+            "{{for(a in `{{grep '\\.a.?$' {w}/changed}}){{rm -rf {w}/ar; mkdir {w}/ar; cd {w}/ar; ar x $a; sha1sum -2 256 * | awk -v 'a='$a '{{print $1 \"\\t\" a \"(\" $2 \")\"}}'}}}} > {w}/members.sha256; cd / && rm -rf {w}/ar"
+        ),
         // yacc -D writes y.debug, which yaccpar includes.
         format!("tar cf {w}/gen.tar {w}/t0 `{{grep '\\.[chy]$|/y\\.debug$' {w}/changed}}"),
         format!("cd {w} && tar cf $r9collect {}", COLLECTED.join(" ")),
@@ -212,8 +217,16 @@ mod tests {
         assert!(c[2].contains("{while(! test -f /tmp/r9/t1){sleep 60; echo r9-progress"));
         assert!(c[5].contains("awk -v 't='$t0 '$1 >= t+0 {print $3}'"));
         assert!(c[6].starts_with("sha1sum -2 256 /tmp/r9/t0 `{cat /tmp/r9/changed}"));
-        assert!(c[7].contains("`{grep '\\.[chy]$|/y\\.debug$' /tmp/r9/changed}"));
-        assert!(c.last().unwrap().ends_with("changed.sha256 gen.tar"));
+        assert_eq!(
+            c[7],
+            "{for(a in `{grep '\\.a.?$' /tmp/r9/changed}){rm -rf /tmp/r9/ar; mkdir /tmp/r9/ar; cd /tmp/r9/ar; ar x $a; sha1sum -2 256 * | awk -v 'a='$a '{print $1 \"\\t\" a \"(\" $2 \")\"}'}} > /tmp/r9/members.sha256; cd / && rm -rf /tmp/r9/ar"
+        );
+        assert!(c[8].contains("`{grep '\\.[chy]$|/y\\.debug$' /tmp/r9/changed}"));
+        assert!(
+            c.last()
+                .unwrap()
+                .ends_with("changed.sha256 members.sha256 gen.tar")
+        );
         assert!(c.iter().all(|l| !l.contains('\n')));
     }
 }
