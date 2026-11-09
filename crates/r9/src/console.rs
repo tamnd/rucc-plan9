@@ -143,9 +143,18 @@ impl Session {
         let Some(step) = self.steps.last_mut() else {
             return;
         };
-        if let Some(rest) = line.strip_prefix(STATUS) {
-            step.status = Some(rest.trim().to_string());
-        } else if !is_echo(line, &step.command) {
+        if is_echo(line, &step.command) {
+            return;
+        }
+        // A command whose output has no newline at the end puts the marker in the middle of the
+        // line, as in `cirnoR9-STATUS `.
+        if let Some(at) = line.rfind(STATUS) {
+            let (before, rest) = line.split_at(at);
+            if !before.is_empty() {
+                step.output.push(before.to_string());
+            }
+            step.status = Some(rest[STATUS.len()..].trim().to_string());
+        } else {
             step.output.push(line.to_string());
         }
     }
@@ -238,7 +247,7 @@ mod tests {
         let t = feed(
             &mut s,
             &mut l,
-            "cat /dev/sysname; echo R9-STATUS $status\r\ncirno\r\nR9-STATUS \r\nterm% ",
+            "term% cat /dev/sysname; echo R9-STATUS $status\r\ncirnoR9-STATUS \r\nterm% ",
         );
         assert_eq!(t, vec!["6c -h; echo R9-STATUS $status\n"]);
         let t = feed(
