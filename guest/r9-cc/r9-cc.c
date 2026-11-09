@@ -1,11 +1,11 @@
 /*
  * r9-cc: the compiler slot shim (plan 05.3), in recording mode.
  *
- * r9-build binds this program over 6c, 7c, 8c, 5c and vc, after it copies the real compilers
- * to /tmp/r9/bin. For each call, r9-cc runs the real compiler with the same arguments, and
- * appends one JSON record to /tmp/r9/compile.jsonl: the compiler, objtype, the directory, the
- * arguments, the SHA-256 of each input and output, the exit status and the time. The file is
- * append-only, so parallel calls from mk do not mix their records.
+ * r9-build puts a copy of this program for each of 6c, 7c, 8c, 5c and vc in a directory that
+ * it binds before /bin. For each call, r9-cc runs the real compiler, /$objtype/bin/<name>, with
+ * the same arguments. Then it appends one JSON record to /tmp/r9/compile.jsonl: the compiler,
+ * objtype, the directory, the arguments, the SHA-256 of each input and output, the exit status
+ * and the time. The file is append-only, so parallel calls from mk do not mix their records.
  *
  * The mode that sends the call to rucc on the host (r9 ccd, plan 05.4) comes at P1.
  */
@@ -18,7 +18,6 @@ enum {
 	Hexlen = 2*SHA2_256dlen+1,
 };
 
-char *realdir = "/tmp/r9/bin";
 char *records = "/tmp/r9/compile.jsonl";
 
 typedef struct Buf Buf;
@@ -220,7 +219,7 @@ main(int argc, char **argv)
 	objtype = getenv("objtype");
 	if(objtype == nil)
 		objtype = "";
-	real = smprint("%s/%s", realdir, cc);
+	real = smprint("/%s/bin/%s", objtype, cc);
 	dir = getwd(malloc(1024), 1024);
 	if(dir == nil)
 		dir = "";
