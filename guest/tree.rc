@@ -1,0 +1,4 @@
+# The release tree for r9 demands and r9 locate: r9 boot NAME --run guest/tree.rc --collect 512
+# gives it in DIR/collected. It has the sources, the headers of every objtype, the yacc
+# parsers and /acme, because the build reads all of them.
+cd / && tar cf $r9collect sys/src sys/include sys/lib/yaccpar sys/lib/yaccpars acme `{ls -d /*/include | sed 's,^/,,'}
