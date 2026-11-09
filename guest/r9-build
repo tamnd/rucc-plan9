@@ -1,0 +1,29 @@
+#!/bin/rc
+# r9-build: the build command of a guest (plan 05.3). It changes the namespace and never a file
+# of the tree. A copy of r9-cc for each compiler goes in /tmp/r9/shim, which is bound before
+# /bin. So mk and pcc reach the shim when they run 6c or /bin/6c, and r9-cc runs the real
+# compiler from /$objtype/bin. An install to /$objtype/bin writes the real file, and the calls
+# after it use the new compiler, as in a build with no shim.
+#
+# Do not bind r9-cc over /$objtype/bin/6c. A bind over a file applies everywhere that file is
+# reached, so the install of cmd/6c would write the new 6c over r9-cc.
+#
+# usage: r9-build [dir [mk arguments]]
+# The default is mk install in /sys/src. The records go to /tmp/r9/compile.jsonl.
+
+rfork ne
+r9=/usr/glenda/r9
+dir=/sys/src
+if(! ~ $#* 0){
+	dir=$1
+	shift
+}
+targets=($*)
+if(~ $#targets 0)
+	targets=install
+mkdir -p /tmp/r9/shim
+rm -f /tmp/r9/compile.jsonl /tmp/r9/shim/*
+for(c in 6c 7c 8c 5c vc)
+	cp $r9/bin/r9-cc /tmp/r9/shim/$c
+bind -b /tmp/r9/shim /bin
+cd $dir && mk $targets

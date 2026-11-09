@@ -1,0 +1,7 @@
+</$objtype/mkfile
+
+TARG=r9-cc
+OFILES=r9-cc.$O
+BIN=/usr/glenda/r9/bin
+
+</sys/src/cmd/mkone

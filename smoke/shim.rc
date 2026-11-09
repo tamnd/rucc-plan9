@@ -1,0 +1,8 @@
+# The shim check (plan 05.3), run by r9 boot with --in guest --collect 64.
+# It builds r9-cc with the guest's own compiler, runs r9-build on libbio in recording mode, and
+# writes the records to the collect disk.
+mkdir -p /tmp/r9in /usr/glenda/r9/bin && cd /tmp/r9in && tar xf $r9in
+cp /tmp/r9in/r9-build /usr/glenda/r9/bin/ && cd /tmp/r9in/r9-cc && mk install
+/usr/glenda/r9/bin/r9-build /sys/src/libbio
+test -s /tmp/r9/compile.jsonl && grep -s '"origin":"ref-c"' /tmp/r9/compile.jsonl
+cd /tmp/r9 && tar cf $r9collect compile.jsonl

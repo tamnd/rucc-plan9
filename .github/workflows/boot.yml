@@ -12,6 +12,7 @@ on:
     paths:
       - crates/**
       - smoke/**
+      - guest/**
       - pins.toml
       - rows.toml
       - Cargo.lock
@@ -64,9 +65,17 @@ jobs:
         run: target/release/r9 fetch --row ${{ matrix.row }}
       - name: r9 boot
         run: target/release/r9 boot --row ${{ matrix.row }} --timeout 1800 --out "$RUNNER_TEMP/boot"
+      - name: r9 boot with the shim
+        run: target/release/r9 boot --row ${{ matrix.row }} --timeout 1800 --run smoke/shim.rc --in guest --collect 64 --out "$RUNNER_TEMP/shim"
+      - name: compile records
+        run: |
+          wc -l "$RUNNER_TEMP/shim/collected/compile.jsonl"
+          head -3 "$RUNNER_TEMP/shim/collected/compile.jsonl"
       - name: console
         if: always()
-        run: cat "$RUNNER_TEMP/boot/console.log" || true
+        run: |
+          cat "$RUNNER_TEMP/boot/console.log" || true
+          cat "$RUNNER_TEMP/shim/console.log" || true
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
@@ -76,4 +85,7 @@ jobs:
             ${{ runner.temp }}/boot/steps.json
             ${{ runner.temp }}/boot/qemu.cmd
             ${{ runner.temp }}/boot/qemu.stderr
+            ${{ runner.temp }}/shim/console.log
+            ${{ runner.temp }}/shim/steps.json
+            ${{ runner.temp }}/shim/collected
           retention-days: 14
