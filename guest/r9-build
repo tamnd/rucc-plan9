@@ -1,0 +1,27 @@
+#!/bin/rc
+# r9-build: the build command of a guest (plan 05.3). It changes the namespace and never a file
+# of the tree. The real compilers are copied to /tmp/r9/bin first, because a bind over a file
+# applies everywhere that file is reached, also through another name.
+#
+# usage: r9-build [dir [mk arguments]]
+# The default is mk install in /sys/src. The records go to /tmp/r9/compile.jsonl.
+
+rfork ne
+r9=/usr/glenda/r9
+dir=/sys/src
+if(! ~ $#* 0){
+	dir=$1
+	shift
+}
+targets=($*)
+if(~ $#targets 0)
+	targets=install
+mkdir -p /tmp/r9/bin
+rm -f /tmp/r9/compile.jsonl
+for(c in 6c 7c 8c 5c vc){
+	if(test -x /$objtype/bin/$c){
+		cp /$objtype/bin/$c /tmp/r9/bin/$c
+		bind $r9/bin/r9-cc /$objtype/bin/$c
+	}
+}
+cd $dir && mk $targets
