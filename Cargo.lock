@@ -119,6 +119,7 @@ name = "r9"
 version = "0.0.1"
 dependencies = [
  "r9-pins",
+ "serde_json",
 ]
 
 [[package]]

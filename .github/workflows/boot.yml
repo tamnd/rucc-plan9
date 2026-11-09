@@ -1,0 +1,79 @@
+# The boot smoke test (plan 12.2): the newest release image in the current set of pins.toml,
+# booted under QEMU by r9 boot, with the commands of smoke/boot.rc typed at its shell prompt.
+# amd64 boots with KVM. arm64 boots with TCG and u-boot, because the hosted runners are x86-64.
+#
+# The images are cached in /mnt/r9, the runner's larger disk. r9 fetch checks the SHA-256 that
+# 9front publishes before it unpacks an image, and does nothing when the cache has it.
+
+name: boot
+
+on:
+  pull_request:
+    paths:
+      - crates/**
+      - smoke/**
+      - pins.toml
+      - rows.toml
+      - Cargo.lock
+      - .github/workflows/boot.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  R9_CACHE: /mnt/r9
+
+jobs:
+  boot:
+    name: boot ${{ matrix.row }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        row: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: Swatinem/rust-cache@v2.9.2
+      - name: let the runner user open /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -qy --no-install-recommends qemu-utils \
+            qemu-system-x86 qemu-system-arm u-boot-qemu
+          qemu-system-x86_64 --version | head -1
+          sudo mkdir -p /mnt/r9 && sudo chown "$USER" /mnt/r9
+      - name: cargo build
+        run: cargo build --release --locked -p r9
+      - uses: actions/cache@v6.1.0
+        with:
+          path: /mnt/r9/images
+          key: r9-images-${{ matrix.row }}-${{ hashFiles('pins.toml') }}
+          restore-keys: r9-images-${{ matrix.row }}-
+      - name: r9 fetch
+        run: target/release/r9 fetch --row ${{ matrix.row }}
+      - name: r9 boot
+        run: target/release/r9 boot --row ${{ matrix.row }} --timeout 1800 --out "$RUNNER_TEMP/boot"
+      - name: console
+        if: always()
+        run: cat "$RUNNER_TEMP/boot/console.log" || true
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: boot-${{ matrix.row }}
+          path: |
+            ${{ runner.temp }}/boot/console.log
+            ${{ runner.temp }}/boot/steps.json
+            ${{ runner.temp }}/boot/qemu.cmd
+            ${{ runner.temp }}/boot/qemu.stderr
+          retention-days: 14

@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 r9-pins = { path = "../r9-pins" }
+serde_json.workspace = true
 
 [lints]
 workspace = true

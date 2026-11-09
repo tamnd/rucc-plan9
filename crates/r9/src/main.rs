@@ -53,6 +53,18 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 }
             }
         }
+        "boot" => {
+            let repo = Repo::find()?;
+            let req = r9::boot::request_from(&repo, args)?;
+            eprintln!("r9 boot: {}", r9::boot::qemu_command(&req).join(" "));
+            let outcome = r9::boot::run(&req)?;
+            print!("{}", r9::boot::summary(&outcome, &req.work));
+            Ok(if outcome.passed {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
         "fetch" => {
             let repo = Repo::find()?;
             print!(
