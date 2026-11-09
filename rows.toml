@@ -1,0 +1,50 @@
+# The architecture rows (plan 04.4 and 09.4): the image each row boots and its QEMU machine.
+# A row with a later milestone in from is written down now so that its names are decided once.
+
+[row.amd64]
+from = "P0"
+rucc_arch = "x86_64"
+letter = "6"
+image = "amd64.qcow2"
+kernel = "9pc64"
+qemu = "qemu-system-x86_64"
+machine = "q35"
+cpu_hw = "host"
+cpu_tcg = "max"
+cpus = 4
+memory_gb = 4
+firmware = "bios"                   # the image boots with 9bootfat from the BIOS
+disk = "virtio"
+run_limit_hours = 4
+
+[row.arm64]
+from = "P0"
+rucc_arch = "aarch64"
+letter = "7"
+image = "arm64.qcow2"
+kernel = "9qemu"
+qemu = "qemu-system-aarch64"
+machine = "virt,gic-version=3"
+cpu_hw = "host"
+cpu_tcg = "max"
+cpus = 4
+memory_gb = 4
+firmware = "u-boot"                 # the image has a boot.scr that loads plan9.ini and 9qemu.u
+disk = "virtio"
+run_limit_hours = 6
+
+[row.386]
+from = "P10"
+rucc_arch = "i686"
+letter = "8"
+image = "386.iso"
+kernel = "9pc"
+qemu = "qemu-system-i386"
+machine = "pc"
+cpu_hw = "host"
+cpu_tcg = "max"
+cpus = 2
+memory_gb = 2
+firmware = "bios"
+disk = "ahci"
+run_limit_hours = 6

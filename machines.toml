@@ -1,0 +1,43 @@
+# The builders (plan 04.4) and the jobs each one runs.
+
+[machine.gpc]
+os = "linux"
+arch = "x86_64"
+cores = 32
+accel = "kvm"
+roles = ["G and R builds", "nightly", "Linux amd64 9h GUI under Xvfb"]
+
+[machine.server3]
+os = "linux"
+arch = "x86_64"
+cores = 8
+accel = "tcg"                       # no /dev/kvm on this host when checked on 2026-11-09
+roles = ["runtime benchmarks"]
+
+[machine.server1]
+os = "linux"
+arch = "x86_64"
+cores = 4
+accel = "kvm"
+roles = ["diffrun", "mk test fan-out"]
+
+[machine.server2]
+os = "linux"
+arch = "x86_64"
+cores = 6
+accel = "kvm"
+roles = ["diffrun", "weekly release runs"]
+
+[machine.m4]
+os = "macos"
+arch = "aarch64"
+cores = 10
+accel = "hvf"
+roles = ["arm64 Q", "macOS 9h GUI", "r9 hostcheck"]
+
+[machine.github]
+os = "linux"
+arch = "x86_64"
+cores = 4
+accel = "kvm"
+roles = ["CI", "G baselines on the hosted runner"]
