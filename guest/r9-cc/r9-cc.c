@@ -213,6 +213,7 @@ main(int argc, char **argv)
 	int i, nin, nout, pid, l;
 	vlong t0, t1;
 	Waitmsg *w;
+	ulong user, sys;
 	Buf b;
 
 	cc = base(argv[0]);
@@ -263,9 +264,12 @@ main(int argc, char **argv)
 		sysfatal("r9-cc: exec %s: %r", real);
 	}
 	status = "";
+	user = sys = 0;
 	while((w = wait()) != nil){
 		if(w->pid == pid){
 			status = strdup(w->msg);
+			user = w->time[0];
+			sys = w->time[1];
 			free(w);
 			break;
 		}
@@ -290,6 +294,8 @@ main(int argc, char **argv)
 	putq(&b, status);
 	put(&b, ",\"ms\":");
 	snprint(hex, sizeof hex, "%lld", (t1-t0)/1000000);
+	put(&b, hex);
+	snprint(hex, sizeof hex, ",\"user_ms\":%lud,\"sys_ms\":%lud", user, sys);
 	put(&b, hex);
 	origin = l == hostletter(objtype) ? "ref-c" : "other-arch";
 	put(&b, ",\"origin\":");

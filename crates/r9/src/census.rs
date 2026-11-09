@@ -43,6 +43,13 @@ pub struct Record {
     pub status: String,
     /// The time of the call in milliseconds.
     pub ms: u64,
+    /// The user time of the compiler in milliseconds, from its wait message. Records from
+    /// before this field have 0.
+    #[serde(default)]
+    pub user_ms: u64,
+    /// The system time of the compiler in milliseconds, from its wait message.
+    #[serde(default)]
+    pub sys_ms: u64,
     /// `rucc`, `ref-c`, `ref-as` or `other-arch`.
     pub origin: String,
 }
@@ -82,6 +89,53 @@ pub struct Census {
     pub ms: u64,
     /// The time by directory, in milliseconds.
     pub ms_by_dir: BTreeMap<String, u64>,
+    /// The user and system time of all calls, in milliseconds.
+    pub cpu_ms: u64,
+    /// The spread of the time of one call.
+    pub unit_ms: Spread,
+    /// The spread of the user and system time of one call.
+    pub unit_cpu_ms: Spread,
+}
+
+/// The spread of a list of times in milliseconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Spread {
+    /// The median.
+    pub median: u64,
+    /// The 90th percentile.
+    pub p90: u64,
+    /// The 99th percentile.
+    pub p99: u64,
+    /// The largest time.
+    pub max: u64,
+}
+
+impl Spread {
+    /// The spread of `times`.
+    #[must_use]
+    pub fn of(mut times: Vec<u64>) -> Self {
+        if times.is_empty() {
+            return Self::default();
+        }
+        times.sort_unstable();
+        let at = |q: usize| times[(times.len() * q / 100).min(times.len() - 1)];
+        Self {
+            median: at(50),
+            p90: at(90),
+            p99: at(99),
+            max: times[times.len() - 1],
+        }
+    }
+}
+
+impl std::fmt::Display for Spread {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "median {} ms, p90 {} ms, p99 {} ms, max {} ms",
+            self.median, self.p90, self.p99, self.max
+        )
+    }
 }
 
 /// Take the census of the records.
@@ -108,6 +162,7 @@ pub fn take(records: &[Record]) -> Census {
             c.stdin += 1;
         }
         c.ms += r.ms;
+        c.cpu_ms += r.user_ms + r.sys_ms;
         *c.ms_by_dir.entry(r.dir.clone()).or_default() += r.ms;
         if let ([input], [output]) = (r.inputs.as_slice(), r.outputs.as_slice())
             && !input.sha256.is_empty()
@@ -118,6 +173,8 @@ pub fn take(records: &[Record]) -> Census {
                 .push((format!("{}/{}", r.dir, input.file), output.sha256.clone()));
         }
     }
+    c.unit_ms = Spread::of(records.iter().map(|r| r.ms).collect());
+    c.unit_cpu_ms = Spread::of(records.iter().map(|r| r.user_ms + r.sys_ms).collect());
     for (hash, places) in by_source {
         if places.len() > 1 {
             let same = places.iter().all(|(_, o)| *o == places[0].1);
@@ -159,6 +216,11 @@ impl Census {
         }
         let _ = writeln!(out, "stdin      {}", self.stdin);
         let _ = writeln!(out, "time       {:.1}s", ms_to_s(self.ms));
+        let _ = writeln!(out, "  per call {}", self.unit_ms);
+        if self.cpu_ms > 0 {
+            let _ = writeln!(out, "cpu        {:.1}s", ms_to_s(self.cpu_ms));
+            let _ = writeln!(out, "  per call {}", self.unit_cpu_ms);
+        }
         let mut dirs: Vec<_> = self.ms_by_dir.iter().collect();
         dirs.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
         for (dir, ms) in dirs.into_iter().take(10) {
@@ -225,7 +287,7 @@ fn ms_to_s(ms: u64) -> f64 {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = r#"{"cc":"6c","objtype":"amd64","dir":"/sys/src/libbio","argv":["-FTVw","bfildes.c"],"in":[{"file":"bfildes.c","sha256":"aa"}],"out":[{"file":"bfildes.6","sha256":"b1"}],"stdin":false,"status":"","ms":268,"origin":"ref-c"}
+    const SAMPLE: &str = r#"{"cc":"6c","objtype":"amd64","dir":"/sys/src/libbio","argv":["-FTVw","bfildes.c"],"in":[{"file":"bfildes.c","sha256":"aa"}],"out":[{"file":"bfildes.6","sha256":"b1"}],"stdin":false,"status":"","ms":268,"user_ms":200,"sys_ms":40,"origin":"ref-c"}
 {"cc":"6c","objtype":"amd64","dir":"/sys/src/cmd/x","argv":["-FTVw","../../libbio/bfildes.c"],"in":[{"file":"../../libbio/bfildes.c","sha256":"aa"}],"out":[{"file":"bfildes.6","sha256":"b2"}],"stdin":false,"status":"","ms":100,"origin":"ref-c"}
 {"cc":"8c","objtype":"amd64","dir":"/sys/src/9/pc","argv":["-FTVw","main.c"],"in":[{"file":"main.c","sha256":"cc"}],"out":[{"file":"main.8","sha256":""}],"stdin":false,"status":"8c 99: error","ms":5,"origin":"other-arch"}
 {"cc":"6c","objtype":"amd64","dir":"/sys/src/ape/cmd","argv":["-o","x.6"],"in":[],"out":[{"file":"x.6","sha256":"dd"}],"stdin":true,"status":"","ms":7,"origin":"ref-c"}
@@ -240,6 +302,18 @@ mod tests {
         assert_eq!(c.by_cc["8c"], 1);
         assert_eq!(c.stdin, 1);
         assert_eq!(c.ms, 380);
+        assert_eq!(c.cpu_ms, 240);
+        assert_eq!(
+            c.unit_ms,
+            Spread {
+                median: 100,
+                p90: 268,
+                p99: 268,
+                max: 268
+            }
+        );
+        assert_eq!(c.unit_cpu_ms.max, 240);
+        assert!(c.report(Side::G).contains("cpu        0.2s"));
         assert_eq!(c.failed.len(), 1);
         let (places, same) = &c.repeated["aa"];
         assert_eq!(places.len(), 2);
