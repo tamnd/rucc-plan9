@@ -4,4 +4,8 @@
 //! The commands arrive one milestone at a time, in the order of plan 16. Each command has its own
 //! module, and the binary only parses the command line and calls it.
 
+pub mod check;
 pub mod cli;
+pub mod fetch;
+pub mod repo;
+pub mod sets;

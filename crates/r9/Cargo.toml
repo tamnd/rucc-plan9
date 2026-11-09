@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+r9-pins = { path = "../r9-pins" }
 
 [lints]
 workspace = true

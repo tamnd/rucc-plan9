@@ -44,7 +44,17 @@ impl Accepts {
 #[must_use]
 pub fn accepted(command: &str) -> Option<Accepts> {
     Some(match command {
-        "help" | "version" => Accepts::NOTHING,
+        "help" | "version" | "check" => Accepts::NOTHING,
+        "sets" => Accepts {
+            positional: false,
+            values: &["as-of"],
+            switches: &["write"],
+        },
+        "fetch" => Accepts {
+            positional: true,
+            values: &["row"],
+            switches: &[],
+        },
         _ => return None,
     })
 }
@@ -58,6 +68,16 @@ usage:
       Print this text.
   r9 version
       Print the version of r9.
+  r9 sets [--write] [--as-of TIME]
+      Read what 9front publishes and expand sets.toml into pins. Print the pins, and say whether
+      pins.toml has them. --write writes pins.toml. --as-of takes the pins at a UTC time, such as
+      2026-11-09T06:00:00Z.
+  r9 check
+      Check sets.toml, pins.toml, rows.toml and machines.toml with no network. A hand edit of
+      pins.toml fails here.
+  r9 fetch [NAME] [--row OBJTYPE]
+      Fetch a pin into the cache and check its hash: a tree by commit, or the images of a release.
+      --row fetches the image of one row only. With no name, fetch the pins of the current set.
 
 The repository is found by walking up to sets.toml, or from R9_ROOT. Downloads, images and
 fetched trees go to R9_CACHE, or ~/.cache/r9.

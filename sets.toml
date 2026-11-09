@@ -1,0 +1,19 @@
+# The rules for what is pinned (plan 04.1). r9 sets --write reads what 9front publishes and
+# expands these rules into pins.toml. Edit this file, never pins.toml.
+
+# The current set: the head of the front branch, and the newest release.
+[current]
+tree = "front"
+repo = "9front/9front"              # the GitHub mirror of git.9front.org/plan9front/plan9front
+branch = "front"
+policy = "weekly: the newest commit that G builds and passes three times (04.1, 12.1)"
+
+# The releases set: the newest releases, each with its images.
+[releases]
+newest = 2
+
+[source]
+feed = "https://9front.org/releases/feed.json"
+iso = "https://9front.org/iso/"
+old = "https://9front.org/iso/old/"     # older releases stay here as torrents only
+images = ["amd64.qcow2", "arm64.qcow2", "amd64.iso", "386.iso"]
