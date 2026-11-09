@@ -60,8 +60,17 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         },
         "build" => Accepts {
             positional: true,
-            values: &["side", "row", "accel", "timeout", "firmware", "dir", "out"],
+            values: &[
+                "side", "row", "accel", "timeout", "firmware", "dir", "out", "image",
+            ],
             switches: &["keep"],
+        },
+        "image" => Accepts {
+            positional: true,
+            values: &[
+                "release", "tree", "row", "accel", "timeout", "firmware", "out",
+            ],
+            switches: &[],
         },
         "fetch" => Accepts {
             positional: true,
@@ -120,11 +129,19 @@ usage:
       in place of the release image, with a fresh overlay on top. --disk attaches a qcow2 file
       after the root disk. The writes of the guest to it are not kept.
   r9 build [NAME] --side G [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
-          [--firmware PATH] [--out DIR] [--keep]
-      Boot a release image and run mk install in DIR (/sys/src by default) with r9-cc in the
-      compiler slot. Collect the compile records, the mk log, the files that the build wrote
+          [--firmware PATH] [--image FILE] [--out DIR] [--keep]
+      Boot the g-base image of the row, or the image of the release NAME when there is no
+      g-base image, and run mk install in DIR (/sys/src by default) with r9-cc in the
+      compiler slot. --image boots FILE. Collect the compile records, the mk log, the files that the build wrote
       with their SHA-256, and the generated C sources and headers into DIR/collected. Write the
       summary to build.toml and print the census. Side R comes at P1.
+  r9 image build [--release NAME] [--tree NAME] [--row OBJTYPE] [--accel kvm|hvf|tcg]
+          [--timeout SECS] [--firmware PATH] [--out DIR]
+      Make the g-base image of a pinned tree (the first tree of pins.toml by default). Boot the
+      release image, put the pinned tree in place of /sys/src, /sys/include, /sys/lib, /sys/man,
+      /lib, /rc and each OBJTYPE/include, and build 6c, 6l, 6a, 7c, 7l and 7a three times. The
+      last two builds must give the same bytes. Then build r9-cc, keep the overlay in the cache
+      as the g-base image, and write its summary to baselines/.
   r9 census FILE [--side R|G]
       Count what reached the compiler slot in one build, from the compile.jsonl that r9-cc
       wrote: the calls by origin and by compiler, the calls that failed, the calls from pcc,

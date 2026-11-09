@@ -13,6 +13,7 @@ pub mod console;
 pub mod demands;
 pub mod disk;
 pub mod fetch;
+pub mod image;
 pub mod locate;
 pub mod repo;
 pub mod sets;

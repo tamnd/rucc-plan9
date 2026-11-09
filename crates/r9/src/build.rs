@@ -71,6 +71,8 @@ pub struct Summary {
     pub side: String,
     /// The tree that was built.
     pub dir: String,
+    /// The image that was booted.
+    pub image: String,
     /// The accelerator of QEMU.
     pub accel: String,
     /// Whether `mk install` exited with no error.
@@ -129,6 +131,7 @@ pub fn run(
         objtype: req.objtype.clone(),
         side: "G".into(),
         dir: dir.to_string(),
+        image: req.base.display().to_string(),
         accel: req.accel.clone(),
         passed: t1 > 0 && status.is_empty(),
         status,
@@ -177,6 +180,12 @@ pub fn command(
         .and_then(|f| f.split('.').next())
         .unwrap_or_default()
         .to_string();
+    // R and G builds start from the g-base image when there is one (plan 05.2).
+    if args.get("image").is_none()
+        && let Some(g_base) = crate::image::g_base(repo, &req.objtype)
+    {
+        req.base = g_base;
+    }
     if args.get("out").is_none() {
         req.work = repo
             .root

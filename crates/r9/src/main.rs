@@ -75,6 +75,16 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
+        "image" => {
+            let repo = Repo::find()?;
+            let (summary, report) = r9::image::command(&repo, args)?;
+            print!("{report}");
+            Ok(if summary.fixed_point {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
         "fetch" => {
             let repo = Repo::find()?;
             print!(
