@@ -30,6 +30,8 @@ pub enum Result1 {
         message: String,
         /// `file:line:col` in the guest's tree.
         at: String,
+        /// The names in single quotes, joined by spaces.
+        names: String,
     },
     /// rucc stopped with no error line, or did not run.
     Crash(String),
@@ -51,6 +53,10 @@ pub struct Demand {
     pub units: usize,
     /// Up to three places where it is the first error.
     pub examples: Vec<String>,
+    /// The names that were taken out of the text, most units first, as `name (units)`. Up to
+    /// five are kept.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
 }
 
 /// The whole result, as written to `demands.toml`.
@@ -81,7 +87,15 @@ pub fn target(objtype: &str) -> &'static str {
     }
 }
 
-/// The flags that every replay gets after the rucc program and its extra flags.
+/// The flags that every replay gets after the rucc program and its extra flags. Two of them
+/// stand in for the kencc driver of rucc (tamnd/rucc#4147), so that the ranking shows what the
+/// compiler lacks and not what the driver must set:
+///
+/// - kencc is older than C23, so `true` and `false` are names. `-std=gnu11` gives this.
+/// - kencc looks for a quoted include in the directory of the source first, or in `.` with
+///   `-.`. When no directory has the file, of either form, kencc opens the name as it is, in
+///   the current directory (`macinc` in `cc/macbody`). [`rucc_command`] gives this with
+///   `-iquote` and `-idirafter .`.
 #[must_use]
 pub fn base_flags(objtype: &str) -> Vec<String> {
     vec![
@@ -89,6 +103,7 @@ pub fn base_flags(objtype: &str) -> Vec<String> {
         "-fsyntax-only".into(),
         "-nostdinc".into(),
         "-w".into(),
+        "-std=gnu11".into(),
     ]
 }
 
@@ -106,6 +121,15 @@ pub fn rucc_command(rucc: &[String], root: &Path, r: &Record) -> Vec<String> {
             p.to_string()
         }
     };
+    let source_dir = r
+        .inputs
+        .first()
+        .and_then(|s| Path::new(&s.file).parent())
+        .map(|d| d.display().to_string())
+        .filter(|d| !d.is_empty() && !r.argv.iter().any(|a| a == "-."))
+        .unwrap_or_else(|| ".".into());
+    c.push("-iquote".into());
+    c.push(host(&source_dir));
     let mut args = r.argv.iter();
     while let Some(a) = args.next() {
         if let Some(rest) = a.strip_prefix("-I") {
@@ -127,12 +151,15 @@ pub fn rucc_command(rucc: &[String], root: &Path, r: &Record) -> Vec<String> {
         } else if a.starts_with('-') {
             // -FTVw, -p, -., -a and the rest change nothing that -fsyntax-only sees.
         } else {
-            c.push(a.clone());
+            // A source can have an absolute path, such as /sys/src/cmd/ndb/convM2DNS.c.
+            c.push(host(a));
         }
     }
     // kencc searches these after the -I directories.
     c.push(format!("-I{}", host(&format!("/{}/include", r.objtype))));
     c.push(format!("-I{}", host("/sys/include")));
+    c.push("-idirafter".into());
+    c.push(".".into());
     c
 }
 
@@ -158,7 +185,18 @@ pub fn first_error(stderr: &str, dir: &str, root: &Path) -> Option<Result1> {
         code,
         message: without_names(text),
         at,
+        names: quoted_names(text).join(" "),
     })
+}
+
+/// The names in single quotes, in order.
+#[must_use]
+pub fn quoted_names(text: &str) -> Vec<String> {
+    text.split('\'')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect()
 }
 
 /// Replace each name in single quotes with `_`, so that errors of one kind group together.
@@ -242,7 +280,7 @@ pub fn run(rucc: &[String], root: &Path, records: &[Record]) -> Demands {
 /// Rank the results.
 #[must_use]
 pub fn rank(objtype: &str, rucc: &str, results: &[Result1]) -> Demands {
-    let mut groups: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    let mut groups: BTreeMap<(String, String), Vec<(String, String)>> = BTreeMap::new();
     let (mut clean, mut crashed, mut skipped) = (0, 0, 0);
     for r in results {
         match r {
@@ -253,22 +291,31 @@ pub fn rank(objtype: &str, rucc: &str, results: &[Result1]) -> Demands {
                 groups
                     .entry(("crash".into(), without_names(m)))
                     .or_default()
-                    .push(String::new());
+                    .push((String::new(), String::new()));
             }
-            Result1::Error { code, message, at } => groups
+            Result1::Error {
+                code,
+                message,
+                at,
+                names,
+            } => groups
                 .entry((code.clone(), message.clone()))
                 .or_default()
-                .push(at.clone()),
+                .push((at.clone(), names.clone())),
         }
     }
     let mut demand: Vec<Demand> = groups
         .into_iter()
-        .map(|((code, message), places)| Demand {
-            rank: 0,
-            code,
-            message,
-            units: places.len(),
-            examples: distinct(places, 3),
+        .map(|((code, message), units)| {
+            let names = common(units.iter().map(|(_, n)| n.as_str()), 5);
+            Demand {
+                rank: 0,
+                code,
+                message,
+                units: units.len(),
+                examples: distinct(units.into_iter().map(|(at, _)| at).collect(), 3),
+                names,
+            }
         })
         .collect();
     demand.sort_by(|a, b| {
@@ -289,6 +336,21 @@ pub fn rank(objtype: &str, rucc: &str, results: &[Result1]) -> Demands {
         skipped,
         demand,
     }
+}
+
+/// The `n` most common texts that are not empty, as `text (count)`.
+fn common<'a>(texts: impl Iterator<Item = &'a str>, n: usize) -> Vec<String> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for t in texts.filter(|t| !t.is_empty()) {
+        *counts.entry(t).or_default() += 1;
+    }
+    let mut counts: Vec<_> = counts.into_iter().collect();
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    counts
+        .into_iter()
+        .take(n)
+        .map(|(t, c)| format!("{t} ({c})"))
+        .collect()
 }
 
 /// The first `n` distinct places that are not empty.
@@ -325,6 +387,9 @@ impl Demands {
                 d.message,
                 d.examples.first().map_or("", String::as_str)
             );
+            if !d.names.is_empty() {
+                let _ = writeln!(out, "              names: {}", d.names.join(", "));
+            }
         }
         out
     }
@@ -397,12 +462,17 @@ mod tests {
                 "-fsyntax-only",
                 "-nostdinc",
                 "-w",
+                "-std=gnu11",
+                "-iquote",
+                ".",
                 "-I../common",
                 "-I/g/sys/include/ape",
                 "-DX=1",
                 "acme.c",
                 "-I/g/amd64/include",
                 "-I/g/sys/include",
+                "-idirafter",
+                ".",
             ]
         );
     }
@@ -418,6 +488,7 @@ mod tests {
                 code: "E0502".into(),
                 message: "'_' has no member named '_'".into(),
                 at: "/sys/src/x/a.c:3:26".into(),
+                names: "struct R k".into(),
             })
         );
         assert_eq!(
@@ -440,6 +511,11 @@ mod tests {
             code: code.into(),
             message: "m".into(),
             at: at.into(),
+            names: if at == "a" {
+                String::new()
+            } else {
+                format!("n{at}")
+            },
         };
         let d = rank(
             "amd64",
@@ -457,6 +533,8 @@ mod tests {
         assert_eq!(d.demand[0].code, "E1");
         assert_eq!(d.demand[0].units, 3);
         assert_eq!(d.demand[0].examples, ["b", "c"]);
+        assert_eq!(d.demand[0].names, ["nb (2)", "nc (1)"]);
+        assert!(d.demand[1].names.is_empty());
         assert_eq!(d.demand[1].rank, 2);
         assert!(d.report(10).contains("E1"));
     }
