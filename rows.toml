@@ -24,10 +24,14 @@ letter = "7"
 image = "arm64.qcow2"
 kernel = "9qemu"
 qemu = "qemu-system-aarch64"
-machine = "virt,gic-version=3"
+# The 9qemu kernel of 11952 has its PCI ECAM at 0x3F000000. QEMU puts the ECAM high unless
+# highmem-ecam=off, and then the kernel panics in kenter.
+machine = "virt,gic-version=3,highmem-ecam=off"
 cpu_hw = "host"
 cpu_tcg = "max"
-cpus = 4
+# On newer QEMU, the other CPUs of the 11952 kernel stop at a WFE in _start that no SEV
+# ends. 9front removed the WFE in ba5324e3f. Until a release has that change, use one CPU.
+cpus = 1
 memory_gb = 4
 firmware = "u-boot"                 # the image has a boot.scr that loads plan9.ini and 9qemu.u
 disk = "virtio"
