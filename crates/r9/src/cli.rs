@@ -85,7 +85,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         "locate" => Accepts {
             positional: true,
             values: &["tree", "days"],
-            switches: &[],
+            switches: &["write"],
         },
         "tree-diff" => Accepts {
             positional: true,
@@ -164,12 +164,15 @@ usage:
       different contents, and the archives whose members are the same but whose dates differ.
       At most N names (20 by default) are printed in each group. Exit with failure when the
       builds differ.
-  r9 locate NAME --tree DIR [--days N]
+  r9 locate NAME --tree DIR [--days N] [--write]
       Find the commit that the release NAME was cut from. DIR holds the release's sys/src and
-      sys/include, as a boot with --collect gives them. Each file is hashed as git hashes it, and
-      compared with each commit of the pinned branch in the N days (90 by default) up to the day
-      after the release date. Print the commit with the fewest different files, and the files
-      that differ. The history is a blobless clone in the cache.
+      sys/include, as a boot with --collect gives them. DIR can also be the collected.tar of
+      that boot, which keeps the paths that differ only by case on a host that ignores case.
+      Each file is hashed as git hashes it, and compared with each commit of the pinned branch
+      in the N days (90 by default) up to the day after the release date. Print the commit with the fewest different files, and the files
+      that differ. The history is a blobless clone in the cache. --write writes the commit to
+      pins.toml when no file has different contents and no other commit ties. r9 sets --write
+      keeps it.
 
 The repository is found by walking up to sets.toml, or from R9_ROOT. Downloads, images and
 fetched trees go to R9_CACHE, or ~/.cache/r9.

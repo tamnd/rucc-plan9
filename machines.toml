@@ -18,14 +18,14 @@ roles = ["runtime benchmarks"]
 os = "linux"
 arch = "x86_64"
 cores = 4
-accel = "kvm"
+accel = "tcg"                       # no /dev/kvm and no vmx flag when checked on 2026-11-09
 roles = ["diffrun", "mk test fan-out"]
 
 [machine.server2]
 os = "linux"
 arch = "x86_64"
 cores = 6
-accel = "kvm"
+accel = "tcg"                       # no /dev/kvm and no vmx flag when checked on 2026-11-09
 roles = ["diffrun", "weekly release runs"]
 
 [machine.m4]

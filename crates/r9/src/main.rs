@@ -108,7 +108,13 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 .map_err(|e| format!("--days: {e}"))?;
             print!(
                 "{}",
-                r9::locate::run(&repo, name, std::path::Path::new(tree), window)?
+                r9::locate::run(
+                    &repo,
+                    name,
+                    std::path::Path::new(tree),
+                    window,
+                    args.has("write")
+                )?
             );
             Ok(ExitCode::SUCCESS)
         }

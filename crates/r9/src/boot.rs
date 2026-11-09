@@ -321,11 +321,27 @@ fn type_text(
 }
 
 /// Unpack the collect disk, and remove the overlay and the input disk unless `--keep` was given.
+/// The archive on the collect disk is kept as `collected.tar`, cut to its length, because the
+/// host file system can lose files of a tree that it unpacks (plan 11.8). A collect disk that
+/// the archive fills is an error.
 fn clean_up(req: &Request) -> Result<(), String> {
     if req.collect_mib.is_some() {
         let disk = crate::disk::collect_disk(&req.work);
+        let archive = crate::tar::list(&disk)?;
         crate::disk::unpack(&disk, &req.work.join("collected"))?;
-        let _ = std::fs::remove_file(disk);
+        let kept = req.work.join("collected.tar");
+        if archive.files.is_empty() {
+            let _ = std::fs::remove_file(&disk);
+        } else {
+            std::fs::rename(&disk, &kept)
+                .and_then(|()| {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&kept)?
+                        .set_len(archive.end)
+                })
+                .map_err(|e| format!("{}: {e}", kept.display()))?;
+        }
     }
     if !req.keep {
         let _ = std::fs::remove_file(overlay(req));
