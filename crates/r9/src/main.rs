@@ -73,6 +73,21 @@ fn run(args: &Args) -> Result<ExitCode, String> {
             );
             Ok(ExitCode::SUCCESS)
         }
+        "census" => {
+            let path = args
+                .target
+                .as_deref()
+                .ok_or("give the compile.jsonl file of a build")?;
+            let records = r9::census::load(std::path::Path::new(path))?;
+            let side = r9::census::Side::pick(args.get("side"), &records)?;
+            let census = r9::census::take(&records);
+            print!("{}", census.report(side));
+            Ok(if census.problems(side).is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
         other => Err(format!("unknown command {other}; see r9 help")),
     }
 }
