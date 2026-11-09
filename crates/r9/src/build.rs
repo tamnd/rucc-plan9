@@ -54,7 +54,8 @@ pub fn commands(dir: &str) -> Vec<String> {
         ),
         // t0 is always named, so that an empty list does not make sha1sum read its input.
         format!("sha1sum -2 256 {w}/t0 `{{cat {w}/changed}} > {w}/changed.sha256"),
-        format!("tar cf {w}/gen.tar {w}/t0 `{{grep '\\.[chy]$' {w}/changed}}"),
+        // yacc -D writes y.debug, which yaccpar includes.
+        format!("tar cf {w}/gen.tar {w}/t0 `{{grep '\\.[chy]$|/y\\.debug$' {w}/changed}}"),
         format!("cd {w} && tar cf $r9collect {}", COLLECTED.join(" ")),
     ]
 }
@@ -202,7 +203,7 @@ mod tests {
         assert!(c[2].contains("{while(! test -f /tmp/r9/t1){sleep 60; echo r9-progress"));
         assert!(c[5].contains("awk -v 't='$t0 '$1 >= t+0 {print $3}'"));
         assert!(c[6].starts_with("sha1sum -2 256 /tmp/r9/t0 `{cat /tmp/r9/changed}"));
-        assert!(c[7].contains("`{grep '\\.[chy]$' /tmp/r9/changed}"));
+        assert!(c[7].contains("`{grep '\\.[chy]$|/y\\.debug$' /tmp/r9/changed}"));
         assert!(c.last().unwrap().ends_with("changed.sha256 gen.tar"));
         assert!(c.iter().all(|l| !l.contains('\n')));
     }
