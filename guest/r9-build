@@ -10,6 +10,10 @@
 #
 # usage: r9-build [dir [mk arguments]]
 # The default is mk install in /sys/src. The records go to /tmp/r9/compile.jsonl.
+#
+# With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
+# machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
+# rucc fails runs the real compiler, and what rucc said goes to /tmp/r9/rucc.err.
 
 rfork ne
 r9=/usr/glenda/r9

@@ -6,6 +6,7 @@
 
 pub mod boot;
 pub mod build;
+pub mod ccd;
 pub mod census;
 pub mod check;
 pub mod cli;

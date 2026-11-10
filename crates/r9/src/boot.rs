@@ -47,6 +47,9 @@ pub struct Request {
     pub timeout: Duration,
     /// Keep the overlay after the boot.
     pub keep: bool,
+    /// Give the guest a network card on the user network of QEMU. The guest reaches the host
+    /// at 10.0.2.2, and the host needs no open port.
+    pub net: bool,
 }
 
 /// What came of a boot.
@@ -153,6 +156,12 @@ pub fn qemu_command(req: &Request) -> Vec<String> {
         ));
         c.push("-device".into());
         c.push(device(&id));
+    }
+    if req.net {
+        c.push("-netdev".into());
+        c.push("user,id=net0".into());
+        c.push("-device".into());
+        c.push(format!("virtio-net-pci,netdev=net0{modern}"));
     }
     c
 }
@@ -562,6 +571,7 @@ pub fn request_from(repo: &crate::repo::Repo, args: &crate::cli::Args) -> Result
             .transpose()?,
         timeout,
         keep: args.has("keep"),
+        net: args.has("net"),
     })
 }
 
@@ -604,6 +614,7 @@ mod tests {
             collect_mib: None,
             timeout: Duration::from_secs(60),
             keep: false,
+            net: false,
         }
     }
 
@@ -626,6 +637,12 @@ mod tests {
         let c = qemu_command(&req).join(" ");
         assert!(c.contains("-bios /u-boot.bin"));
         assert!(c.contains("virtio-blk-pci,drive=root,disable-legacy=on"));
+        assert!(!c.contains("-netdev"));
+        req.net = true;
+        let c = qemu_command(&req).join(" ");
+        assert!(c.ends_with(
+            "-netdev user,id=net0 -device virtio-net-pci,netdev=net0,disable-legacy=on"
+        ));
     }
 
     #[test]
