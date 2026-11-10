@@ -1,0 +1,12 @@
+# The R build of all of /sys/src (plan 05.4 and 12.3). Run r9 ccd on the host first, then run
+# r9 boot with --net --in guest --collect 128 --keep. The guest builds r9-cc, and r9-build runs
+# mk install in /sys/src with each compile sent to rucc on the host. With cc:auto, a compile that
+# rucc fails runs the real compiler. Count the compiles with the origin ref-c in compile.jsonl.
+# Then boot the kept root.qcow2 with --image and smoke/rboot.rc.
+mkdir -p /tmp/r9in /usr/glenda/r9/bin && cd /tmp/r9in && tar xf $r9in
+cp /tmp/r9in/r9-build /usr/glenda/r9/bin/ && cd /tmp/r9in/r9-cc && mk install
+ip/ipconfig
+r9ccd='tcp!10.0.2.2!5640' r9bringup=cc:auto /usr/glenda/r9/bin/r9-build > /tmp/build.log >[2=1]; echo build $status
+cp /tmp/r9/compile.jsonl /tmp/compile.jsonl; cp /tmp/r9/rucc.err /tmp/rucc.err; wc -l /tmp/compile.jsonl
+grep -c '"origin":"rucc"' /tmp/compile.jsonl; grep -c '"origin":"ref-c"' /tmp/compile.jsonl; tail -20 /tmp/build.log
+cd /tmp && tar cf $r9collect compile.jsonl rucc.err build.log
