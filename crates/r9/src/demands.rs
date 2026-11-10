@@ -5,10 +5,16 @@
 //! unit is kept. The errors are grouped by their code and their text, with the names in quotes
 //! taken out, and ranked by the number of units they stop.
 //!
-//! rucc has no kencc driver yet (tamnd/rucc#4147). Until it has one, the kencc arguments are
-//! translated: `-I` and `-D` pass through, the kencc default include directories are added, and
-//! the other flags are dropped. The target is x86-64 or aarch64 Linux, which is the closest
-//! target rucc has. The command is in [`rucc_command`], so it changes in one place.
+//! There are two modes. In the syntax mode, the kencc arguments are translated: `-I` and `-D`
+//! pass through, the kencc default include directories are added, and the other flags are
+//! dropped. The target is x86-64 or aarch64 Linux. The command is in [`rucc_command`]. This
+//! mode was made before rucc had the kencc driver (tamnd/rucc#4147), and it shows what the
+//! front end lacks with no help from the driver.
+//!
+//! In the kencc mode, which is `--kencc`, each unit is compiled with the kencc driver of rucc
+//! and the Plan 9 target, with the arguments that kencc got, as `r9 ccd` compiles it. The tree
+//! under the root is the sysroot. The objects go to a scratch directory and are then removed.
+//! The command is in [`kencc_command`].
 
 use crate::census::Record;
 use serde::Serialize;
@@ -16,6 +22,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// What became of one unit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,8 +42,8 @@ pub enum Result1 {
     },
     /// rucc stopped with no error line, or did not run.
     Crash(String),
-    /// The unit was not replayed: its source was on standard input, or it is not for the
-    /// guest's architecture.
+    /// The unit was not replayed: its source was on standard input, the build made its source,
+    /// or it is not for the guest's architecture.
     Skipped,
 }
 
@@ -217,9 +224,53 @@ pub fn without_names(text: &str) -> String {
     out
 }
 
+/// How a unit is replayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// `-fsyntax-only` with the Linux target, and the kencc arguments translated.
+    Syntax,
+    /// The kencc driver of rucc and the Plan 9 target, as `r9 ccd` runs it.
+    Kencc,
+}
+
+/// The environment variables of a rucc command, as names and values.
+pub type Env = Vec<(String, String)>;
+
+/// The rucc command and its environment for one unit in the kencc mode, as `r9 ccd` makes
+/// them. The tree under `root` is the sysroot.
+///
+/// # Errors
+///
+/// The `$objtype` of the unit has no rucc target, or the arguments are not complete.
+pub fn kencc_command(
+    rucc: &[String],
+    root: &Path,
+    r: &Record,
+) -> Result<(Vec<String>, Env), String> {
+    let call = crate::ccd::Call {
+        cc: r.cc.clone(),
+        objtype: r.objtype.clone(),
+        dir: r.dir.clone(),
+        args: r.argv.clone(),
+        stdin: Vec::new(),
+    };
+    let t = crate::ccd::translate(&call, &root.display().to_string())?;
+    let mut c = rucc.to_vec();
+    c.extend(t.args);
+    let env = vec![
+        ("objtype".to_owned(), r.objtype.clone()),
+        ("INCLUDE".to_owned(), t.include),
+        ("R9_OPT".to_owned(), t.options),
+    ];
+    Ok((c, env))
+}
+
+/// The number of scratch directories made, so that each has its own name.
+static SCRATCH: AtomicUsize = AtomicUsize::new(0);
+
 /// Replay one unit.
 #[must_use]
-pub fn replay(rucc: &[String], root: &Path, r: &Record) -> Result1 {
+pub fn replay(rucc: &[String], root: &Path, r: &Record, mode: Mode) -> Result1 {
     let host_letter = match r.objtype.as_str() {
         "amd64" => "6c",
         "arm64" => "7c",
@@ -228,9 +279,41 @@ pub fn replay(rucc: &[String], root: &Path, r: &Record) -> Result1 {
     if r.stdin || r.inputs.is_empty() || r.cc != host_letter {
         return Result1::Skipped;
     }
-    let dir = root.join(r.dir.trim_start_matches('/'));
-    let c = rucc_command(rucc, root, r);
-    match Command::new(&c[0]).args(&c[1..]).current_dir(&dir).output() {
+    // A source that the build made, such as a y.tab.c of yacc, is not in a copy of the tree.
+    let generated = r.inputs.iter().any(|f| {
+        let path = crate::ccd::absolute(&r.dir, &f.file);
+        !root.join(path.trim_start_matches('/')).exists()
+    });
+    if generated {
+        return Result1::Skipped;
+    }
+    let (c, env, dir, scratch) = match mode {
+        Mode::Syntax => {
+            let dir = root.join(r.dir.trim_start_matches('/'));
+            (rucc_command(rucc, root, r), Vec::new(), dir, false)
+        }
+        Mode::Kencc => {
+            let (c, env) = match kencc_command(rucc, root, r) {
+                Ok(command) => command,
+                Err(e) => return Result1::Crash(e),
+            };
+            let n = SCRATCH.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("r9-demands-{}-{n}", std::process::id()));
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                return Result1::Crash(format!("cannot make {}: {e}", dir.display()));
+            }
+            (c, env, dir, true)
+        }
+    };
+    let ran = Command::new(&c[0])
+        .args(&c[1..])
+        .envs(env)
+        .current_dir(&dir)
+        .output();
+    if scratch {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    match ran {
         Err(e) => Result1::Crash(format!("cannot run {} in {}: {e}", c[0], dir.display())),
         Ok(out) if out.status.success() => Result1::Clean,
         Ok(out) => {
@@ -252,7 +335,7 @@ pub fn replay(rucc: &[String], root: &Path, r: &Record) -> Result1 {
 
 /// Replay every unit, on all host CPUs, and rank the first errors.
 #[must_use]
-pub fn run(rucc: &[String], root: &Path, records: &[Record]) -> Demands {
+pub fn run(rucc: &[String], root: &Path, records: &[Record], mode: Mode) -> Demands {
     let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
     let chunk = records.len().div_ceil(threads).max(1);
     let results: Vec<Result1> = std::thread::scope(|s| {
@@ -261,7 +344,7 @@ pub fn run(rucc: &[String], root: &Path, records: &[Record]) -> Demands {
             .map(|part| {
                 s.spawn(move || {
                     part.iter()
-                        .map(|r| replay(rucc, root, r))
+                        .map(|r| replay(rucc, root, r, mode))
                         .collect::<Vec<_>>()
                 })
             })
@@ -273,7 +356,14 @@ pub fn run(rucc: &[String], root: &Path, records: &[Record]) -> Demands {
     });
     let objtype = records.first().map_or("", |r| r.objtype.as_str());
     let mut command = rucc.to_vec();
-    command.extend(base_flags(objtype));
+    match mode {
+        Mode::Syntax => command.extend(base_flags(objtype)),
+        Mode::Kencc => {
+            command.push("--driver=kencc".to_owned());
+            let target = crate::ccd::target(objtype).unwrap_or("none");
+            command.push(format!("--target={target}"));
+        }
+    }
     rank(objtype, &command.join(" "), &results)
 }
 
@@ -437,6 +527,26 @@ mod tests {
             sys_ms: 0,
             origin: "ref-c".into(),
         }
+    }
+
+    #[test]
+    fn the_kencc_mode_compiles_as_ccd_does() {
+        let r = record(&["-FTVw", "-I", "../common", "-o", "a.6", "acme.c"]);
+        let (c, env) = kencc_command(&["rucc".into()], Path::new("/g"), &r).unwrap();
+        assert_eq!(c[0], "rucc");
+        assert!(c.contains(&"--driver=kencc".to_owned()), "{c:?}");
+        assert!(c.contains(&"--target=x86_64-plan9".to_owned()), "{c:?}");
+        assert!(c.contains(&"-FTVw".to_owned()), "{c:?}");
+        assert!(
+            c.iter()
+                .any(|a| a.ends_with("acme.c") && a.starts_with("/g/")),
+            "{c:?}"
+        );
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "INCLUDE" && v.contains("/g/amd64/include"))
+        );
+        assert!(env.iter().any(|(k, v)| k == "objtype" && v == "amd64"));
     }
 
     #[test]

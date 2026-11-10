@@ -100,7 +100,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         "demands" => Accepts {
             positional: true,
             values: &["root", "out", "top", "flags"],
-            switches: &[],
+            switches: &["kencc"],
         },
         _ => return None,
     })
@@ -158,12 +158,14 @@ usage:
       wrote: the calls by origin and by compiler, the calls that failed, the calls from pcc,
       the time by directory, and the sources compiled more than once. The census of an R build
       fails when a call went to kencc. The side comes from the records when --side is not given.
-  r9 demands FILE --root DIR [--flags FLAGS] [--out FILE] [--top N]
+  r9 demands FILE --root DIR [--flags FLAGS] [--out FILE] [--top N] [--kencc]
       Compile each unit of a G build again with rucc -fsyntax-only on the host, and rank the
       first errors by the number of units they stop. FILE is the compile.jsonl of the build. DIR
       holds the guest's sys/src, sys/include and OBJTYPE/include. The ranks go to --out
       (demands.toml by default), and the first N (20 by default) are printed. rucc comes from
-      R9_RUCC, or from the path. --flags gives more rucc flags, separated by spaces.
+      R9_RUCC, or from the path. --flags gives more rucc flags, separated by spaces. --kencc
+      compiles each unit with the kencc driver of rucc and the Plan 9 target, as r9 ccd does,
+      with DIR as the sysroot.
   r9 tree-diff A --with B [--top N]
       Compare the files that two builds wrote. A and B are the directories of two builds, or
       their changed.sha256 files. Print the files that only one build wrote, the files with
