@@ -1,0 +1,17 @@
+# The GUI smoke test. r9 boot types each line at the shell prompt, so each command is one line.
+# The input disk is the output of gather.py. The guest puts the objects of rucc into a copy of
+# each library of the image, links the programs with the loader of the image, and binds them
+# over /bin. vncs gives a draw device with no display, and rio runs the windows of start in it.
+cd /tmp && mkdir r && cd r && tar xf $r9in && mkdir L bin
+O=`{sed -n 's/^O=//p' /$objtype/mkfile}; echo O $O
+for(l in `{ls lib | sed 's,.*/,,'}) { cp /$objtype/lib/$l.a L/$l.a; cd lib/$l; ar r ../../L/$l.a *.$O; echo lib $l `{ls | wc -l}; cd /tmp/r }
+bind -b /tmp/r/L /$objtype/lib
+for(p in `{ls cmd | sed 's,.*/,,'}) { cd cmd/$p; $O^l -o /tmp/r/bin/$p *.$O && echo linked $p; cd /tmp/r }
+for(f in one/*.$O) { $O^l -o bin/`{basename $f .$O} $f && echo linked $f }
+ls bin | wc -l
+bind -b /tmp/r/bin /bin
+chmod +x gui.rc
+vncs -g 1024x768 /tmp/r/gui.rc
+sleep 50; test -f /tmp/r/done
+topng < /tmp/r/shot.bit > /tmp/r/shot.png
+ps > ps.txt; tar cf $r9collect shot.png ps.txt `{ls *.err}

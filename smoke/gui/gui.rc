@@ -1,0 +1,2 @@
+#!/bin/rc
+rio -i 'rc /tmp/r/start' >[2]/tmp/r/rio.err
