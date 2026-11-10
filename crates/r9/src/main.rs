@@ -183,7 +183,12 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
                 .map_err(|e| format!("--top: {e}"))?;
             let records = r9::census::load(std::path::Path::new(path))?;
             let rucc = r9::demands::find_rucc(args.get("flags"));
-            let demands = r9::demands::run(&rucc, std::path::Path::new(root), &records);
+            let mode = if args.has("kencc") {
+                r9::demands::Mode::Kencc
+            } else {
+                r9::demands::Mode::Syntax
+            };
+            let demands = r9::demands::run(&rucc, std::path::Path::new(root), &records, mode);
             demands.write(std::path::Path::new(
                 args.get("out").unwrap_or("demands.toml"),
             ))?;

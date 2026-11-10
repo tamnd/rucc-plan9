@@ -91,7 +91,7 @@ rucc-plan9/
 | `r9 ccd` | the host daemon that runs rucc for `r9-cc` (05.4) |
 | `r9 build --side=R\|G` | boots a builder guest, runs `r9-build`, collects the outputs |
 | `r9 census` | origins of every unit, what never reached the slot, `--gui` for the GUI census (05.6, 02.7) |
-| `r9 demands` | replays G's units through `rucc -fsyntax-only` and ranks the first errors (05.6) |
+| `r9 demands` | replays G's units through `rucc -fsyntax-only`, or with `--kencc` through the kencc driver as `r9 ccd` runs it, and ranks the first errors (05.6) |
 | `r9 flags-diff` | the argv of every unit, R against G (05.5) |
 | `r9 tree-diff` | the set of output files, R against G (05.5) |
 | `r9 warn-diff` | warnings lost and added (05.8) |
