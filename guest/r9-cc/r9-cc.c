@@ -7,10 +7,16 @@
  * objtype, the directory, the arguments, the SHA-256 of each input and output, the exit status
  * and the time. The file is append-only, so parallel calls from mk do not mix their records.
  *
- * The mode that sends the call to rucc on the host (r9 ccd, plan 05.4) comes at P1.
+ * When $r9ccd names the host, such as tcp!10.0.2.2!5640, a call for the machine of the guest
+ * goes to rucc through r9 ccd (plan 05.4). r9-cc dials the host two times. On the first
+ * connection it runs exportfs, so that rucc reads the sources and the headers from the name
+ * space of the build. On the second it sends the call, and it writes the objects of the reply.
+ * The record then has the origin rucc. When rucc fails and $r9bringup has cc:auto, r9-cc runs
+ * the real compiler, and the record has the origin ref-c.
  */
 #include <u.h>
 #include <libc.h>
+#include <bio.h>
 #include <libsec.h>
 
 enum {
@@ -205,14 +211,207 @@ record(Buf *b)
 	close(fd);
 }
 
+/* All the bytes of fd, in a buffer that ends in 0. */
+char*
+readall(int fd, long *len)
+{
+	Buf b;
+	char tmp[8192];
+	long n;
+
+	memset(&b, 0, sizeof b);
+	grow(&b, 1);
+	while((n = read(fd, tmp, sizeof tmp)) > 0){
+		grow(&b, n);
+		memmove(b.p+b.n, tmp, n);
+		b.n += n;
+		b.p[b.n] = 0;
+	}
+	*len = b.n;
+	return b.p;
+}
+
+/*
+ * Run the real compiler with argv. When in is not nil, it is the standard input of the
+ * compiler. Return the exit status and set the times.
+ */
+char*
+runreal(char *real, char *cc, char **argv, char *in, long nin, ulong *user, ulong *sys)
+{
+	int pid, p[2];
+	char *status;
+	Waitmsg *w;
+
+	if(in != nil && pipe(p) < 0)
+		sysfatal("r9-cc: pipe: %r");
+	pid = fork();
+	switch(pid){
+	case -1:
+		sysfatal("r9-cc: fork: %r");
+	case 0:
+		if(in != nil){
+			dup(p[0], 0);
+			close(p[0]);
+			close(p[1]);
+		}
+		argv[0] = cc;
+		exec(real, argv);
+		sysfatal("r9-cc: exec %s: %r", real);
+	}
+	if(in != nil){
+		close(p[0]);
+		write(p[1], in, nin);
+		close(p[1]);
+	}
+	status = "";
+	*user = *sys = 0;
+	while((w = wait()) != nil){
+		if(w->pid == pid){
+			status = strdup(w->msg);
+			*user = w->time[0];
+			*sys = w->time[1];
+			free(w);
+			break;
+		}
+		free(w);
+	}
+	return status;
+}
+
+/* Read a line of the reply that starts with key and a space, and return the rest. */
+char*
+field(Biobuf *b, char *key)
+{
+	char *l;
+	int n;
+
+	l = Brdstr(b, '\n', 1);
+	if(l == nil)
+		return nil;
+	n = strlen(key);
+	if(strncmp(l, key, n) != 0 || (l[n] != ' ' && l[n] != 0)){
+		free(l);
+		return nil;
+	}
+	return l[n] == 0 ? l+n : l+n+1;
+}
+
+/* Copy n bytes of the reply to fd, or skip them when fd is negative. */
+int
+copyout(Biobuf *b, int fd, long n)
+{
+	char tmp[8192];
+	long m;
+
+	while(n > 0){
+		m = n < sizeof tmp ? n : sizeof tmp;
+		if(Bread(b, tmp, m) != m)
+			return -1;
+		if(fd >= 0 && write(fd, tmp, m) != m)
+			return -1;
+		n -= m;
+	}
+	return 0;
+}
+
+/*
+ * Send the call to r9 ccd at addr. Return 0 when the host gave a reply, with its status in
+ * *status, or -1 with the reason in *status. Standard error goes to errfd. The files of a
+ * reply with an empty status are written in the guest.
+ */
+int
+forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, char *in, long nin, int errfd, char **status)
+{
+	char *id, *v;
+	int efd, cfd, fd, i;
+	long n;
+	Biobuf b;
+
+	id = smprint("%d.%lld", getpid(), nsec());
+	efd = dial(addr, nil, nil, nil);
+	if(efd < 0){
+		*status = smprint("r9-cc: dial %s: %r", addr);
+		return -1;
+	}
+	fprint(efd, "9p %s\n", id);
+	switch(rfork(RFPROC|RFFDG|RFNOWAIT)){
+	case -1:
+		*status = smprint("r9-cc: fork: %r");
+		close(efd);
+		return -1;
+	case 0:
+		dup(efd, 0);
+		dup(efd, 1);
+		close(efd);
+		execl("/bin/exportfs", "exportfs", "-r", "/", nil);
+		sysfatal("r9-cc: exec exportfs: %r");
+	}
+	close(efd);
+
+	cfd = dial(addr, nil, nil, nil);
+	if(cfd < 0){
+		*status = smprint("r9-cc: dial %s: %r", addr);
+		return -1;
+	}
+	Binit(&b, cfd, OWRITE);
+	Bprint(&b, "call %s\ncc %s\nobjtype %s\ndir %s\nargc %d\n", id, cc, objtype, dir, argc-1);
+	for(i = 1; i < argc; i++)
+		Bprint(&b, "%s\n", argv[i]);
+	Bprint(&b, "stdin %ld\n", in != nil ? nin : 0);
+	if(in != nil)
+		Bwrite(&b, in, nin);
+	Bterm(&b);
+
+	Binit(&b, cfd, OREAD);
+	*status = "r9-cc: the reply of r9 ccd is not complete";
+	if((v = field(&b, "status")) == nil)
+		goto out;
+	*status = strdup(v);
+	if((v = field(&b, "stderr")) == nil || copyout(&b, errfd, atol(v)) < 0)
+		goto bad;
+	for(;;){
+		if((v = Brdstr(&b, '\n', 1)) == nil)
+			goto bad;
+		if(strcmp(v, "end") == 0)
+			break;
+		if(strncmp(v, "file ", 5) != 0)
+			goto bad;
+		n = strtol(v+5, &v, 10);
+		if(*v++ != ' ')
+			goto bad;
+		fd = -1;
+		if((*status)[0] == 0){
+			fd = create(v, OWRITE, 0664);
+			if(fd < 0){
+				*status = smprint("r9-cc: create %s: %r", v);
+				goto out;
+			}
+		}
+		i = copyout(&b, fd, n);
+		if(fd >= 0)
+			close(fd);
+		if(i < 0)
+			goto bad;
+	}
+	Bterm(&b);
+	close(cfd);
+	return 0;
+bad:
+	*status = "r9-cc: the reply of r9 ccd is not complete";
+out:
+	Bterm(&b);
+	close(cfd);
+	return -1;
+}
+
 void
 main(int argc, char **argv)
 {
-	char *cc, *objtype, *real, *dir, *status, *origin;
+	char *cc, *objtype, *real, *dir, *status, *origin, *ccd, *bringup, *text, *log;
 	char *in[Maxfiles], *out[Maxfiles], hex[Hexlen];
-	int i, nin, nout, pid, l;
+	int i, nin, nout, l, fd;
+	long ntext;
 	vlong t0, t1;
-	Waitmsg *w;
 	ulong user, sys;
 	Buf b;
 
@@ -254,27 +453,37 @@ main(int argc, char **argv)
 	put(&b, "]");
 
 	t0 = nsec();
-	pid = fork();
-	switch(pid){
-	case -1:
-		sysfatal("r9-cc: fork: %r");
-	case 0:
-		argv[0] = cc;
-		exec(real, argv);
-		sysfatal("r9-cc: exec %s: %r", real);
-	}
-	status = "";
+	ccd = getenv("r9ccd");
+	bringup = getenv("r9bringup");
+	origin = l == hostletter(objtype) ? "ref-c" : "other-arch";
+	text = nil;
+	ntext = 0;
 	user = sys = 0;
-	while((w = wait()) != nil){
-		if(w->pid == pid){
-			status = strdup(w->msg);
-			user = w->time[0];
-			sys = w->time[1];
-			free(w);
-			break;
+	if(ccd != nil && ccd[0] != 0 && l == hostletter(objtype)){
+		if(nin == 0)
+			text = readall(0, &ntext);
+		log = "/tmp/r9/rucc.err";
+		fd = open(log, OWRITE);
+		if(fd < 0)
+			fd = create(log, OWRITE, DMAPPEND|0666);
+		if(bringup == nil || strstr(bringup, "cc:auto") == nil){
+			close(fd);
+			fd = 2;
+		}else
+			fprint(fd, "== %s %s\n", cc, dir);
+		if(forward(ccd, cc, objtype, dir, argc, argv, text, ntext, fd, &status) == 0 && status[0] == 0)
+			origin = "rucc";
+		else if(fd != 2){
+			fprint(fd, "%s\n", status);
+			status = runreal(real, cc, argv, text, ntext, &user, &sys);
+		}else{
+			fprint(2, "%s\n", status);
+			origin = "rucc";
 		}
-		free(w);
-	}
+		if(fd != 2)
+			close(fd);
+	}else
+		status = runreal(real, cc, argv, nil, 0, &user, &sys);
 	t1 = nsec();
 
 	put(&b, ",\"out\":[");
@@ -297,7 +506,6 @@ main(int argc, char **argv)
 	put(&b, hex);
 	snprint(hex, sizeof hex, ",\"user_ms\":%lud,\"sys_ms\":%lud", user, sys);
 	put(&b, hex);
-	origin = l == hostletter(objtype) ? "ref-c" : "other-arch";
 	put(&b, ",\"origin\":");
 	putq(&b, origin);
 	put(&b, "}\n");
