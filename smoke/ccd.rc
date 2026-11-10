@@ -1,0 +1,11 @@
+# The check of the compiler slot in forwarding mode (plan 05.4). Run r9 ccd on the host first,
+# then run r9 boot with --net --in guest --collect 16. The guest builds r9-cc with its own
+# compiler, and builds libbio and rio with mk install, with each compile sent to rucc on the
+# host. Each compile must have the origin rucc.
+mkdir -p /tmp/r9in /usr/glenda/r9/bin && cd /tmp/r9in && tar xf $r9in
+cp /tmp/r9in/r9-build /usr/glenda/r9/bin/ && cd /tmp/r9in/r9-cc && mk install
+ip/ipconfig
+r9ccd='tcp!10.0.2.2!5640' /usr/glenda/r9/bin/r9-build /sys/src/libbio && cp /tmp/r9/compile.jsonl /tmp/libbio.jsonl
+r9ccd='tcp!10.0.2.2!5640' /usr/glenda/r9/bin/r9-build /sys/src/cmd/rio && cp /tmp/r9/compile.jsonl /tmp/rio.jsonl
+! grep -s -v '"origin":"rucc"' /tmp/libbio.jsonl /tmp/rio.jsonl
+cd /tmp && tar cf $r9collect libbio.jsonl rio.jsonl
