@@ -56,7 +56,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
                 "row", "accel", "timeout", "run", "bootargs", "out", "firmware", "in", "collect",
                 "image", "disk",
             ],
-            switches: &["keep"],
+            switches: &["keep", "net"],
         },
         "build" => Accepts {
             positional: true,
@@ -80,6 +80,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         "census" => Accepts {
             positional: true,
             values: &["side"],
+            switches: &[],
+        },
+        "ccd" => Accepts {
+            positional: false,
+            values: &["port", "rucc", "work"],
             switches: &[],
         },
         "locate" => Accepts {
@@ -122,7 +127,7 @@ usage:
       --row fetches the image of one row only. With no name, fetch the pins of the current set.
   r9 boot [NAME] [--row OBJTYPE] [--accel kvm|hvf|tcg] [--run FILE] [--timeout SECS]
           [--bootargs ARGS] [--firmware PATH] [--in PATH] [--collect MIB] [--image FILE]
-          [--disk FILE] [--out DIR] [--keep]
+          [--disk FILE] [--out DIR] [--keep] [--net]
       Boot a release image under QEMU on a fresh overlay. Answer the boot prompts, type each
       command of FILE (smoke/boot.rc by default) at the shell prompt, and halt the guest. The
       console goes to DIR/console.log and the results to DIR/steps.json. With no name, boot the
@@ -132,7 +137,8 @@ usage:
       $r9collect the collect disk. A tar archive that the guest writes to $r9collect is
       unpacked into DIR/collected. --image boots another qcow2 file, such as a kept overlay,
       in place of the release image, with a fresh overlay on top. --disk attaches a qcow2 file
-      after the root disk. The writes of the guest to it are not kept.
+      after the root disk. The writes of the guest to it are not kept. --net gives the guest a
+      network card on the user network of QEMU, where the host is 10.0.2.2.
   r9 build [NAME] --side G [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
           [--firmware PATH] [--image FILE] [--out DIR] [--keep]
       Boot the g-base image of the row, or the image of the release NAME when there is no
@@ -164,6 +170,13 @@ usage:
       different contents, and the archives whose members are the same but whose dates differ.
       At most N names (20 by default) are printed in each group. Exit with failure when the
       builds differ.
+  r9 ccd [--port N] [--rucc PATH] [--work DIR]
+      Serve the compiler slot of a guest (plan 05.4). r9-cc in the guest sends each call of 6c
+      and 7c to port N on the host (5640 by default), as tcp!10.0.2.2!N, with the name space of
+      the build on a second connection. ccd runs rucc (PATH, or R9_RUCC, or rucc on the path)
+      with the sysroot on that name space and sends the objects back. The outputs of each call
+      go in a new directory under DIR (a temporary directory by default) while rucc runs. Each
+      call prints one line. Boot the guest with --net.
   r9 locate NAME --tree DIR [--days N] [--write]
       Find the commit that the release NAME was cut from. DIR holds the release's sys/src and
       sys/include, as a boot with --collect gives them. DIR can also be the collected.tar of
