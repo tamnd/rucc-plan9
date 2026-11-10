@@ -1,0 +1,19 @@
+# The smoke test of an R userland (plan 12.3). Boot the root.qcow2 that smoke/rbuild.rc keeps,
+# with r9 boot --image. Each command in /arm64/bin is then the one that rucc compiled. The test
+# runs common commands, compiles and runs a program with 7c and 7l, and builds rc with mk.
+cat /dev/sysname; cat /dev/osversion; echo $cputype
+ls -l /arm64/bin/rc /arm64/bin/7c /arm64/bin/ls
+echo hello | sed s/hello/world/ | tr a-z A-Z
+seq 1 100 | awk '{s+=$1} END {print s}' | grep -s 5050
+echo '2^64' | hoc; echo '2^64' | hoc | grep -s e
+echo '2 100^p' | dc
+cat /lib/words | sort -u | wc -l
+du -s /sys/src/cmd/rc
+cat /sys/src/cmd/rc/*.c | md5sum
+cat /sys/src/cmd/rc/*.c | sha1sum
+mkdir /tmp/t && cd /tmp/t && tar cf /tmp/t.tar /sys/src/cmd/rc && tar tf /tmp/t.tar | wc -l
+gzip -c /tmp/t.tar > /tmp/t.tgz && gunzip -c /tmp/t.tgz | cmp /fd/0 /tmp/t.tar && echo gzip ok
+cd /tmp/t && echo '#include <u.h>' > h.c && echo '#include <libc.h>' >> h.c && echo 'void main(void){ print("hello %d\n", 6*7); exits(nil); }' >> h.c && 7c h.c && 7l -o h h.7 && ./h
+cd /sys/src/cmd/rc && mk clean >/dev/null && mk >/dev/null && ls -l 7.out
+date; ps | wc -l; cat /dev/kmesg | wc -l
+echo $status
