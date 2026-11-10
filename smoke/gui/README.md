@@ -25,9 +25,9 @@ r9 boot --row arm64 --accel hvf --run smoke/gui/run.rc --in /tmp/gui/in --out /t
 
 The picture is in `/tmp/gui/out/collected/shot.png`. To make the picture of G, remove the line `bind -b /tmp/r/bin /bin` from a copy of `run.rc` and run it with the same input.
 
-## The result on arm64
+## The result
 
-The sources are the `front` tree at 2859ae04e800, and the image is release 11554. The compiler is rucc with the changes of tamnd/rucc#4312 and the pull requests under it. Under HVF on an M4, all 604 files compile and all 10 programs link. The picture of R is the same as the picture of G, except in these areas:
+The sources are the `front` tree at 2859ae04e800, and the image is release 11554. The compiler is rucc with the changes of tamnd/rucc#4312 and the pull requests under it. On arm64 under HVF on an M4, all 604 files compile and all 10 programs link. On amd64 under TCG on the same host, all 590 files compile and all 10 programs link. The picture of R is the same as the picture of G, except in these areas:
 
 - The hands of clock and catclock, and the graph of stats, which change with time.
 - catclock, which is in `/bin/games` and not in `/bin` on the image. The G picture has no catclock window, and winwatch shows one name less.
