@@ -91,6 +91,10 @@ pub struct Translated {
     pub args: Vec<String>,
     /// The value of `$INCLUDE` for rucc.
     pub include: String,
+    /// The value of `$R9_OPT` for rucc, which adds the directory of the call to the end of the
+    /// search for includes. kencc opens a name from the current directory when no include
+    /// directory has it, and the current directory of rucc is not the one of the guest.
+    pub options: String,
     /// For each output with `-o`, the name in the host directory and the name in the guest.
     pub renamed: Vec<(String, String)>,
 }
@@ -178,11 +182,21 @@ pub fn translate(call: &Call, root: &str) -> Result<Translated, String> {
         "{root}/{objtype}/include {root}/sys/include",
         objtype = call.objtype
     );
+    let options = format!("-idirafter {root}{}", absolute("/", &call.dir));
     Ok(Translated {
         args,
         include,
+        options,
         renamed,
     })
+}
+
+/// The options of `$R9_OPT` on the host, then `options`.
+fn opt_with(options: &str) -> String {
+    match std::env::var("R9_OPT") {
+        Ok(host) if !host.trim().is_empty() => format!("{host} {options}"),
+        _ => options.to_owned(),
+    }
 }
 
 /// The name in the host directory of the output `name` of the guest.
@@ -418,6 +432,7 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
         .current_dir(&dir)
         .env("objtype", &call.objtype)
         .env("INCLUDE", &t.include)
+        .env("R9_OPT", opt_with(&t.options))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -455,7 +470,17 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
             reply
         }
     };
-    let _ = std::fs::remove_dir_all(&dir);
+    // A failed call keeps its directory, with what it needs to run again: the directory of the
+    // guest, the arguments, and the standard input.
+    if reply.status.is_empty() {
+        let _ = std::fs::remove_dir_all(&dir);
+    } else {
+        let what = format!("{}\n{}\n", call.dir, call.args.join(" "));
+        let _ = std::fs::write(dir.join("call"), what);
+        if !call.stdin.is_empty() {
+            let _ = std::fs::write(dir.join("stdin"), &call.stdin);
+        }
+    }
     reply
 }
 
@@ -616,6 +641,10 @@ mod tests {
         assert_eq!(
             t.include,
             "9p:tcp!127.0.0.1!4000/arm64/include 9p:tcp!127.0.0.1!4000/sys/include"
+        );
+        assert_eq!(
+            t.options,
+            "-idirafter 9p:tcp!127.0.0.1!4000/sys/src/cmd/acme"
         );
         assert!(t.renamed.is_empty());
     }
