@@ -1,0 +1,9 @@
+window -r 0 0 380 300 'clock >[2]/tmp/r/clock.err'
+window -r 380 0 760 300 'colors >[2]/tmp/r/colors.err'
+window -r 760 0 1024 300 'catclock >[2]/tmp/r/catclock.err'
+window -r 0 300 600 768 'acme -c 1 /tmp/r/start /sys/src/cmd/clock.c >[2]/tmp/r/acme.err'
+window -r 600 300 1024 520 'stats -lmc >[2]/tmp/r/stats.err'
+window -r 600 520 1024 768 'winwatch >[2]/tmp/r/winwatch.err'
+sleep 25
+cat /dev/screen > /tmp/r/shot.bit
+echo done > /tmp/r/done
