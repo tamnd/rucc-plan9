@@ -526,6 +526,7 @@ mod tests {
             user_ms: 0,
             sys_ms: 0,
             origin: "ref-c".into(),
+            stderr: String::new(),
         }
     }
 
