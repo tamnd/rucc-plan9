@@ -1,0 +1,5 @@
+# The tests of the tree (plan 12.2), run by r9 boot with --in guest. guest/r9-test runs each test
+# that /sys/src/cmd/mktest knows, and prints one result line for each. The step fails when a test
+# fails.
+mkdir -p /tmp/r9in && cd /tmp/r9in && tar xf $r9in
+rc /tmp/r9in/r9-test

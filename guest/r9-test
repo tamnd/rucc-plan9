@@ -1,0 +1,77 @@
+#!/bin/rc
+# r9-test: the tests of the tree (plan 12.2), with one result for each test. mk test in
+# /sys/src gives no result for each test, so r9-test runs the tests as /sys/src/cmd/mktest
+# does. It finds each directory whose mkfile includes mktest, reads $TEST through mk, and runs
+# mk NAME.test for each test that is not a directory. Each test prints "ok NAME" or
+# "FAIL NAME: reason", and "value NAME.out HASH" with the SHA-1 of what mk and the test wrote.
+# The last line is a count, and the status is empty only when each test passed.
+#
+# usage: r9-test [dir...]
+# The directories are relative to /sys/src. The default is each directory that includes mktest.
+
+rfork e
+switch($cputype){
+case amd64
+	O=6
+case arm64
+	O=7
+case 386
+	O=8
+case arm
+	O=5
+case *
+	echo FAIL setup: no compiler for $cputype
+	exit setup
+}
+oks=()
+fails=()
+log=/tmp/r9test.log
+list=/tmp/r9test.mk
+echo 'r9list:VQ:
+	echo $TEST' >$list
+
+# A test runs programs that mk builds in a directory above it, such as ../$O.date. mktest
+# expects that mk all ran first, so prereq builds each program that the scripts of the
+# directory name. It writes a command for each name to a file, and rc runs the file.
+fn prereq {
+	cmds=/tmp/r9prereq.rc
+	awk '{
+		while(match($0, /(\.\.\/)+\$O\.[a-zA-Z0-9_]+/)){
+			s = substr($0, RSTART, RLENGTH)
+			i = index(s, "$O.")
+			print "@{cd " substr(s, 1, i-1) " && mk $O." substr(s, i+3) "}"
+			$0 = substr($0, RSTART+RLENGTH)
+		}
+	}' `{ls | grep '\.rc$'} </dev/null >[2]/dev/null | sort -u >$cmds
+	rc $cmds >/tmp/r9prereq.log >[2=1]
+	status=''
+}
+dirs=($*)
+if(~ $#dirs 0)
+	dirs=`{cd /sys/src && walk -f | grep '/mkfile$' | sort | xargs grep -l '^<.*/sys/src/cmd/mktest' | sed 's,^\./,,; s,/mkfile$,,'}
+echo r9-test: $#dirs directories
+for(d in $dirs){
+	cd /sys/src/$d
+	tests=`{mk -f mkfile -f $list r9list >[2]/dev/null}
+	prereq
+	for(t in $tests){
+		if(! test -d $t){
+			name=$d/$t
+			mk $t.test >$log >[2=1]
+			s=$status
+			if(~ $s ''){
+				echo ok $name
+				oks=($oks $name)
+			}
+			if not {
+				echo FAIL $name: $s `{tail -1 $log}
+				fails=($fails $name)
+			}
+			echo value $name.out `{sha1sum <$log}
+		}
+	}
+}
+echo r9-test: $#oks ok, $#fails FAIL
+if(! ~ $#fails 0)
+	exit $"fails
+exit ''
