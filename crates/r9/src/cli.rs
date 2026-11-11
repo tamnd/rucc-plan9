@@ -109,6 +109,16 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["with", "context"],
             switches: &[],
         },
+        "optab" => Accepts {
+            positional: false,
+            values: &["root", "pin", "out"],
+            switches: &[],
+        },
+        "objcheck" => Accepts {
+            positional: true,
+            values: &[],
+            switches: &[],
+        },
         "demands" => Accepts {
             positional: true,
             values: &["root", "out", "top", "flags"],
@@ -211,6 +221,17 @@ usage:
       the symbols that only one file has, and the lines that differ in each function, with N
       same lines (3 by default) around each change. Exit with failure when the records
       differ. With no --with, print the listing of A.
+  r9 optab --root DIR [--pin PIN] [--out FILE]
+      Read the instruction tables of 6l under DIR/sys/src/cmd/6l (plan 07.3): the Y classes of
+      l.h, optab and its ytab arrays in optab.c, ymovtab in span.c, and ycover in obj.c. Write them as Rust to
+      FILE, or print them. PIN goes in the header. The file crates/r9/src/optab6.rs is the
+      output for the pin, and r9 objcheck uses it.
+  r9 objcheck FILE
+      Check a .6 file, or each .6 member of an archive, against the instruction tables of 6l
+      (plan 07.6). Each instruction gets the classes of its operands as oclass in 6l/span.c
+      gives them, after the changes that 6l makes when it reads an object. An instruction that
+      no pair of its ytab or of ymovtab covers is the link error doasm: notfound. Print each
+      such instruction, and exit with failure when there is one.
   r9 ccd [--port N] [--rucc PATH] [--work DIR]
       Serve the compiler slot of a guest (plan 05.4). r9-cc in the guest sends each call of 6c
       and 7c to port N on the host (5640 by default), as tcp!10.0.2.2!N, with the name space of

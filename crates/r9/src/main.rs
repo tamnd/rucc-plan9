@@ -139,6 +139,39 @@ fn locate(args: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// `r9 optab` and `r9 objcheck`: the instruction tables of `6l`, and the check against them.
+fn run_optab(args: &Args) -> Result<ExitCode, String> {
+    match args.command.as_str() {
+        "objcheck" => {
+            let path = args
+                .target
+                .as_deref()
+                .ok_or("give a .6 file or an archive of them")?;
+            let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+            let (report, bad) = r9::objcheck::file(&r9::objcheck::Checker::new(), path, &bytes)?;
+            print!("{report}");
+            Ok(if bad == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        "optab" => {
+            let root = args
+                .get("root")
+                .ok_or("give --root, a tree with sys/src/cmd/6l")?;
+            let t = r9::optab::load(std::path::Path::new(root))?;
+            let text = t.rust(args.get("pin").unwrap_or("(not given)"));
+            match args.get("out") {
+                Some(out) => std::fs::write(out, text).map_err(|e| format!("{out}: {e}"))?,
+                None => print!("{text}"),
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        _ => unreachable!("run_optab takes objcheck and optab"),
+    }
+}
+
 /// Run `r9 objdiff`: list one object, or compare two.
 fn run_objdiff(args: &Args) -> Result<ExitCode, String> {
     let a = args
@@ -212,6 +245,7 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
             })
         }
         "objdiff" => run_objdiff(args),
+        "objcheck" | "optab" => run_optab(args),
         "census" => {
             let path = args
                 .target
