@@ -1,0 +1,601 @@
+# Written by r9 demands. Do not edit.
+objtype = "amd64"
+rucc = "/tmp/r9rucc/demands/rucc --target=x86_64-unknown-linux-gnu -fsyntax-only -nostdinc -w -std=gnu11"
+replayed = 3009
+clean = 1031
+crashed = 0
+skipped = 1312
+
+[[demand]]
+rank = 1
+code = "E0554"
+message = "flexible array member in a struct with no named members"
+units = 1057
+examples = ["/sys/include/bio.h:50:8"]
+
+[[demand]]
+rank = 2
+code = "E0521"
+message = "implicit declaration of function '_'"
+units = 317
+examples = ["/sys/src/lib9p/parse.c:77:2", "/sys/src/libauth/auth_challenge.c:16:2", "/sys/src/libauth/auth_getuserpasswd.c:46:2"]
+names = ["SET (178)", "USED (135)", "strcasecmp (4)"]
+
+[[demand]]
+rank = 3
+code = "E0586"
+message = "conflicting types for '_'; have '_'"
+units = 155
+examples = ["/sys/src/libdraw/stringbg.c:12:1", "/sys/include/stdio.h:113:6", "/sys/src/libstdio/Stdio.h:103:6"]
+names = ["perror void(const char *) (145)", "s8int char (6)", "nfs3Errstr void(enum <anonymous>) (1)", "nmi int (1)", "pic unsigned char[] (1)"]
+
+[[demand]]
+rank = 4
+code = "E0502"
+message = "'_' has no member named '_'"
+units = 92
+examples = ["/sys/src/lib9p/file.c:65:7", "/sys/src/lib9p/uid.c:16:6", "/sys/src/libaml/aml.c:211:11"]
+names = ["struct File nc (14)", "struct Serial Serialops (4)", "struct Dentry path (2)", "struct ECpriv x (2)", "struct File name (2)"]
+
+[[demand]]
+rank = 5
+code = "E0512"
+message = "passing argument 1 of '_' from incompatible pointer type"
+units = 52
+examples = ["/sys/src/lib9p/intmap.c:91:8", "/sys/src/lib9p/queue.c:24:9", "/sys/src/lib9p/srv.c:116:9"]
+names = ["incref (15)", "qlock (15)", "lock (8)", "bufread (3)", "canqlock (1)"]
+
+[[demand]]
+rank = 6
+code = "E0341"
+message = "`y.tab.h` file not found"
+units = 47
+examples = ["/sys/src/cmd/1a/lex.c:4:1", "/sys/src/cmd/cc/lex.c:2:1", "/sys/src/cmd/cc/dpchk.c:2:1"]
+
+[[demand]]
+rank = 7
+code = "E0341"
+message = "`protos.h` file not found"
+units = 37
+examples = ["/sys/src/cmd/ip/snoopy/main.c:12:1", "/sys/src/cmd/ip/snoopy/aoe.c:5:1", "/sys/src/cmd/ip/snoopy/aoeata.c:5:1"]
+
+[[demand]]
+rank = 8
+code = "E0545"
+message = "redefinition of parameter '_'"
+units = 32
+examples = ["/sys/src/cmd/mothra/libpanel/panel.h:148:54", "/sys/src/cmd/mothra/libpanel/./panel.h:148:54"]
+names = ["pl (32)"]
+
+[[demand]]
+rank = 9
+code = ""
+message = "y.tab.c: No such file or directory (os error 2)"
+units = 24
+examples = ["/sys/src/cmd/1a/rucc", "/sys/src/cmd/cc/rucc", "/sys/src/cmd/2a/rucc"]
+
+[[demand]]
+rank = 10
+code = "E0341"
+message = "`/power/include/ureg.h` file not found"
+units = 13
+examples = ["/sys/src/libmach/q.c:11:1", "/sys/src/cmd/qi/power.h:11:1"]
+
+[[demand]]
+rank = 11
+code = "E0526"
+message = "type defaults to '_' in declaration of '_'"
+units = 13
+examples = ["/sys/src/cmd/time.c:75:9", "/sys/src/cmd/cifs/cifs.c:405:1", "/sys/src/cmd/map/libmap/albers.c:10:8"]
+names = ["int i (3)", "int first (2)", "int CIFStreeconnect (1)", "int Xbonne (1)", "int Xlune (1)"]
+
+[[demand]]
+rank = 12
+code = "E0341"
+message = "`/mips/include/ureg.h` file not found"
+units = 12
+examples = ["/sys/src/libmach/v.c:10:1", "/sys/src/cmd/vi/mips.h:4:1"]
+
+[[demand]]
+rank = 13
+code = ""
+message = "enam.c: No such file or directory (os error 2)"
+units = 11
+examples = ["/sys/src/cmd/1c/rucc", "/sys/src/cmd/2c/rucc", "/sys/src/cmd/5c/rucc"]
+
+[[demand]]
+rank = 14
+code = "E0341"
+message = "`/sparc/include/ureg.h` file not found"
+units = 11
+examples = ["/sys/src/libmach/k.c:10:1", "/sys/src/cmd/ki/sparc.h:11:1"]
+
+[[demand]]
+rank = 15
+code = "E0341"
+message = "`../smtp/rfc822.tab.h` file not found"
+units = 7
+examples = ["/sys/src/cmd/upas/ml/dat.h:3:1", "/sys/src/cmd/upas/send/message.c:5:1"]
+
+[[demand]]
+rank = 16
+code = "E0512"
+message = "passing argument 2 of '_' from incompatible pointer type"
+units = 6
+examples = ["/sys/src/libdraw/getrect.c:25:25", "/sys/src/libdraw/menuhit.c:24:25", "/sys/src/libthread/channel.c:139:17"]
+names = ["avllookup (2)", "dlist2kv (1)", "enqueue (1)", "gengetrect (1)", "genmenuhit (1)"]
+
+[[demand]]
+rank = 17
+code = ""
+message = "empty character constant"
+units = 5
+examples = ["/sys/src/cmd/abaco/page.c:771:11", "/sys/src/cmd/dict/robert.c:31:50", "/sys/src/cmd/dossrv/dossubs.c:60:9"]
+
+[[demand]]
+rank = 18
+code = "E0341"
+message = "`/386/include/ureg.h` file not found"
+units = 4
+examples = ["/sys/src/libmach/8.c:10:1", "/sys/src/cmd/aux/vga/vesa.c:4:1", "/sys/src/cmd/aux/realemu/main.c:12:1"]
+
+[[demand]]
+rank = 19
+code = "E0512"
+message = "passing argument 4 of '_' from incompatible pointer type"
+units = 4
+examples = ["/sys/src/libcomplete/complete.c:136:55", "/sys/src/libdraw/enter.c:26:33", "/sys/src/cmd/ext4srv/ext4_dir_idx.c:910:8"]
+names = ["qsort (3)", "genenter (1)"]
+
+[[demand]]
+rank = 20
+code = ""
+message = "rfc822.tab.c: No such file or directory (os error 2)"
+units = 3
+examples = ["/sys/src/cmd/upas/smtp/rucc"]
+
+[[demand]]
+rank = 21
+code = "E0400"
+message = "expected `=`, found an integer constant"
+units = 3
+examples = ["/sys/src/cmd/ptrap.c:29:22", "/sys/src/cmd/vmx/io.c:420:15", "/sys/src/cmd/vmx/vga.c:23:5"]
+
+[[demand]]
+rank = 22
+code = "E0512"
+message = "assignment to '_' from incompatible pointer type '_'"
+units = 3
+examples = ["/sys/src/libthread/main.c:27:2", "/sys/src/cmd/samterm/io.c:106:2", "/sys/src/cmd/vnc/compat.c:66:2"]
+names = ["struct Proc ** void ** (2)", "struct Mouse * struct Mousectl * (1)"]
+
+[[demand]]
+rank = 23
+code = ""
+message = "../2c/enam.c: No such file or directory (os error 2)"
+units = 2
+examples = ["/sys/src/cmd/1l/rucc", "/sys/src/cmd/2l/rucc"]
+
+[[demand]]
+rank = 24
+code = ""
+message = "../5c/enam.c: No such file or directory (os error 2)"
+units = 2
+examples = ["/sys/src/cmd/5l/rucc", "/sys/src/cmd/tl/rucc"]
+
+[[demand]]
+rank = 25
+code = ""
+message = "invalid suffix on integer constant"
+units = 2
+examples = ["/sys/src/libc/port/pool.c:99:18", "/sys/src/cmd/aux/mswordstrings.c:66:24"]
+
+[[demand]]
+rank = 26
+code = "E0341"
+message = "`/arm/include/ureg.h` file not found"
+units = 2
+examples = ["/sys/src/libmach/t.c:10:1", "/sys/src/libmach/5.c:10:1"]
+
+[[demand]]
+rank = 27
+code = "E0341"
+message = "`/sys/src/libc/9syscall/sys.h` file not found"
+units = 2
+examples = ["/sys/src/cmd/5e/sys.c:6:1", "/sys/src/cmd/5i/syscall.c:14:1"]
+
+[[demand]]
+rank = 28
+code = "E0341"
+message = "`/sys/src/libthread/threadimpl.h` file not found"
+units = 2
+examples = ["/sys/src/cmd/execnet/note.c:6:1", "/sys/src/cmd/venti/srv/hproc.c:5:1"]
+
+[[demand]]
+rank = 29
+code = "E0401"
+message = "expected an identifier, found `,`"
+units = 2
+examples = ["/sys/src/cmd/nusb/ether/asix.c:103:40", "/sys/src/cmd/nusb/serial/prolific.c:164:54"]
+
+[[demand]]
+rank = 30
+code = "E0512"
+message = "passing argument 3 of '_' from incompatible pointer type"
+units = 2
+examples = ["/sys/src/cmd/acme/fsys.c:153:22", "/sys/src/cmd/rio/fsys.c:179:22"]
+names = ["convM2S (2)"]
+
+[[demand]]
+rank = 31
+code = "E0638"
+message = "cannot initialize array of '_' from a string literal with type array of '_'"
+units = 2
+examples = ["/sys/src/cmd/audio/libtags/437.c:4:13", "/sys/src/cmd/sam/plan9.c:3:6"]
+names = ["unsigned int int (2)"]
+
+[[demand]]
+rank = 32
+code = ""
+message = "../6c/enam.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/6l/rucc"]
+
+[[demand]]
+rank = 33
+code = ""
+message = "../7c/enam.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/7l/rucc"]
+
+[[demand]]
+rank = 34
+code = ""
+message = "../8c/enam.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/8l/rucc"]
+
+[[demand]]
+rank = 35
+code = ""
+message = "../9c/enam.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/9l/rucc"]
+
+[[demand]]
+rank = 36
+code = ""
+message = "../kc/enam.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/kl/rucc"]
+
+[[demand]]
+rank = 37
+code = ""
+message = "../qc/enam.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/ql/rucc"]
+
+[[demand]]
+rank = 38
+code = ""
+message = "../vc/enam.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/vl/rucc"]
+
+[[demand]]
+rank = 39
+code = ""
+message = "awkgram.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/awk/rucc"]
+
+[[demand]]
+rank = 40
+code = ""
+message = "bc.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/rucc"]
+
+[[demand]]
+rank = 41
+code = ""
+message = "cnam.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/7l/rucc"]
+
+[[demand]]
+rank = 42
+code = ""
+message = "ecdsa.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/auth/factotum/rucc"]
+
+[[demand]]
+rank = 43
+code = ""
+message = "jacobian.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/libsec/port/rucc"]
+
+[[demand]]
+rank = 44
+code = ""
+message = "mpc.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/rucc"]
+
+[[demand]]
+rank = 45
+code = ""
+message = "news.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/rucc"]
+
+[[demand]]
+rank = 46
+code = ""
+message = "pc.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/rucc"]
+
+[[demand]]
+rank = 47
+code = ""
+message = "proctab.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/awk/rucc"]
+
+[[demand]]
+rank = 48
+code = ""
+message = "protos.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/ip/snoopy/rucc"]
+
+[[demand]]
+rank = 49
+code = ""
+message = "scsierrs.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/nusb/disk/rucc"]
+
+[[demand]]
+rank = 50
+code = ""
+message = "secp256k1.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/libsec/port/rucc"]
+
+[[demand]]
+rank = 51
+code = ""
+message = "secp256r1.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/libsec/port/rucc"]
+
+[[demand]]
+rank = 52
+code = ""
+message = "secp384r1.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/libsec/port/rucc"]
+
+[[demand]]
+rank = 53
+code = ""
+message = "smtpd.tab.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/upas/smtp/rucc"]
+
+[[demand]]
+rank = 54
+code = ""
+message = "units.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/rucc"]
+
+[[demand]]
+rank = 55
+code = ""
+message = "vcrop.c: No such file or directory (os error 2)"
+units = 1
+examples = ["/sys/src/cmd/rucc"]
+
+[[demand]]
+rank = 56
+code = "E0341"
+message = "`/68020/include/ureg.h` file not found"
+units = 1
+examples = ["/sys/src/libmach/2.c:5:1"]
+
+[[demand]]
+rank = 57
+code = "E0341"
+message = "`/amd64/include/ureg.h` file not found"
+units = 1
+examples = ["/sys/src/libmach/6.c:7:1"]
+
+[[demand]]
+rank = 58
+code = "E0341"
+message = "`/arm64/include/ureg.h` file not found"
+units = 1
+examples = ["/sys/src/libmach/7.c:9:1"]
+
+[[demand]]
+rank = 59
+code = "E0341"
+message = "`/power64/include/ureg.h` file not found"
+units = 1
+examples = ["/sys/src/libmach/9.c:8:1"]
+
+[[demand]]
+rank = 60
+code = "E0341"
+message = "`/sparc64/include/ureg.h` file not found"
+units = 1
+examples = ["/sys/src/libmach/u.c:7:1"]
+
+[[demand]]
+rank = 61
+code = "E0341"
+message = "`/sys/src/cmd/8c/8.out.h` file not found"
+units = 1
+examples = ["/sys/src/cmd/aux/8prefix.c:10:1"]
+
+[[demand]]
+rank = 62
+code = "E0341"
+message = "`/sys/src/cmd/scuzz/scsireq.h` file not found"
+units = 1
+examples = ["/sys/src/cmd/disk/smart/scsi.c:5:1"]
+
+[[demand]]
+rank = 63
+code = "E0341"
+message = "`alias.h` file not found"
+units = 1
+examples = ["/sys/src/cmd/tcs/tcs.c:155:1"]
+
+[[demand]]
+rank = 64
+code = "E0341"
+message = "`andrew.bits` file not found"
+units = 1
+examples = ["/sys/src/games/blabs/blabs.c:65:1"]
+
+[[demand]]
+rank = 65
+code = "E0341"
+message = "`latin1.h` file not found"
+units = 1
+examples = ["/sys/src/cmd/aux/kbdfs/kbdfs.c:795:1"]
+
+[[demand]]
+rank = 66
+code = "E0341"
+message = "`msqrt.mpc` file not found"
+units = 1
+examples = ["/sys/src/libauthsrv/authpak.c:7:1"]
+
+[[demand]]
+rank = 67
+code = "E0341"
+message = "`rfc822.tab.h` file not found"
+units = 1
+examples = ["/sys/src/cmd/upas/smtp/smtpd.c:10:1"]
+
+[[demand]]
+rank = 68
+code = "E0341"
+message = "`rgbv.h` file not found"
+units = 1
+examples = ["/sys/src/cmd/jpg/torgbv.c:7:1"]
+
+[[demand]]
+rank = 69
+code = "E0341"
+message = "`runebreakdata` file not found"
+units = 1
+examples = ["/sys/src/libc/ucd/runebreak.c:4:1"]
+
+[[demand]]
+rank = 70
+code = "E0341"
+message = "`runeistypedata` file not found"
+units = 1
+examples = ["/sys/src/libc/ucd/runeistype.c:4:1"]
+
+[[demand]]
+rank = 71
+code = "E0341"
+message = "`runenormdata` file not found"
+units = 1
+examples = ["/sys/src/libc/ucd/runenorm.c:4:1"]
+
+[[demand]]
+rank = 72
+code = "E0341"
+message = "`runetotypedata` file not found"
+units = 1
+examples = ["/sys/src/libc/ucd/runetotype.c:4:1"]
+
+[[demand]]
+rank = 73
+code = "E0341"
+message = "`tab.h` file not found"
+units = 1
+examples = ["/sys/src/cmd/syscall/syscall.c:34:1"]
+
+[[demand]]
+rank = 74
+code = "E0341"
+message = "`wctype.h` file not found"
+units = 1
+examples = ["/sys/src/cmd/aux/antiword/chartrans.c:13:1"]
+
+[[demand]]
+rank = 75
+code = "E0400"
+message = "expected `=`, found `menustr`"
+units = 1
+examples = ["/sys/src/games/galaxy/galaxy.c:82:8"]
+
+[[demand]]
+rank = 76
+code = "E0400"
+message = "expected `=`, found `srvread`"
+units = 1
+examples = ["/sys/src/cmd/vmx/9p.c:120:8"]
+
+[[demand]]
+rank = 77
+code = "E0400"
+message = "expected `=`, found `sshfsstart`"
+units = 1
+examples = ["/sys/src/cmd/sshfs.c:1241:9"]
+
+[[demand]]
+rank = 78
+code = "E0400"
+message = "expected `=`, found `{`"
+units = 1
+examples = ["/sys/src/cmd/ip/wol.c:55:10"]
+
+[[demand]]
+rank = 79
+code = "E0401"
+message = "expected a name, found `asm`"
+units = 1
+examples = ["/sys/src/games/mix/repl.c:103:1"]
+
+[[demand]]
+rank = 80
+code = "E0403"
+message = "expected an expression, found `=`"
+units = 1
+examples = ["/sys/src/games/life.c:247:3"]
+
+[[demand]]
+rank = 81
+code = "E0512"
+message = "passing argument 5 from incompatible pointer type"
+units = 1
+examples = ["/sys/src/cmd/vnc/dev.c:233:34"]
+
+[[demand]]
+rank = 82
+code = "E0512"
+message = "returning '_' from a function with incompatible return type '_'"
+units = 1
+examples = ["/sys/src/libmp/port/mpfield.c:20:9"]
+names = ["struct Mfield * struct mpint * (1)"]
+
+[[demand]]
+rank = 83
+code = "E0564"
+message = "enumerator value for '_' is not an integer constant"
+units = 1
+examples = ["/sys/src/libdraw/mkwarp.c:11:7"]
+names = ["ε (1)"]

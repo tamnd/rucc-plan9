@@ -1,0 +1,56 @@
+# Written by r9 demands. Do not edit.
+objtype = "amd64"
+rucc = "/tmp/r9rucc/demands/rucc --driver=kencc --target=x86_64-plan9"
+replayed = 2941
+clean = 2929
+crashed = 0
+skipped = 1345
+
+[[demand]]
+rank = 1
+code = "E0341"
+message = "`rgbv.h` file not found"
+units = 6
+examples = ["/sys/src/cmd/jpg/torgbv.c:7:1"]
+
+[[demand]]
+rank = 2
+code = "E0341"
+message = "`andrew.bits` file not found"
+units = 1
+examples = ["/sys/src/games/blabs/blabs.c:65:1"]
+
+[[demand]]
+rank = 3
+code = "E0341"
+message = "`msqrt.mpc` file not found"
+units = 1
+examples = ["/sys/src/libauthsrv/authpak.c:7:1"]
+
+[[demand]]
+rank = 4
+code = "E0341"
+message = "`runebreakdata` file not found"
+units = 1
+examples = ["/sys/src/libc/ucd/runebreak.c:4:1"]
+
+[[demand]]
+rank = 5
+code = "E0341"
+message = "`runeistypedata` file not found"
+units = 1
+examples = ["/sys/src/libc/ucd/runeistype.c:4:1"]
+
+[[demand]]
+rank = 6
+code = "E0341"
+message = "`runenormdata` file not found"
+units = 1
+examples = ["/sys/src/libc/ucd/runenorm.c:4:1"]
+
+[[demand]]
+rank = 7
+code = "E0341"
+message = "`runetotypedata` file not found"
+units = 1
+examples = ["/sys/src/libc/ucd/runetotype.c:4:1"]
