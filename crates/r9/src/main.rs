@@ -75,14 +75,13 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
-        "build" | "mix" | "diffrun" | "fixedpoint" => {
+        "build" | "mix" | "diffrun" | "fixedpoint" | "2x2" => {
             let repo = Repo::find()?;
-            let (passed, report) = if args.command == "diffrun" {
-                r9::diffrun::command(&repo, args)?
-            } else if args.command == "fixedpoint" {
-                r9::fixedpoint::command(&repo, args)?
-            } else {
-                r9::build::command(&repo, args)?
+            let (passed, report) = match args.command.as_str() {
+                "diffrun" => r9::diffrun::command(&repo, args)?,
+                "fixedpoint" => r9::fixedpoint::command(&repo, args)?,
+                "2x2" => r9::twobytwo::command(&repo, args)?,
+                _ => r9::build::command(&repo, args)?,
             };
             print!("{report}");
             Ok(if passed {
