@@ -139,6 +139,31 @@ fn locate(args: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Run `r9 objdiff`: list one object, or compare two.
+fn run_objdiff(args: &Args) -> Result<ExitCode, String> {
+    let a = args
+        .target
+        .as_deref()
+        .ok_or("give a .6 or .7 file, or an archive of them")?;
+    let read = |p: &str| std::fs::read(p).map_err(|e| format!("{p}: {e}"));
+    let bytes = read(a)?;
+    let Some(b) = args.get("with") else {
+        print!("{}", r9::obj::listing(a, &bytes)?);
+        return Ok(ExitCode::SUCCESS);
+    };
+    let context = args
+        .get("context")
+        .map_or(Ok(3), str::parse)
+        .map_err(|e| format!("--context: {e}"))?;
+    let (report, same) = r9::obj::diff_files(a, &bytes, b, &read(b)?, context)?;
+    print!("{report}");
+    Ok(if same {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
+
 /// Run a command that reads the compile records of a build.
 fn run_records(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
@@ -186,6 +211,7 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
+        "objdiff" => run_objdiff(args),
         "census" => {
             let path = args
                 .target
