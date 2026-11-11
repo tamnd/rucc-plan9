@@ -2,23 +2,23 @@
   "flaky": 2,
   "flaky_results": {
     "cmd/git/test/rebase.out": [
-      "value bb8096f5bca54e4bebb0c1e6c6294cab73602d43",
-      "value 146ccc10b7d01ee6493035687cbe3af5e326972a",
-      "value 4ae326f97fda5a53da52b25ce46c9e4213d000b6"
+      "value 0d3a699080ee8ea122727c417f0006cc960cbcf8",
+      "value 4d0d0ba648dea6663aff1e0d28397c560d61c7a7",
+      "value d710e23b12c7b891988a8a6a0286b6f604731c6a"
     ],
     "libmemdraw/test/drawtest.out": [
-      "value 3b2b2e521c8031f624f2eee2947b618da034f2eb",
-      "value 59c8e9ecb16c96c3a581d3444e8ea2de95ccbaf5",
-      "value 1c4134fa4d08df6460861e7e1b6e5d945d81c8e5"
+      "value 03e0abc1da2fd4da6287bf268b05a0430f134c42",
+      "value a282592110385c850c8763bd295d8159193ca20d",
+      "value c410a886d3406ba8198a8acfc4ae779a0f52d4b7"
     ]
   },
-  "graded": 85,
+  "graded": 87,
   "graded_fail": 0,
   "objtype": "arm64",
   "pin": "2859ae04e800",
   "results": {
     "cmd/awk/test/awk": "ok",
-    "cmd/awk/test/awk.out": "value 8eac1b33e769dfa126382a44bd78490e0fc1a430",
+    "cmd/awk/test/awk.out": "value 8cfbdc056010becc3745238bb3503fcbde10ccf8",
     "cmd/cpp/test/edges": "ok",
     "cmd/cpp/test/edges.out": "value 351361b692f85bbc36e0beace4fd94019d902302",
     "cmd/diff/test/diff": "ok",
@@ -92,6 +92,8 @@
     "libsec/test/hmac.out": "value 07c0c082c31fa0fc3b4760f85b0be2fba293e437",
     "libsec/test/md4": "ok",
     "libsec/test/md4.out": "value b00023a119a53e06b066324b21b6119391939c78",
+    "libsec/test/mlkem": "ok",
+    "libsec/test/mlkem.out": "value 9bf4a296849868ce4f82585ee29838dbd0f36ff7",
     "libsec/test/prime": "ok",
     "libsec/test/prime.out": "value 195e1de4947bdbef68110c067a0c5d849d0b3881",
     "libsec/test/rsa": "ok",
@@ -106,21 +108,21 @@
   "runs": [
     {
       "passed": true,
-      "seconds": 53.5,
-      "sha256": "38a97f5ab5b1564de6163517e6cb2f896b0a71f507cfe7fd96e686ab546b147d",
-      "tests": 87
+      "seconds": 162.1,
+      "sha256": "6905d9539465860c27638c1905b13cff95056a50be10eb2e89b2af0fbcfce952",
+      "tests": 89
     },
     {
       "passed": true,
-      "seconds": 81.5,
-      "sha256": "928c801a79fa5d64c66f559dd7f6784a4b3469480115eb54bb914360c229136f",
-      "tests": 87
+      "seconds": 127.0,
+      "sha256": "b760c2f82b5a58e20a6d411608e5a4095d40fda351b780c825c4e3d6e2d04d13",
+      "tests": 89
     },
     {
       "passed": true,
-      "seconds": 52.4,
-      "sha256": "7ebc0b41c5ca4249c84446e9b4ed3078a5be8460908449538b8e2d31555c679d",
-      "tests": 87
+      "seconds": 119.0,
+      "sha256": "0bdfb729e65d4725f29b5b1dc0391f196e25237f445735740ba2b5738cdd007a",
+      "tests": 89
     }
   ],
   "suite": "test"
