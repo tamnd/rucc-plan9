@@ -1,0 +1,247 @@
+#!/bin/rc
+# r9-boot: the smoke suite of plan 09.5. It tests the kernel paths that every program uses. Each
+# case prints "ok name" or "FAIL name: reason" on the console, and the last line is a count. The
+# status is empty only when each case passed. The suite is the same for G and for R, so a failure
+# on G is a fault of the rig.
+#
+# The programs in smoke/c test what rc cannot reach. r9-boot builds them first with the compiler
+# of the image, in a directory in /tmp.
+#
+# usage: r9-boot [dir]
+# dir holds smoke/c, and is the directory of this script by default.
+
+rfork e
+here=`{basename -d $0}
+if(! ~ $#* 0)
+	here=$1
+switch($cputype){
+case amd64
+	O=6
+case arm64
+	O=7
+case 386
+	O=8
+case arm
+	O=5
+case *
+	echo FAIL setup: no compiler for $cputype
+	exit setup
+}
+oks=()
+fails=()
+t=/tmp/r9t
+log=/tmp/r9smoke.log
+
+# t name command...: run the command, and give its result as one line.
+fn t {
+	name=$1
+	shift
+	$* >$log >[2=1]
+	s=$status
+	if(~ $s ''){
+		echo ok $name
+		oks=($oks $name)
+	}
+	if not {
+		echo FAIL $name: $s `{sed 1q $log}
+		fails=($fails $name)
+	}
+}
+
+# nonempty file: whether the file gives some bytes. A file of a device has the size 0.
+fn nonempty {
+	test `{cat $1 | wc -c} -gt 0
+}
+
+# Set up the directories and the programs.
+rm -rf $t
+mkdir -p $t/a $t/b $t/mnt $t/c
+echo r9 >$t/a/e
+echo r9 >$t/b/f
+echo a >$t/a/same
+echo b >$t/b/same
+cp $here/smoke/c/*.c $t/c/
+fn build {
+	cd $t/c
+	bad=()
+	for(f in *.c){
+		b=`{basename $f .c}
+		$O^c -FTVw $f && $O^l -o $b $b.$O || bad=($bad $b)
+	}
+	~ $#bad 0
+}
+t cc build
+cd $t/c
+
+# The process: rfork with each flag (rfork.c), and exec of a 2 MB program.
+for(f in n N e E s f F m r w)
+	t rfork-$f ./rfork $f
+fn bigexec {
+	x=`{./big}
+	~ $"x 'big 2097152' && test `{ls -l big | awk '{print $6}'} -gt 2000000
+}
+t exec-2mb bigexec
+
+# Memory and synchronization.
+t segattach ./seg
+t rendezvous ./rendez
+t semacquire ./sem
+t tsemacquire ./sem -t
+
+# Notes.
+t note ./note
+t alarm ./note -a
+fn notekill {
+	sleep 100 &
+	p=$apid
+	echo kill >/proc/$p/note
+	wait $p
+	! test -e /proc/$p/status
+}
+t note-kill notekill
+fn ctlkill {
+	sleep 100 &
+	p=$apid
+	echo kill >/proc/$p/ctl
+	wait $p
+	! test -e /proc/$p/status
+}
+t ctl-kill ctlkill
+fn killcmd {
+	sleep 100 &
+	p=$apid
+	kill sleep | grep -s $p && kill sleep | rc
+	wait $p
+	! test -e /proc/$p/status
+}
+t kill killcmd
+
+# Pipes.
+fn pipe1 {
+	x=`{echo r9 pipe | cat | tr a-z A-Z}
+	~ $"x 'R9 PIPE'
+}
+t pipe pipe1
+fn pipebig {
+	~ `{seq 1 100000 | wc -l} 100000
+}
+t pipe-100k pipebig
+fn pipedev {
+	bind '#|' $t/mnt && echo r9 >$t/mnt/data && ~ `{read <$t/mnt/data1} r9
+	s=$status
+	unmount $t/mnt
+	~ $s ''
+}
+t pipe-device pipedev
+
+# Name spaces: a 9P server, bind, srv and exportfs.
+fn ramfs1 {
+	ramfs -S r9ram && mount -c /srv/r9ram $t/mnt && echo r9 >$t/mnt/x && ~ `{cat $t/mnt/x} r9 && mkdir $t/mnt/d && rm $t/mnt/x
+	s=$status
+	unmount $t/mnt
+	rm -f /srv/r9ram
+	~ $s ''
+}
+t mount-ramfs ramfs1
+fn bindafter {
+	bind -a $t/b $t/a && test -e $t/a/e && test -e $t/a/f && ~ `{cat $t/a/same} a
+	s=$status
+	unmount $t/b $t/a
+	~ $s ''
+}
+t bind-after bindafter
+fn bindbefore {
+	bind -b $t/b $t/a && test -e $t/a/e && test -e $t/a/f && ~ `{cat $t/a/same} b
+	s=$status
+	unmount $t/b $t/a
+	~ $s ''
+}
+t bind-before bindbefore
+fn bindcreate {
+	bind -ac $t/b $t/a && echo r9 >$t/a/g && test -e $t/b/g
+	s=$status
+	unmount $t/b $t/a
+	rm -f $t/b/g
+	~ $s ''
+}
+t bind-create bindcreate
+fn bindrepl {
+	bind $t/b $t/a && ! test -e $t/a/e && test -e $t/a/f
+	s=$status
+	unmount $t/a
+	~ $s ''
+}
+t bind-replace bindrepl
+fn srvpost {
+	echo 0 >/srv/r9post <$t/b/f && ~ `{cat /srv/r9post} r9
+	s=$status
+	rm -f /srv/r9post
+	~ $s ''
+}
+t srv srvpost
+fn srvfs1 {
+	srvfs r9srv $t/b && mount /srv/r9srv $t/mnt && ~ `{cat $t/mnt/f} r9
+	s=$status
+	unmount $t/mnt
+	rm -f /srv/r9srv
+	~ $s ''
+}
+t exportfs srvfs1
+t ns-file grep -s 'bind|mount' /proc/$pid/ns
+
+# The network on the loopback.
+fn loopback {
+	grep -s '127\.0\.0\.1' /net/ipselftab || ip/ipconfig loopback /dev/null 127.1
+	grep -s '127\.0\.0\.1' /net/ipselftab
+}
+t loopback loopback
+t dial ./dial
+
+# The /proc files and ps.
+t proc-status grep -s rc /proc/$pid/status
+t proc-args nonempty /proc/$pid/args
+t proc-segment grep -s Text /proc/$pid/segment
+t proc-fd nonempty /proc/$pid/fd
+t proc-noteid nonempty /proc/$pid/noteid
+t ps-rc grep -s rc <{ps}
+t ps-a grep -s r9-boot <{ps -a}
+
+# Time.
+fn sleep2 {
+	a=`{date -n}
+	sleep 2
+	b=`{date -n}
+	echo $a $b | awk '{exit !($2 - $1 >= 1 && $2 - $1 < 10)}'
+}
+t sleep sleep2
+fn ticks {
+	a=`{cat /dev/time}
+	sleep 1
+	b=`{cat /dev/time}
+	echo $a(2) $b(2) $a(3) $b(3) $a(4) | awk '{exit !($2 > $1 && $4 > $3 && $5 > 0)}'
+}
+t time-ticks ticks
+# bintime gives the same bytes at each offset, so cat does not stop on it.
+fn bintime {
+	test `{dd -if '#c/bintime' -bs 24 -count 1 >[2]/dev/null | wc -c} -eq 24
+}
+t bintime bintime
+
+# The devices that the programs read.
+t sysname nonempty /dev/sysname
+t osversion nonempty /dev/osversion
+t user nonempty /dev/user
+fn cpu {
+	~ $cputype amd64 arm64 386 arm
+}
+t cputype cpu
+t sysstat nonempty /dev/sysstat
+t random test `{dd -if /dev/random -bs 16 -count 1 >[2]/dev/null | wc -c} -eq 16
+t kmesg nonempty /dev/kmesg
+t env-device test -e '#e'
+t srv-device test -e '#s'
+
+echo smoke: $#oks ok, $#fails FAIL
+if(! ~ $#fails 0)
+	exit $"fails
+exit ''

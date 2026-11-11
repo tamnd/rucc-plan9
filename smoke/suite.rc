@@ -1,0 +1,5 @@
+# The smoke suite of plan 09.5, run by r9 boot with --in guest. guest/r9-boot builds the
+# programs of guest/smoke/c with the compiler of the image and runs each case. Each case prints
+# "ok name" or "FAIL name: reason", and the step fails when a case fails.
+mkdir -p /tmp/r9in && cd /tmp/r9in && tar xf $r9in
+rc /tmp/r9in/r9-boot /tmp/r9in
