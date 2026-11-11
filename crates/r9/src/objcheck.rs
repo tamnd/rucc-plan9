@@ -1,4 +1,5 @@
 //! `r9 objcheck`: check the instructions of a `.6` object against the tables of `6l` (plan 07.6).
+//! The check of a `.7` object against the table of `7l` is in `objcheck7`.
 //!
 //! `doasm` in `6l/span.c` gives each operand a class with `oclass`, and looks for a pair of the
 //! `ytab` of the opcode whose classes cover the two classes. When there is none, it tries
@@ -295,37 +296,45 @@ impl Checker {
     }
 }
 
-/// Check a file: a `.6` object, or an archive of them. Return the report and the number of
-/// instructions that fail.
+/// Check a file: a `.6` or `.7` object, or an archive of them. A `.6` object goes against the
+/// tables of `6l`, and a `.7` object against the table of `7l`. Return the report and the number
+/// of instructions that fail.
 pub fn file(c: &Checker, name: &str, bytes: &[u8]) -> Result<(String, usize), String> {
     let mut objects = Vec::new();
     if let Some(members) = obj::archive(bytes)? {
         let arch_of = obj::member_arch(&members);
         for m in members {
-            if arch_of(&m.name) != Some(Arch::Amd64) {
+            let Some(arch) = arch_of(&m.name) else {
                 continue;
-            }
-            let o = obj::decode(Arch::Amd64, &m.data)
-                .map_err(|e| format!("{name}({}): {e}", m.name))?;
+            };
+            let o = obj::decode(arch, &m.data).map_err(|e| format!("{name}({}): {e}", m.name))?;
             objects.push((format!("{name}({})", m.name), o));
         }
     } else {
-        if Arch::of_name(name) != Some(Arch::Amd64) {
-            return Err(format!(
-                "{name}: give a .6 file or an archive of them; arm64 comes at P4"
-            ));
-        }
+        let arch = Arch::of_name(name)
+            .ok_or_else(|| format!("{name}: give a .6 or .7 file, or an archive of them"))?;
         objects.push((
             name.to_string(),
-            obj::decode(Arch::Amd64, bytes).map_err(|e| format!("{name}: {e}"))?,
+            obj::decode(arch, bytes).map_err(|e| format!("{name}: {e}"))?,
         ));
     }
     let mut s = String::new();
     let mut bad = 0;
     let mut instructions = 0;
+    let (mut amd64, mut arm64) = (false, false);
     for (n, o) in &objects {
         instructions += o.progs.len();
-        for b in c.object(o) {
+        let found = match o.arch {
+            Arch::Amd64 => {
+                amd64 = true;
+                c.object(o)
+            }
+            Arch::Arm64 => {
+                arm64 = true;
+                crate::objcheck7::CHECKER.object(o)
+            }
+        };
+        for b in found {
             bad += 1;
             let _ = writeln!(
                 s,
@@ -338,9 +347,14 @@ pub fn file(c: &Checker, name: &str, bytes: &[u8]) -> Result<(String, usize), St
             );
         }
     }
+    let linker = match (amd64, arm64) {
+        (true, true) => "6l or 7l",
+        (false, true) => "7l",
+        _ => "6l",
+    };
     let _ = writeln!(
         s,
-        "{name}: {} objects, {instructions} records, {bad} that 6l cannot encode",
+        "{name}: {} objects, {instructions} records, {bad} that {linker} cannot encode",
         objects.len()
     );
     Ok((s, bad))

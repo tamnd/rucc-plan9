@@ -355,8 +355,10 @@ usage:
       Check a .6 file, or each .6 member of an archive, against the instruction tables of 6l
       (plan 07.6). Each instruction gets the classes of its operands as oclass in 6l/span.c
       gives them, after the changes that 6l makes when it reads an object. An instruction that
-      no pair of its ytab or of ymovtab covers is the link error doasm: notfound. Print each
-      such instruction, and exit with failure when there is one.
+      no pair of its ytab or of ymovtab covers is the link error doasm: notfound. A .7 file,
+      or a .7 member, goes against the table of 7l in the same way: aclass in 7l/span.c gives
+      the classes, and a record that no entry of optab covers is the link error illegal
+      combination. Print each such instruction, and exit with failure when there is one.
   r9 ccd [--port N] [--rucc PATH] [--work DIR] [--file UNIT=R|G,...] [--mix FILE] [--default R|G]
       Serve the compiler slot of a guest (plan 05.4). r9-cc in the guest sends each call of 6c
       and 7c to port N on the host (5640 by default), as tcp!10.0.2.2!N, with the name space of

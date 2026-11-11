@@ -25,10 +25,13 @@ pub mod locate;
 pub mod mix;
 pub mod obj;
 pub mod objcheck;
+pub mod objcheck7;
 pub mod optab;
 pub mod optab7l;
 #[rustfmt::skip]
 pub mod optab6;
+#[rustfmt::skip]
+pub mod optab7;
 pub mod repo;
 pub mod rtt;
 pub mod sdiff;
