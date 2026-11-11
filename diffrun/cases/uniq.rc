@@ -1,4 +1,4 @@
 # program: uniq
 # uniq over the sorted words of the manual.
-cat /sys/man/1/* | tr -cs 'A-Za-z' '\n' | sort | uniq -c
-cat /sys/man/2/* | tr -cs 'A-Za-z' '\n' | sort | uniq -d
+cat /sys/man/1/* | tr -cs 'A-Za-z' '\012' | sort | uniq -c
+cat /sys/man/2/* | tr -cs 'A-Za-z' '\012' | sort | uniq -d

@@ -1,3 +1,3 @@
 # program: bc
 # bc on expressions of the inputs, to 500 digits.
-bc -l $in/bc.in
+bc -l $inputs/bc.in

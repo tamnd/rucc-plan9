@@ -1,13 +1,13 @@
 # program: git/fs
 # git/fs and git/query on a packed repository of the inputs.
-mkdir -p /tmp/r9diff/repo && dircp $in/git /tmp/r9diff/repo/.git
+mkdir -p /tmp/r9diff/repo/.git && dircp $inputs/git /tmp/r9diff/repo/.git && mkdir -p /tmp/r9diff/repo/.git/fs
 cd /tmp/r9diff/repo
 git/fs
 for(n in `{seq 0 39}) git/query front~$n
-cat /mnt/git/branch/heads/front/msg
+cat /tmp/r9diff/repo/.git/fs/branch/heads/front/msg
 for(c in `{git/query front front~10 front~20 front~39}){
-	cat /mnt/git/object/$c/msg
-	cd /mnt/git/object/$c/tree
+	cat /tmp/r9diff/repo/.git/fs/object/$c/msg
+	cd /tmp/r9diff/repo/.git/fs/object/$c/tree
 	for(f in `{walk -f . | sort}){
 		echo $f
 		cat $f

@@ -1,4 +1,4 @@
 # program: tbl
 # tbl on the pages of /sys/man/1 and on a table of the inputs.
 for(f in `{ls /sys/man/1 | sed 60q}) tbl /sys/man/1/$f
-tbl $in/tbl.ms
+tbl $inputs/tbl.ms

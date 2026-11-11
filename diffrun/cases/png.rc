@@ -1,6 +1,6 @@
 # program: png
 # png converts PNG files to Plan 9 images.
-png -9 $in/img.png
-png -9 $in/gray.png
-png -9 $in/alpha.png
-png -9t $in/img.png
+png -9 $inputs/img.png
+png -9 $inputs/gray.png
+png -9 $inputs/alpha.png
+png -9t $inputs/img.png

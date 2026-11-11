@@ -1,4 +1,4 @@
 # program: cpp
-# The APE cpp on sources of the tree.
-cd /sys/src/cmd/awk
+# The APE cpp on sources of the tree. These sources include no generated header.
+cd /sys/src/ape/lib/ap/gen
 for(f in *.c) cpp -D_POSIX_SOURCE -D_BSD_EXTENSION -I/sys/include/ape -I/$objtype/include/ape $f

@@ -1,5 +1,13 @@
 # program: topng
-# topng converts Plan 9 images to PNG files.
-png -9 $in/img.png | topng
-png -9 $in/alpha.png | topng
-jpg -9 $in/img.jpg | topng -g
+# topng converts Plan 9 images to PNG files. topng writes the time of the run in a tIME chunk
+# after the IHDR chunk, at bytes 33 to 51 of the file, so the case removes these bytes.
+fn notime {
+	dd -if $1 -bs 33 -count 1 >[2]/dev/null
+	dd -if $1 -bs 52 -skip 1 >[2]/dev/null
+}
+png -9 $inputs/img.png | topng >/tmp/r9diff/img.png
+notime /tmp/r9diff/img.png
+png -9 $inputs/alpha.png | topng >/tmp/r9diff/alpha.png
+notime /tmp/r9diff/alpha.png
+jpg -9 $inputs/img.jpg | topng -g 2.2 >/tmp/r9diff/jpg.png
+notime /tmp/r9diff/jpg.png
