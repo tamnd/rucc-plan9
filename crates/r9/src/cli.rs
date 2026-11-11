@@ -125,7 +125,9 @@ usage:
   r9 sets [--write] [--as-of TIME]
       Read what 9front publishes and expand sets.toml into pins. Print the pins, and say whether
       pins.toml has them. --write writes pins.toml. --as-of takes the pins at a UTC time, such as
-      2026-11-09T06:00:00Z.
+      2026-11-09T06:00:00Z. For the tree, --as-of uses the commit date that GitHub keeps, not
+      the time of the push. Thus a commit that 9front pushed after TIME with an older date can
+      be taken.
   r9 check
       Check sets.toml, pins.toml, rows.toml and machines.toml with no network. A hand edit of
       pins.toml fails here.
