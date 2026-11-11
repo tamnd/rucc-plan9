@@ -1,0 +1,6 @@
+# The check of plan 09.1 for one objtype that is not the objtype of the guest. Build the tree for
+# amd64 first, as the 9front FQA gives a cross build, and then the pc64 kernel. Run by r9 boot
+# with --in guest.
+mkdir -p /tmp/r9in && cd /tmp/r9in && tar xf $r9in
+cd /sys/src && objtype=amd64 mk install >/tmp/r9cross.log >[2=1]; grep -n 'error|rror:|not found|know how' /tmp/r9cross.log | sed 12q; ls /amd64/lib/*.a | wc -l; ls /amd64/bin | wc -l
+rc /tmp/r9in/r9-kernels pc64

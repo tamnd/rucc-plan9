@@ -1,0 +1,34 @@
+#!/bin/rc
+# r9-kernels: what mk kernels needs (plan 09.1). For each objtype, print the number of libraries
+# in /$objtype/lib. Then build each kernel of /sys/src/9 with mk, and print "ok kernel/NAME" or
+# "FAIL kernel/NAME: reason". The reason is the first lines of the log that name a missing file.
+# The kernels are built in place, and mk clean runs after each one.
+#
+# usage: r9-kernels [name...]
+
+rfork e
+for(o in 386 amd64 arm arm64 mips spim power)
+	echo libs $o `{ls /$o/lib/*.a >[2]/dev/null | wc -l}
+names=($*)
+if(~ $#names 0)
+	names=`{sed -n '/^ARCH=/,/^$/p' /sys/src/9/mkfile | grep -v '^ARCH|#|^$' | tr -d '\\	 '}
+oks=()
+fails=()
+for(k in $names){
+	cd /sys/src/9/$k
+	o=`{grep '^objtype=' mkfile | sed 's/objtype=//'}
+	mk >/tmp/r9k.log >[2=1]
+	s=$status
+	if(~ $s ''){
+		echo ok kernel/$k
+		oks=($oks $k)
+	}
+	if not {
+		echo FAIL kernel/$k: objtype $o: `{grep -i 'not found|cannot open|does not exist|undefined' /tmp/r9k.log | sed 3q}
+		echo log kernel/$k: `{tail -3 /tmp/r9k.log}
+		fails=($fails $k)
+	}
+	mk clean >/dev/null >[2=1]
+}
+echo r9-kernels: $#oks ok, $#fails FAIL
+exit ''
