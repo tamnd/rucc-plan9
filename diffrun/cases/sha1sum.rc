@@ -1,0 +1,6 @@
+# program: sha1sum
+# sha1sum with SHA-1, SHA-256 and SHA-512 over the manual.
+cd /sys/man/1
+sha1sum *
+sha1sum -2 256 *
+sha1sum -2 512 *

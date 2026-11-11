@@ -1,0 +1,4 @@
+# program: md5sum
+# md5sum over the manual.
+cd /sys/man/2
+md5sum *

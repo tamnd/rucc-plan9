@@ -1,0 +1,5 @@
+# program: awk
+# awk counts the words of the sources of rc and of the manual.
+cat /sys/src/cmd/rc/*.c /sys/man/1/* | awk -f $inputs/words.awk | sort -k1nr -k2 | sed 200q
+awk 'BEGIN { for(i = 1; i <= 2000; i++) s += sin(i) * exp(-i / 500); printf "%.12g %.12g\n", s, atan2(s, 3) }'
+awk -F: '{ n[$1]++ } END { for(k in n) print k, n[k] }' /adm/users | sort

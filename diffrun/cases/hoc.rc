@@ -1,0 +1,3 @@
+# program: hoc
+# hoc on expressions of the inputs.
+hoc $inputs/hoc.in

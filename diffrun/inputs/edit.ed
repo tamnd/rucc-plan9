@@ -1,0 +1,13 @@
+g/^#include/d
+1,$s/->/ ARROW /g
+/^Xasync/,/^}/d
+$a
+/* the end */
+.
+1i
+/* the start */
+.
+g/char \*/s//char* /g
+v/[a-z]/d
+w
+q

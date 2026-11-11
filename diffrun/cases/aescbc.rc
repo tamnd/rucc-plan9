@@ -1,0 +1,6 @@
+# program: auth/aescbc
+# aescbc encrypts a file and decrypts it again.
+cat /sys/man/1/* >/tmp/r9diff/clear
+echo -n secret-key-of-diffrun >/tmp/r9diff/key
+auth/aescbc -i -e </tmp/r9diff/clear >/tmp/r9diff/cipher <[3]/tmp/r9diff/key
+auth/aescbc -i -d </tmp/r9diff/cipher <[3]/tmp/r9diff/key

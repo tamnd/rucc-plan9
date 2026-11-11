@@ -1,0 +1,3 @@
+# program: audio/mp3dec
+# mp3dec decodes an MP3 file to PCM.
+audio/mp3dec <$inputs/tone.mp3

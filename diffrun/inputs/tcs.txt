@@ -1,0 +1,8 @@
+ASCII: The quick brown fox jumps over the lazy dog. 0123456789
+Latin: Ça va? Über Straße, niño, façade, smørrebrød, Đặng.
+Greek: Ξεσκεπάζω την ψυχοφθόρα βδελυγμία.
+Cyrillic: Съешь же ещё этих мягких французских булок.
+Japanese: いろはにほへと ちりぬるを 漢字 カタカナ
+Chinese: 天地玄黄 宇宙洪荒 日月盈昃
+Thai: เป็นมนุษย์สุดประเสริฐเลิศคุณค่า
+Symbols: € £ ¥ © ® ™ ½ ¼ → ∀ ∃ ∑ ∫ ≤ ≥

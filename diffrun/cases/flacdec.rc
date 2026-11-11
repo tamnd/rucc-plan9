@@ -1,0 +1,3 @@
+# program: audio/flacdec
+# flacdec decodes a FLAC file to PCM.
+audio/flacdec <$inputs/tone.flac
