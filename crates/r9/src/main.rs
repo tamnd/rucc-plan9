@@ -149,7 +149,8 @@ fn locate(args: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// `r9 optab` and `r9 objcheck`: the instruction tables of `6l`, and the check against them.
+/// `r9 optab` and `r9 objcheck`: the instruction tables of `6l` and `7l`, and the check against
+/// the tables of `6l`.
 fn run_optab(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
         "objcheck" => {
@@ -169,9 +170,18 @@ fn run_optab(args: &Args) -> Result<ExitCode, String> {
         "optab" => {
             let root = args
                 .get("root")
-                .ok_or("give --root, a tree with sys/src/cmd/6l")?;
-            let t = r9::optab::load(std::path::Path::new(root))?;
-            let text = t.rust(args.get("pin").unwrap_or("(not given)"));
+                .ok_or("give --root, a tree with sys/src/cmd/6l or sys/src/cmd/7l")?;
+            let root = std::path::Path::new(root);
+            let pin = args.get("pin").unwrap_or("(not given)");
+            let text = match args.get("row").unwrap_or("amd64") {
+                "amd64" => r9::optab::load(root)?.rust(pin),
+                "arm64" => r9::optab7l::load(root)?.rust(pin),
+                row => {
+                    return Err(format!(
+                        "r9 optab has no row {row}; the rows are amd64 and arm64"
+                    ));
+                }
+            };
             match args.get("out") {
                 Some(out) => std::fs::write(out, text).map_err(|e| format!("{out}: {e}"))?,
                 None => print!("{text}"),
