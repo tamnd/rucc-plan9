@@ -76,6 +76,13 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             ],
             switches: &[],
         },
+        "2x2" => Accepts {
+            positional: true,
+            values: &[
+                "row", "r", "g", "runs", "accel", "timeout", "firmware", "out",
+            ],
+            switches: &[],
+        },
         "build" | "mix" => Accepts {
             positional: true,
             values: &[
@@ -247,6 +254,16 @@ usage:
       that r9 build --side R --keep left. The G image is the g-base image of the row by default.
       A case is compared only when each G run gives the same value. Write DIR/diffrun.txt
       (work/diffrun by default). The command fails when a case differs.
+  r9 2x2 SUITE --r FILE [--g FILE] [--row OBJTYPE] [--runs N] [--accel kvm|hvf|tcg]
+          [--timeout SECS] [--firmware PATH] [--out DIR]
+      Run SUITE (boot, smoke, test or diffrun) on the cells of plan 12.7, and name the half of
+      R that each failure comes from. FILE is the image of r9 build --side R --keep, which has
+      the user space of R and the kernel of G. The oracle is the baseline of the suite for the
+      pin of the G image when there is one. Otherwise the G image (the g-base image of the row
+      by default) boots N times (1 by default). A test that only the user cell fails is USER. A
+      test that only a cell with the kernel of R fails is KERNEL. A test that both fail is
+      LIBRARY. The kernel cells run when there is a kernel that rucc built (plan 09). Write
+      DIR/2x2.txt (work/2x2/SUITE by default). The command fails when a cell differs.
   r9 image build [--release NAME] [--tree NAME] [--row OBJTYPE] [--accel kvm|hvf|tcg]
           [--timeout SECS] [--firmware PATH] [--out DIR]
       Make the g-base image of a pinned tree (the first tree of pins.toml by default). Boot the

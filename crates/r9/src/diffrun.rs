@@ -96,8 +96,9 @@ pub fn report(verdicts: &[(String, Verdict)]) -> (bool, String) {
     (differs == 0 && same > 0, text)
 }
 
-/// Boot `image` once with the diffrun suite and read the results.
-fn boot_once(
+/// Boot `image` once with the diffrun suite and read the results. The work goes to `work`, and
+/// the staged suite to `work` with the extension `in`.
+pub fn boot_once(
     repo: &crate::repo::Repo,
     args: &crate::cli::Args,
     objtype: &str,
