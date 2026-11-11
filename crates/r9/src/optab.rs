@@ -69,7 +69,7 @@ pub struct Tables {
 }
 
 /// Remove the comments of C source.
-fn strip_comments(s: &str) -> String {
+pub(crate) fn strip_comments(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while !rest.is_empty() {
@@ -88,7 +88,7 @@ fn strip_comments(s: &str) -> String {
 }
 
 /// The text between the brace after `at` and the brace that closes it.
-fn braced(s: &str, at: usize) -> Result<(&str, usize), String> {
+pub(crate) fn braced(s: &str, at: usize) -> Result<(&str, usize), String> {
     let open = s[at..].find('{').ok_or("no opening brace")? + at;
     let mut depth = 0;
     for (i, c) in s[open..].char_indices() {
@@ -107,7 +107,7 @@ fn braced(s: &str, at: usize) -> Result<(&str, usize), String> {
 }
 
 /// The words of a list that commas separate.
-fn words(s: &str) -> Vec<String> {
+pub(crate) fn words(s: &str) -> Vec<String> {
     s.split(',')
         .map(str::trim)
         .filter(|w| !w.is_empty())
@@ -116,7 +116,7 @@ fn words(s: &str) -> Vec<String> {
 }
 
 /// The entries of an array of structures: the words of each inner brace.
-fn entries(body: &str) -> Result<Vec<Vec<String>>, String> {
+pub(crate) fn entries(body: &str) -> Result<Vec<Vec<String>>, String> {
     let mut out = Vec::new();
     let mut at = 0;
     while let Some(i) = body[at..].find('{') {

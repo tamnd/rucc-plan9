@@ -26,6 +26,7 @@ pub mod mix;
 pub mod obj;
 pub mod objcheck;
 pub mod optab;
+pub mod optab7l;
 #[rustfmt::skip]
 pub mod optab6;
 pub mod repo;

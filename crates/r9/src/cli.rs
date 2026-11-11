@@ -155,7 +155,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         },
         "optab" => Accepts {
             positional: false,
-            values: &["root", "pin", "out"],
+            values: &["root", "pin", "out", "row"],
             switches: &[],
         },
         "sdiff" => Accepts {
@@ -344,11 +344,13 @@ usage:
       rucc and G has the objects of kencc, in the same layout. Compare each R object with the
       G object of the same name, and list the symbols that R refers to and G does not. Exit
       with failure when there is one.
-  r9 optab --root DIR [--pin PIN] [--out FILE]
+  r9 optab --root DIR [--row amd64|arm64] [--pin PIN] [--out FILE]
       Read the instruction tables of 6l under DIR/sys/src/cmd/6l (plan 07.3): the Y classes of
       l.h, optab and its ytab arrays in optab.c, ymovtab in span.c, and ycover in obj.c. Write them as Rust to
       FILE, or print them. PIN goes in the header. The file crates/r9/src/optab6.rs is the
-      output for the pin, and r9 objcheck uses it.
+      output for the pin, and r9 objcheck uses it. With --row arm64, read 7l under
+      DIR/sys/src/cmd/7l: the C_ classes of l.h, optab in optab.c, and the ranges of buildop in
+      span.c. rucc checks each .7 record against that output.
   r9 objcheck FILE
       Check a .6 file, or each .6 member of an archive, against the instruction tables of 6l
       (plan 07.6). Each instruction gets the classes of its operands as oclass in 6l/span.c
