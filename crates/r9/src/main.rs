@@ -198,6 +198,32 @@ fn run_objdiff(args: &Args) -> Result<ExitCode, String> {
 }
 
 /// `r9 sdiff`: two objects side by side, function by function.
+fn run_helpers(args: &Args) -> Result<ExitCode, String> {
+    let path = args
+        .target
+        .as_deref()
+        .ok_or("give a directory of objects and archives, or one file")?;
+    if let Some(g) = args.get("with") {
+        let r = r9::helpers::load_relative(std::path::Path::new(path))?;
+        let g = r9::helpers::load_relative(std::path::Path::new(g))?;
+        let (found, pairs, alone) = r9::helpers::added(&r, &g);
+        print!("{}", r9::helpers::added_report(&found, pairs, &alone));
+        return Ok(if found.is_empty() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
+    }
+    let src = args
+        .get("src")
+        .ok_or("give the tree with --src, or G objects with --with")?;
+    let objects = r9::helpers::load(std::path::Path::new(path))?;
+    let (ids, sources) = r9::helpers::source_identifiers(std::path::Path::new(src))?;
+    let found = r9::helpers::helpers(&objects, &ids);
+    print!("{}", r9::helpers::report(objects.len(), sources, &found));
+    Ok(ExitCode::SUCCESS)
+}
+
 fn run_sdiff(args: &Args) -> Result<ExitCode, String> {
     let a = args
         .target
@@ -272,6 +298,7 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
         }
         "objdiff" => run_objdiff(args),
         "sdiff" => run_sdiff(args),
+        "helpers" => run_helpers(args),
         "objcheck" | "optab" => run_optab(args),
         "census" => {
             let path = args
