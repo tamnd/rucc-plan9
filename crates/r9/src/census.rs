@@ -52,6 +52,10 @@ pub struct Record {
     pub sys_ms: u64,
     /// `rucc`, `ref-c`, `ref-as` or `other-arch`.
     pub origin: String,
+    /// What the compiler that made the object wrote to standard error. Records from before this
+    /// field have an empty text.
+    #[serde(default)]
+    pub stderr: String,
 }
 
 /// Read a `compile.jsonl` file. A line that does not parse is an error with its line number.

@@ -288,6 +288,10 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
+        "warn-diff" => {
+            print!("{}", r9::warndiff::command(args)?);
+            Ok(ExitCode::SUCCESS)
+        }
         "tree-diff" => {
             let a = args
                 .target

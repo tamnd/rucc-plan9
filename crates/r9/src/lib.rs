@@ -33,3 +33,4 @@ pub mod sdiff;
 pub mod sets;
 pub mod tar;
 pub mod treediff;
+pub mod warndiff;

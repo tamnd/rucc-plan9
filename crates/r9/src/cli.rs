@@ -121,7 +121,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["tree", "days"],
             switches: &["write"],
         },
-        "flags-diff" | "tree-diff" => Accepts {
+        "flags-diff" | "tree-diff" | "warn-diff" => Accepts {
             positional: true,
             values: &["with", "top"],
             switches: &[],
@@ -271,6 +271,12 @@ usage:
       sources. Print the units with other arguments and the units that only one build has. At
       most N units (20 by default) are printed in each group. Exit with failure when the builds
       differ.
+  r9 warn-diff G --with R [--top N]
+      Compare the warnings that the compiler gave for each unit in two builds (plan 05.8). G and R
+      are the directories of r9 build, or their compile.jsonl files. List the warnings that only
+      G gives, which is lost checking, and those that only R gives, which is noise, with the
+      count of each class and the count of the varargck format warnings. Show up to N units (20
+      by default). This is a report, and it fails only when a file cannot be read.
   r9 tree-diff A --with B [--top N]
       Compare the files that two builds wrote. A and B are the directories of two builds, or
       their changed.sha256 files. Print the files that only one build wrote, the files with
