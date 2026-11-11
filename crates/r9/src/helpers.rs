@@ -6,6 +6,12 @@
 //! of the tree has as an identifier. That list is the set of calls that the compiler makes by
 //! itself. rucc can call only these symbols, with the same convention as kencc.
 //!
+//! With `--with G`, the objects at PATH are from R and the objects at G are from kencc. Then
+//! `r9 helpers` compares each R object with the G object of the same unit, and lists each
+//! external symbol that the R object refers to and the G object does not. Such a symbol is a
+//! call that rucc made by itself, such as a call of `memmove` for a copy. This check has no
+//! gap: a source of the tree that names the symbol does not hide it.
+//!
 //! The sources are the files under the tree that end in `.c`, `.h`, `.s`, `.y`, `.l` or `.mp`. An
 //! identifier is a word of letters, digits and `_` that does not start with a digit. The match is
 //! on words, so a name in a comment or a string counts too. Thus the list can only be too short,
@@ -128,6 +134,69 @@ pub fn helpers(objects: &[(String, Object)], ids: &BTreeSet<String>) -> Vec<Help
     found.into_values().collect()
 }
 
+/// The symbols that each object of `r` refers to and the object of `g` with the same name does
+/// not. Return the symbols, the number of pairs, and the objects of `r` that have no pair.
+#[must_use]
+pub fn added(r: &[(String, Object)], g: &[(String, Object)]) -> (Vec<Helper>, usize, Vec<String>) {
+    let g: BTreeMap<&str, BTreeSet<String>> = g
+        .iter()
+        .map(|(n, o)| (n.as_str(), references(o).into_iter().collect()))
+        .collect();
+    let mut found: BTreeMap<String, Helper> = BTreeMap::new();
+    let mut pairs = 0;
+    let mut alone = Vec::new();
+    for (name, o) in r {
+        let Some(refs) = g.get(name.as_str()) else {
+            alone.push(name.clone());
+            continue;
+        };
+        pairs += 1;
+        for sym in references(o).into_iter().filter(|s| !refs.contains(s)) {
+            found
+                .entry(sym.clone())
+                .or_insert_with(|| Helper {
+                    name: sym,
+                    objects: 0,
+                    first: name.clone(),
+                })
+                .objects += 1;
+        }
+    }
+    (found.into_values().collect(), pairs, alone)
+}
+
+/// The objects at `path`, with names relative to `path`, so that the objects of two trees
+/// have the same names.
+pub fn load_relative(path: &Path) -> Result<Vec<(String, Object)>, String> {
+    let root = path.display().to_string();
+    Ok(load(path)?
+        .into_iter()
+        .map(|(n, o)| {
+            let rel = n.strip_prefix(&root).unwrap_or(&n);
+            (rel.trim_start_matches('/').to_owned(), o)
+        })
+        .collect())
+}
+
+/// The report of `added`.
+#[must_use]
+pub fn added_report(found: &[Helper], pairs: usize, alone: &[String]) -> String {
+    let mut s = String::new();
+    for h in found {
+        let _ = writeln!(s, "{}\t{} objects\tfirst in {}", h.name, h.objects, h.first);
+    }
+    for a in alone.iter().take(20) {
+        let _ = writeln!(s, "no G object for {a}");
+    }
+    let _ = writeln!(
+        s,
+        "{} symbols that R refers to and G does not, in {pairs} pairs of objects; {} R objects have no pair",
+        found.len(),
+        alone.len()
+    );
+    s
+}
+
 /// Decode the objects at `path`: one object or archive, or each of them under a directory.
 pub fn load(path: &Path) -> Result<Vec<(String, Object)>, String> {
     let files = if path.is_dir() {
@@ -182,6 +251,34 @@ mod tests {
         let mut v: Vec<&str> = set.iter().map(String::as_str).collect();
         v.sort_unstable();
         assert_eq!(v, ["SB", "TEXT", "_tos", "a_b1", "f", "main", "x"]);
+    }
+
+    #[test]
+    fn a_call_that_only_r_makes_is_found_by_its_pair() {
+        let g = decode(&amd64_object());
+        let mut r = g.clone();
+        let extern_kind = obj::d6::EXTERN;
+        let p = r.progs.iter_mut().find(|p| p.to.sym.is_none()).unwrap();
+        p.to.sym = Some(obj::Sym {
+            name: "memmove".into(),
+            kind: extern_kind,
+        });
+        let rs = vec![
+            ("libc.a(a.6)".to_string(), r.clone()),
+            ("libc.a(b.6)".to_string(), r),
+        ];
+        let gs = vec![("libc.a(a.6)".to_string(), g)];
+        let (found, pairs, alone) = added(&rs, &gs);
+        assert_eq!(
+            found,
+            [Helper {
+                name: "memmove".into(),
+                objects: 1,
+                first: "libc.a(a.6)".into()
+            }]
+        );
+        assert_eq!((pairs, alone), (1, vec!["libc.a(b.6)".to_string()]));
+        assert!(added_report(&found, 1, &[]).ends_with("1 symbols that R refers to and G does not, in 1 pairs of objects; 0 R objects have no pair\n"));
     }
 
     #[test]

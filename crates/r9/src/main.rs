@@ -203,7 +203,20 @@ fn run_helpers(args: &Args) -> Result<ExitCode, String> {
         .target
         .as_deref()
         .ok_or("give a directory of objects and archives, or one file")?;
-    let src = args.get("src").ok_or("give the tree with --src")?;
+    if let Some(g) = args.get("with") {
+        let r = r9::helpers::load_relative(std::path::Path::new(path))?;
+        let g = r9::helpers::load_relative(std::path::Path::new(g))?;
+        let (found, pairs, alone) = r9::helpers::added(&r, &g);
+        print!("{}", r9::helpers::added_report(&found, pairs, &alone));
+        return Ok(if found.is_empty() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
+    }
+    let src = args
+        .get("src")
+        .ok_or("give the tree with --src, or G objects with --with")?;
     let objects = r9::helpers::load(std::path::Path::new(path))?;
     let (ids, sources) = r9::helpers::source_identifiers(std::path::Path::new(src))?;
     let found = r9::helpers::helpers(&objects, &ids);

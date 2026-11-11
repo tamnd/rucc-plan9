@@ -121,7 +121,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         },
         "helpers" => Accepts {
             positional: true,
-            values: &["src"],
+            values: &["src", "with"],
             switches: &[],
         },
         "objcheck" => Accepts {
@@ -239,10 +239,14 @@ usage:
       of them with --all, or only NAME. Each side is N characters wide (60 by default). Exit
       with failure when a function differs.
   r9 helpers PATH --src DIR
+  r9 helpers R --with G
       List the external symbols that the objects at PATH refer to and that no source under DIR
       names (plan 08.6). PATH is a .6 or .7 file, an archive, or a directory of them. A source is
-      a file that ends in .c, .h, .s, .y or .l. The list is the set of calls that the compiler
-      makes by itself, and rucc calls only these.
+      a file that ends in .c, .h, .s, .y, .l or .mp. The list is the set of calls that the
+      compiler makes by itself, and rucc calls only these. With --with, R has the objects of
+      rucc and G has the objects of kencc, in the same layout. Compare each R object with the
+      G object of the same name, and list the symbols that R refers to and G does not. Exit
+      with failure when there is one.
   r9 optab --root DIR [--pin PIN] [--out FILE]
       Read the instruction tables of 6l under DIR/sys/src/cmd/6l (plan 07.3): the Y classes of
       l.h, optab and its ytab arrays in optab.c, ymovtab in span.c, and ycover in obj.c. Write them as Rust to
