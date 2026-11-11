@@ -6,6 +6,12 @@
 # link it, run it, and write what it printed to DIR/NAME.SIDE. A case that does not compile
 # or link has the line "did not build" in that file. Run it as G with the compiler of the
 # image, and as R under r9-build with $r9ccd set, so that each compile goes to rucc.
+#
+# A case under abi/ has two halves. With -DCALLEE it is the half with the called functions,
+# and without it is the half with main. run.rc links the two halves twice: first with main
+# from $O^c and the callee from /$objtype/bin/$O^c, then the other way. Under r9-build, $O^c
+# is the shim that sends the compile to rucc and /$objtype/bin/$O^c is kencc, so each run
+# calls across an object of rucc and an object of kencc. In G each half is from kencc.
 
 rfork e
 side=$1
@@ -20,12 +26,39 @@ case *
 	echo run.rc: no compiler for $objtype >[1=2]
 	exit objtype
 }
+fn abi {
+	rm -f $2.$side
+	for(way in rk kr){
+		switch($way){
+		case rk
+			main=$O^c
+			callee=/$objtype/bin/$O^c
+		case kr
+			main=/$objtype/bin/$O^c
+			callee=$O^c
+		}
+		rm -f /tmp/compat.a.$O /tmp/compat.b.$O /tmp/compat.out
+		echo way $way >>$2.$side
+		if($main -o /tmp/compat.a.$O $1 >[2]/tmp/compat.err && $callee -DCALLEE -o /tmp/compat.b.$O $1 >>[2]/tmp/compat.err && $O^l -o /tmp/compat.out /tmp/compat.a.$O /tmp/compat.b.$O >>[2]/tmp/compat.err)
+			/tmp/compat.out >>$2.$side >[2=1]
+		if not
+			echo did not build >>$2.$side
+	}
+}
+
+fn one {
+	rm -f /tmp/compat.$O /tmp/compat.out
+	if($O^c -o /tmp/compat.$O $1 >[2]/tmp/compat.err && $O^l -o /tmp/compat.out /tmp/compat.$O >>[2]/tmp/compat.err)
+		/tmp/compat.out >$2.$side >[2=1]
+	if not
+		echo did not build >$2.$side
+}
+
 for(c in */*.c){
 	stem=`{echo $c | sed 's/\.c$//'}
-	rm -f /tmp/compat.$O /tmp/compat.out
-	if($O^c -o /tmp/compat.$O $c >[2]/tmp/compat.err && $O^l -o /tmp/compat.out /tmp/compat.$O >>[2]/tmp/compat.err)
-		/tmp/compat.out >$stem.$side >[2=1]
+	if(~ $c abi/*)
+		abi $c $stem
 	if not
-		echo did not build >$stem.$side
+		one $c $stem
 }
 exit ''
