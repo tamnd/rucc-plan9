@@ -1,4 +1,4 @@
 # program: sed
 # sed scripts over the sources of the tree.
-sed -f $inputs/edit.sed /sys/src/cmd/rc/*.c
+sed -f $inputs/edit.sed `{ls /sys/src/cmd/rc/*.c | grep -v 'y\.tab'}
 sed -n '/^[a-z].*\(/p' /sys/src/libc/port/*.c

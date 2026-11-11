@@ -1,5 +1,5 @@
 # program: bunzip2
 # bunzip2 on a stream that bzip2 made.
-cd /sys/src/cmd/awk && tar c *.c *.h *.y >/tmp/r9diff/awk.tar
+cd /sys/src/cmd/awk && tar c `{ls *.c *.h *.y | grep -v '^(y\.tab|awkgram\.c|proctab\.c)'} >/tmp/r9diff/awk.tar
 bzip2 -c -9 </tmp/r9diff/awk.tar >/tmp/r9diff/awk.tbz
 bunzip2 -c </tmp/r9diff/awk.tbz
