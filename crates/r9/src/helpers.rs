@@ -27,9 +27,10 @@ use crate::obj::{self, Object};
 /// code with names such as `edwards_add`.
 const SOURCES: &[&str] = &["c", "h", "s", "y", "l", "mp"];
 
-/// Add each identifier of `text` to `set`.
+/// Add each identifier of `text` to `set`. As in kencc, a rune that is not ASCII is a letter, so
+/// each byte of its UTF-8 form is part of the identifier.
 pub fn identifiers(text: &[u8], set: &mut BTreeSet<String>) {
-    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
     let mut i = 0;
     while i < text.len() {
         if !word(text[i]) {
@@ -251,6 +252,9 @@ mod tests {
         let mut v: Vec<&str> = set.iter().map(String::as_str).collect();
         v.sort_unstable();
         assert_eq!(v, ["SB", "TEXT", "_tos", "a_b1", "f", "main", "x"]);
+        let mut set = BTreeSet::new();
+        identifiers("double θ; πfmt(f);".as_bytes(), &mut set);
+        assert!(set.contains("θ") && set.contains("πfmt"), "{set:?}");
     }
 
     #[test]
