@@ -149,14 +149,14 @@ fn locate(args: &Args) -> Result<ExitCode, String> {
 }
 
 /// `r9 optab` and `r9 objcheck`: the instruction tables of `6l` and `7l`, and the check against
-/// the tables of `6l`.
+/// them.
 fn run_optab(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
         "objcheck" => {
             let path = args
                 .target
                 .as_deref()
-                .ok_or("give a .6 file or an archive of them")?;
+                .ok_or("give a .6 or .7 file, or an archive of them")?;
             let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
             let (report, bad) = r9::objcheck::file(&r9::objcheck::Checker::new(), path, &bytes)?;
             print!("{report}");
