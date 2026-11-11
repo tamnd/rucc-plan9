@@ -1,0 +1,4 @@
+# program: gzip
+# gzip on a tar stream of sources.
+cd /sys/src/cmd/rc && tar c *.c *.h mkfile >/tmp/r9diff/rc.tar
+for(l in 1 6 9) gzip -c -$l </tmp/r9diff/rc.tar

@@ -1,0 +1,7 @@
+# program: resample
+# resample scales Plan 9 images.
+png -9 $in/img.png >/tmp/r9diff/img
+resample -x 50% /tmp/r9diff/img
+resample -x 333 -y 77 /tmp/r9diff/img
+jpg -9 $in/img444.jpg >/tmp/r9diff/img2
+resample -x 200% /tmp/r9diff/img2

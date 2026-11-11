@@ -1,0 +1,5 @@
+# program: ed
+# ed runs a script of edits on a source file.
+cp /sys/src/cmd/rc/exec.c /tmp/r9diff/exec.c
+ed - /tmp/r9diff/exec.c <$in/edit.ed
+cat /tmp/r9diff/exec.c

@@ -1,0 +1,6 @@
+# program: jpg
+# jpg converts JPEG files to Plan 9 images.
+jpg -9 $in/img.jpg
+jpg -9 $in/img444.jpg
+jpg -9t $in/img.jpg
+jpg -c $in/img.jpg

@@ -1,0 +1,4 @@
+# program: sed
+# sed scripts over the sources of the tree.
+sed -f $in/edit.sed /sys/src/cmd/rc/*.c
+sed -n '/^[a-z].*(/p' /sys/src/libc/port/*.c

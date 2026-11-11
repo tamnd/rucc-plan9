@@ -1,0 +1,5 @@
+# program: topng
+# topng converts Plan 9 images to PNG files.
+png -9 $in/img.png | topng
+png -9 $in/alpha.png | topng
+jpg -9 $in/img.jpg | topng -g

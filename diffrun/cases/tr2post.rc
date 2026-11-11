@@ -1,0 +1,3 @@
+# program: aux/tr2post
+# tr2post on the troff output of a paper.
+troff -ms /sys/doc/utf.ms | aux/tr2post

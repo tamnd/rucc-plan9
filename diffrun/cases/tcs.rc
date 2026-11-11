@@ -1,0 +1,8 @@
+# program: tcs
+# tcs from UTF-8 to each character set and back.
+for(cs in latin1 8859-2 8859-5 8859-7 koi8 cp1251 cp1252 jis-kanji ujis ms-kanji gb big5 ascii html utf-16 utf-16le tis){
+	echo $cs
+	tcs -s -t $cs $in/tcs.txt >/tmp/r9diff/tcs.$cs
+	cat /tmp/r9diff/tcs.$cs
+	tcs -s -f $cs /tmp/r9diff/tcs.$cs
+}

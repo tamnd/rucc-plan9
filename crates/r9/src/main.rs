@@ -75,6 +75,16 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
+        "diffrun" => {
+            let repo = Repo::find()?;
+            let (ok, report) = r9::diffrun::command(&repo, args)?;
+            print!("{report}");
+            Ok(if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
         "build" | "mix" => {
             let repo = Repo::find()?;
             let (passed, report) = r9::build::command(&repo, args)?;

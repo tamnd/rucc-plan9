@@ -1,0 +1,45 @@
+#!/bin/rc
+# r9-diffrun: the cases of diffrun (plan 12.5), with one result for each case. Each case is an rc
+# script in DIR/diffrun/cases. Its first line names the program that it checks, and $in is the
+# directory of the inputs. A case runs in a new empty directory, and the result is
+# "value NAME HASH", with the SHA-1 of what the case wrote to its standard output. When the case
+# fails, a "!" follows the hash. When the program is not in the image, the result is
+# "FAIL NAME: reason". r9 diffrun compares the values of G and R.
+#
+# usage: r9-diffrun DIR [case...]
+
+rfork e
+dir=$1
+shift
+in=$dir/diffrun/inputs
+cases=($*)
+if(~ $#cases 0)
+	cases=`{ls $dir/diffrun/cases | sed -n 's,.*/,,; s,\.rc$,,p'}
+echo r9-diffrun: $#cases cases
+n=0
+for(c in $cases){
+	file=$dir/diffrun/cases/$c.rc
+	prog=`{sed -n '1s/^# program: //p' $file}
+	rm -rf /tmp/r9diff
+	mkdir -p /tmp/r9diff/work
+	if(! test -x /bin/$prog){
+		echo FAIL $c: there is no /bin/$prog
+	}
+	if not{
+		@{
+			rfork n
+			cd /tmp/r9diff/work
+			in=$in rc $file >/tmp/r9diff.out >[2]/tmp/r9diff.err </dev/null
+		}
+		st=$status
+		h=`{sha1sum /tmp/r9diff.out}
+		if(~ $st '')
+			echo value $c $h(1)
+		if not{
+			echo value $c $h(1)^!
+			sed 5q /tmp/r9diff.err
+		}
+		n=`{echo $n + 1 | hoc}
+	}
+}
+echo r9-diffrun: $n cases ran

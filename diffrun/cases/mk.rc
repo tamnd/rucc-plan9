@@ -1,0 +1,6 @@
+# program: mk
+# mk -n -a in directories of /sys/src.
+for(d in libc libbio libdraw libsec cmd/rc cmd/awk cmd/mk cmd/6c cmd/acme cmd/rio){
+	echo $d
+	cd /sys/src/$d && mk -n -a >[2=1]
+}

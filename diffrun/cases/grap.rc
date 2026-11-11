@@ -1,0 +1,4 @@
+# program: grap
+# grap and pic on graphs of the inputs.
+grap $in/grap.ms
+grap $in/grap.ms | pic
