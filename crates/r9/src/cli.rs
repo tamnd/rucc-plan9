@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 /// A parsed command line.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Args {
     /// The subcommand.
     pub command: String,
@@ -86,8 +86,16 @@ pub fn accepted(command: &str) -> Option<Accepts> {
                 "mix",
                 "test",
                 "test-timeout",
+                "targets",
             ],
             switches: &["keep", "bisect"],
+        },
+        "fixedpoint" => Accepts {
+            positional: false,
+            values: &[
+                "row", "r", "g", "accel", "timeout", "firmware", "dir", "out", "top",
+            ],
+            switches: &[],
         },
         "image" => Accepts {
             positional: true,
@@ -197,7 +205,7 @@ usage:
       network card on the user network of QEMU, where the host is 10.0.2.2.
   r9 build [NAME] --side G|R [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
           [--firmware PATH] [--image FILE] [--out DIR] [--rucc PATH] [--keep] [--test CMD]
-          [--test-timeout SECS]
+          [--test-timeout SECS] [--targets 'T ...']
       Boot the g-base image of the row, or the image of the release NAME when there is no
       g-base image, and run mk install in DIR (/sys/src by default) with r9-cc in the compiler
       slot. --image boots FILE. Collect the compile records, the mk log, the files that the
@@ -209,7 +217,8 @@ usage:
       command CMD in the guest after the build, in a new note group. After SECS seconds (600
       by default) the guest kills the test, and the status is timeout. The status and the
       output go to test.status and test.log in DIR/collected. The command fails when the
-      build or the test fails.
+      build or the test fails. --targets gives the mk targets in place of install, such as
+      'clean install'. Each target is a separate mk, in the order given.
   r9 mix [NAME] [--file UNIT=R|G,...] [--mix FILE] [--default R|G] [r9 build options]
       Build with some units from rucc and the others from kencc (plan 05.7, 12.8). A unit is a
       source file of the guest, such as /sys/src/libc/port/strcmp.c, or a directory, which
@@ -259,6 +268,15 @@ usage:
       sources. Print the units with other arguments and the units that only one build has. At
       most N units (20 by default) are printed in each group. Exit with failure when the builds
       differ.
+  r9 fixedpoint --r FILE [--g DIR] [--row OBJTYPE] [--accel kvm|hvf|tcg] [--timeout SECS]
+          [--dir DIR] [--out DIR] [--top N]
+      Build the tree again with the kencc that rucc built, and compare it with G (plan 12.4).
+      FILE is the image that r9 build --side R --keep left, with the 6c, 6l and 6a of rucc.
+      Run r9 build --side G --targets 'clean install' in the g-base image, then in FILE. The
+      second build is Rk. Compare the files that the two builds wrote as r9 tree-diff does,
+      and write the report to fixedpoint.txt. --g DIR uses an earlier G build with the same
+      targets. The builds go to g and rk in --out (work/fixedpoint by default). Exit with
+      failure when a build fails or when Rk differs from G.
   r9 tree-diff A --with B [--top N]
       Compare the files that two builds wrote. A and B are the directories of two builds, or
       their changed.sha256 files. Print the files that only one build wrote, the files with

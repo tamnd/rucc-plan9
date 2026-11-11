@@ -8,8 +8,10 @@
 # Do not bind r9-cc over /$objtype/bin/6c. A bind over a file applies everywhere that file is
 # reached, so the install of cmd/6c would write the new 6c over r9-cc.
 #
-# usage: r9-build [dir [mk arguments]]
-# The default is mk install in /sys/src. The records go to /tmp/r9/compile.jsonl.
+# usage: r9-build [dir [target ...]]
+# The default is mk install in /sys/src. Each target is a separate mk, in the order given, and
+# the first one that fails stops the build. Thus clean install builds each file again. The
+# records go to /tmp/r9/compile.jsonl.
 #
 # With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
 # machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
@@ -30,4 +32,11 @@ rm -f /tmp/r9/compile.jsonl /tmp/r9/shim/*
 for(c in 6c 7c 8c 5c vc)
 	cp $r9/bin/r9-cc /tmp/r9/shim/$c
 bind -b /tmp/r9/shim /bin
-cd $dir && mk $targets
+cd $dir || exit cd
+for(t in $targets){
+	mk $t
+	s=$status
+	if(! ~ $s '')
+		exit $s
+}
+exit ''

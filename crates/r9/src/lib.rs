@@ -16,6 +16,7 @@ pub mod console;
 pub mod demands;
 pub mod disk;
 pub mod fetch;
+pub mod fixedpoint;
 pub mod flagsdiff;
 pub mod helpers;
 pub mod image;

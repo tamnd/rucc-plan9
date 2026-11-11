@@ -65,10 +65,11 @@ impl Slot {
     }
 }
 
-/// The commands that the guest runs to build `dir` with `mk install`. Each command is one line
-/// at the shell prompt.
+/// The commands that the guest runs to build `dir` with `mk TARGETS`, where `targets` is a list
+/// of mk targets separated by spaces, such as `install` or `clean install`. Each command is one
+/// line at the shell prompt.
 #[must_use]
-pub fn commands(dir: &str, slot: &Slot) -> Vec<String> {
+pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
     let w = "/tmp/r9";
     // rucc.err is append-only, because each call of r9-cc opens it to write.
     let (net, env) = match slot {
@@ -87,7 +88,7 @@ pub fn commands(dir: &str, slot: &Slot) -> Vec<String> {
         // time, the lines of the log, its last line and the memory in use. The console log on
         // the host keeps it when the guest stops before its file server writes the log out.
         format!(
-            "date -n > {w}/t0; {{while(! test -f {w}/t1){{sleep 60; echo r9-progress `{{date -n}} `{{wc -l < {w}/mk.log}} `{{tail -1 {w}/mk.log}}; grep memory /dev/swap}}}} & r9p=$apid; {env}/usr/glenda/r9/bin/r9-build {dir} install < /dev/null > {w}/mk.log >[2=1]; s=$status; date -n > {w}/t1; echo kill > /proc/$r9p/note; echo $s > {w}/status; test -z $s"
+            "date -n > {w}/t0; {{while(! test -f {w}/t1){{sleep 60; echo r9-progress `{{date -n}} `{{wc -l < {w}/mk.log}} `{{tail -1 {w}/mk.log}}; grep memory /dev/swap}}}} & r9p=$apid; {env}/usr/glenda/r9/bin/r9-build {dir} {targets} < /dev/null > {w}/mk.log >[2=1]; s=$status; date -n > {w}/t1; echo kill > /proc/$r9p/note; echo $s > {w}/status; test -z $s"
         ),
         format!("tail -20 {w}/mk.log"),
         format!("walk -f -e msp {dir} /$objtype/bin /$objtype/lib > {w}/walk"),
@@ -185,12 +186,13 @@ fn read(dir: &Path, name: &str) -> String {
 pub fn run(
     release: &str,
     dir: &str,
+    targets: &str,
     mut req: Request,
     repo_root: &Path,
     slot: &Slot,
     guest_test: Option<&Test>,
 ) -> Result<(Summary, String), String> {
-    req.commands = commands(dir, slot);
+    req.commands = commands(dir, targets, slot);
     if let Some(t) = guest_test {
         // After the tail of the log, and before the walk and the collection.
         req.commands.insert(4, test_command(t));
@@ -341,6 +343,7 @@ pub fn command(
     let one = Build {
         release,
         dir: args.get("dir").unwrap_or("/sys/src").to_owned(),
+        targets: args.get("targets").unwrap_or("install").to_owned(),
         repo_root: repo.root.clone(),
         rucc,
         test,
@@ -360,6 +363,9 @@ pub struct Build {
     pub release: String,
     /// The tree to build in the guest.
     pub dir: String,
+    /// The mk targets, separated by spaces: `install`, or `clean install` to build each file
+    /// again.
+    pub targets: String,
     /// The root of the repository.
     pub repo_root: std::path::PathBuf,
     /// The rucc program for side R.
@@ -413,6 +419,7 @@ impl Build {
         run(
             &self.release,
             &self.dir,
+            &self.targets,
             req,
             &self.repo_root,
             &slot,
@@ -432,7 +439,7 @@ mod tests {
 
     #[test]
     fn the_commands_build_and_collect() {
-        let c = commands("/sys/src", &Slot::G);
+        let c = commands("/sys/src", "install", &Slot::G);
         assert!(c[2].contains("r9-build /sys/src install < /dev/null"));
         assert!(c[2].contains("{while(! test -f /tmp/r9/t1){sleep 60; echo r9-progress"));
         assert!(c[5].contains("awk -v 't='$t0 '$1 >= t+0 {print $3}'"));
@@ -471,12 +478,12 @@ mod tests {
             port: 41234,
             bringup: "cc:auto".into(),
         };
-        let c = commands("/sys/src/libc", &slot);
+        let c = commands("/sys/src/libc", "install", &slot);
         assert!(c[0].ends_with("tar xf $r9in && ip/ipconfig"));
         assert!(c[0].contains("chmod +a /tmp/r9/rucc.err"));
         assert!(c[2].contains(
             "r9ccd='tcp!10.0.2.2!41234' r9bringup='cc:auto' /usr/glenda/r9/bin/r9-build /sys/src/libc install"
         ));
-        assert!(!commands("/sys/src", &Slot::G)[2].contains("r9ccd"));
+        assert!(!commands("/sys/src", "install", &Slot::G)[2].contains("r9ccd"));
     }
 }

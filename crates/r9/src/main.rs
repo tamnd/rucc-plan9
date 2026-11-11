@@ -75,9 +75,13 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
-        "build" | "mix" => {
+        "build" | "mix" | "fixedpoint" => {
             let repo = Repo::find()?;
-            let (passed, report) = r9::build::command(&repo, args)?;
+            let (passed, report) = if args.command == "fixedpoint" {
+                r9::fixedpoint::command(&repo, args)?
+            } else {
+                r9::build::command(&repo, args)?
+            };
             print!("{report}");
             Ok(if passed {
                 ExitCode::SUCCESS
