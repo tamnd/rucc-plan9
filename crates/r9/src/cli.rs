@@ -121,6 +121,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["with", "top"],
             switches: &[],
         },
+        "rtt" => Accepts {
+            positional: false,
+            values: &["port", "count", "file", "wait"],
+            switches: &[],
+        },
         "objdiff" => Accepts {
             positional: true,
             values: &["with", "context"],
@@ -302,6 +307,11 @@ usage:
       with the sysroot on that name space and sends the objects back. The outputs of each call
       go in a new directory under DIR (a temporary directory by default) while rucc runs. Each
       call prints one line. Boot the guest with --net. The mix options are as in r9 mix.
+  r9 rtt [--port N] [--count N] [--file PATH] [--wait SECS]
+      Time 9P round trips from a guest to a host process (open question 10). Listen on the port
+      (5641 by default) and wait up to SECS (1800 by default) for r9rtt in the guest, which
+      smoke/rtt.rc builds and runs. Then run COUNT (10000 by default) sequences of walk, open,
+      read and clunk of PATH (/sys/include/libc.h by default), and print the times.
   r9 locate NAME --tree DIR [--days N] [--write]
       Find the commit that the release NAME was cut from. DIR holds the release's sys/src and
       sys/include, as a boot with --collect gives them. DIR can also be the collected.tar of

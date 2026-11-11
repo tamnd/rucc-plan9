@@ -27,6 +27,7 @@ pub mod optab;
 #[rustfmt::skip]
 pub mod optab6;
 pub mod repo;
+pub mod rtt;
 pub mod sdiff;
 pub mod sets;
 pub mod tar;
