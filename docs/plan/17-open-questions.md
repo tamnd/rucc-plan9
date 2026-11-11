@@ -158,6 +158,8 @@ We lean to the second. It matches kencc, it needs no path rule, and it costs onl
 
 **Deadline.** P5.
 
+**Decision.** Rule 2, made in tamnd/rucc#4438. On Plan 9 targets, rucc does not put integer work in the vector registers in any unit. Floating point code still uses them, as kencc does. The audit of the 4333 R amd64 objects found one case of integer SIMD that the compiler made: the loop of `blake2sblock.c` in `libsec`, which came out four lanes at a time in `X0`. `libsec` is outside `/sys/src/9` and `/sys/src/boot`, and the kernels link it, so rule 1 would not have caught it. Struct copies and the expansion of `memset` and `memmove` use the integer registers on both amd64 and arm64. The cost to the library benchmarks of 13.2 is measured at P9.
+
 ## 9. Whether 9front's arm kernels boot on QEMU `virt`
 
 **Belief.** 9front's 32-bit arm kernels are for boards: the Raspberry Pi (`bcm`), Kirkwood (`kw`) and OMAP (`omap`). None targets QEMU's `virt` machine. The Pi kernel may boot under QEMU's `raspi2b` machine, which emulates enough of the Pi 2 for some systems.
