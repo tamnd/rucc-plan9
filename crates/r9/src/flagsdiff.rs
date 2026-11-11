@@ -149,6 +149,7 @@ mod tests {
             user_ms: 0,
             sys_ms: 0,
             origin: "rucc".into(),
+            stderr: String::new(),
         }
     }
 

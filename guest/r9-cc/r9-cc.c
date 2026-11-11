@@ -13,6 +13,10 @@
  * space of the build. On the second it sends the call, and it writes the objects of the reply.
  * The record then has the origin rucc. When rucc fails and $r9bringup has cc:auto, r9-cc runs
  * the real compiler, and the record has the origin ref-c.
+ *
+ * The record also has what the compiler that made the object wrote to standard error, so that
+ * r9 warn-diff compares the warnings of G and R for each unit (plan 05.8). r9-cc still writes
+ * the text to its own standard error, so mk.log does not change.
  */
 #include <u.h>
 #include <libc.h>
@@ -32,6 +36,11 @@ struct Buf {
 	int n;
 	int cap;
 };
+
+/* What the compiler wrote to standard error, for the record. */
+Buf errs;
+
+void keep(char*, long);
 
 void
 grow(Buf *b, int n)
@@ -238,11 +247,14 @@ readall(int fd, long *len)
 char*
 runreal(char *real, char *cc, char **argv, char *in, long nin, ulong *user, ulong *sys)
 {
-	int pid, p[2];
-	char *status;
+	int pid, p[2], e[2];
+	char *status, tmp[8192];
+	long n;
 	Waitmsg *w;
 
 	if(in != nil && pipe(p) < 0)
+		sysfatal("r9-cc: pipe: %r");
+	if(pipe(e) < 0)
 		sysfatal("r9-cc: pipe: %r");
 	pid = fork();
 	switch(pid){
@@ -254,15 +266,24 @@ runreal(char *real, char *cc, char **argv, char *in, long nin, ulong *user, ulon
 			close(p[0]);
 			close(p[1]);
 		}
+		dup(e[1], 2);
+		close(e[0]);
+		close(e[1]);
 		argv[0] = cc;
 		exec(real, argv);
 		sysfatal("r9-cc: exec %s: %r", real);
 	}
+	close(e[1]);
 	if(in != nil){
 		close(p[0]);
 		write(p[1], in, nin);
 		close(p[1]);
 	}
+	while((n = read(e[0], tmp, sizeof tmp)) > 0){
+		write(2, tmp, n);
+		keep(tmp, n);
+	}
+	close(e[0]);
 	status = "";
 	*user = *sys = 0;
 	while((w = wait()) != nil){
@@ -296,9 +317,22 @@ field(Biobuf *b, char *key)
 	return l[n] == 0 ? l+n : l+n+1;
 }
 
-/* Copy n bytes of the reply to fd, or skip them when fd is negative. */
+/* Keep n bytes of standard error for the record. */
+void
+keep(char *p, long n)
+{
+	grow(&errs, n+1);
+	memmove(errs.p+errs.n, p, n);
+	errs.n += n;
+	errs.p[errs.n] = 0;
+}
+
+/*
+ * Copy n bytes of the reply to fd, or skip them when fd is negative. With save set, keep them
+ * for the record too.
+ */
 int
-copyout(Biobuf *b, int fd, long n)
+copyout(Biobuf *b, int fd, long n, int save)
 {
 	char tmp[8192];
 	long m;
@@ -309,6 +343,8 @@ copyout(Biobuf *b, int fd, long n)
 			return -1;
 		if(fd >= 0 && write(fd, tmp, m) != m)
 			return -1;
+		if(save)
+			keep(tmp, m);
 		n -= m;
 	}
 	return 0;
@@ -367,7 +403,7 @@ forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, c
 	if((v = field(&b, "status")) == nil)
 		goto out;
 	*status = strdup(v);
-	if((v = field(&b, "stderr")) == nil || copyout(&b, errfd, atol(v)) < 0)
+	if((v = field(&b, "stderr")) == nil || copyout(&b, errfd, atol(v), 1) < 0)
 		goto bad;
 	for(;;){
 		if((v = Brdstr(&b, '\n', 1)) == nil)
@@ -387,7 +423,7 @@ forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, c
 				goto out;
 			}
 		}
-		i = copyout(&b, fd, n);
+		i = copyout(&b, fd, n, 0);
 		if(fd >= 0)
 			close(fd);
 		if(i < 0)
@@ -475,6 +511,7 @@ main(int argc, char **argv)
 			origin = "rucc";
 		else if(fd != 2){
 			fprint(fd, "%s\n", status);
+			errs.n = 0;
 			status = runreal(real, cc, argv, text, ntext, &user, &sys);
 		}else{
 			fprint(2, "%s\n", status);
@@ -508,6 +545,8 @@ main(int argc, char **argv)
 	put(&b, hex);
 	put(&b, ",\"origin\":");
 	putq(&b, origin);
+	put(&b, ",\"stderr\":");
+	putq(&b, errs.n > 0 ? errs.p : "");
 	put(&b, "}\n");
 	record(&b);
 
