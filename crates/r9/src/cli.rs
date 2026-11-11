@@ -104,6 +104,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["with", "top"],
             switches: &[],
         },
+        "objdiff" => Accepts {
+            positional: true,
+            values: &["with", "context"],
+            switches: &[],
+        },
         "demands" => Accepts {
             positional: true,
             values: &["root", "out", "top", "flags"],
@@ -196,6 +201,13 @@ usage:
       The raced group has the archives that differ only by a member that two ar commands put
       in them, and the APE programs that link such an archive. At most N names (20 by default)
       are printed in each group. Exit with failure when the builds differ.
+  r9 objdiff A [--with B] [--context N]
+      Compare two objects of 6c or 7c, or two archives of them, record by record (plan 07.6).
+      The objects are decoded as 6l and 7l read them, and each symbol is printed as 6c -S and
+      7c -S print it. Line numbers and the order of the symbol slots are not compared. Print
+      the symbols that only one file has, and the lines that differ in each function, with N
+      same lines (3 by default) around each change. Exit with failure when the records
+      differ. With no --with, print the listing of A.
   r9 ccd [--port N] [--rucc PATH] [--work DIR]
       Serve the compiler slot of a guest (plan 05.4). r9-cc in the guest sends each call of 6c
       and 7c to port N on the host (5640 by default), as tcp!10.0.2.2!N, with the name space of
