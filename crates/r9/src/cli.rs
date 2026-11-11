@@ -58,6 +58,13 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             ],
             switches: &["keep", "net"],
         },
+        "baseline" => Accepts {
+            positional: true,
+            values: &[
+                "row", "runs", "suites", "pin", "image", "accel", "timeout", "firmware", "out",
+            ],
+            switches: &[],
+        },
         "build" => Accepts {
             positional: true,
             values: &[
@@ -146,6 +153,14 @@ usage:
       compiler slot. --image boots FILE. Collect the compile records, the mk log, the files that the build wrote
       with their SHA-256, and the generated C sources and headers into DIR/collected. Write the
       summary to build.toml and print the census. Side R comes at P1.
+  r9 baseline [NAME] [--row OBJTYPE,...] [--runs N] [--suites boot,smoke,test] [--pin PIN]
+          [--image FILE] [--accel kvm|hvf|tcg] [--timeout SECS] [--firmware PATH] [--out DIR]
+      Run each suite N times (3 by default) on the g-base image of each row (amd64,arm64 by
+      default), and keep what G gives. A test is graded when each run gives the same result, and
+      flaky when the runs differ. Write DIR/PIN/OBJTYPE/SUITE.json (baselines/ by default) with
+      the hash of each run, the graded results and the flaky ones, and print the flaky ones. The
+      pin comes from the image name. --image boots FILE in place of the g-base image. The boots
+      go to work/baseline.
   r9 image build [--release NAME] [--tree NAME] [--row OBJTYPE] [--accel kvm|hvf|tcg]
           [--timeout SECS] [--firmware PATH] [--out DIR]
       Make the g-base image of a pinned tree (the first tree of pins.toml by default). Boot the

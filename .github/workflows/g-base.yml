@@ -1,10 +1,11 @@
 # The g-base image and two G builds for amd64 (plan 05.2, 16.1). The hosted runners have KVM,
 # and the Linux machines of machines.toml do not at present, so the amd64 G baseline runs here.
 #
-# The job makes the g-base image of the pinned tree with r9 image build, runs r9 build --side G
-# twice from it, and compares the two builds with r9 tree-diff. The summaries, the compile
-# records and the hash lists go to an artifact. arm64 runs on the M4 under HVF, because TCG on
-# an x86-64 runner is too slow for a full build.
+# The job makes the g-base image of the pinned tree with r9 image build, and runs the three runs
+# of r9 baseline on it. Then it runs r9 build --side G twice from the image, and compares the
+# two builds with r9 tree-diff. The baselines, the summaries, the compile records and the hash
+# lists go to an artifact. arm64 runs on the M4 under HVF, because TCG on an x86-64 runner is
+# too slow for a full build.
 
 name: g-base
 
@@ -14,6 +15,8 @@ on:
       - crates/r9/src/image.rs
       - crates/r9/src/build.rs
       - crates/r9/src/treediff.rs
+      - crates/r9/src/baseline.rs
+      - smoke/**
       - guest/**
       - .github/workflows/g-base.yml
   workflow_dispatch:
@@ -32,7 +35,7 @@ jobs:
   g-base:
     name: g-base amd64
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: Swatinem/rust-cache@v2.9.2
@@ -58,6 +61,8 @@ jobs:
         run: target/release/r9 fetch --row amd64
       - name: r9 image build
         run: target/release/r9 image build --row amd64 --accel kvm --out "$RUNNER_TEMP/image"
+      - name: r9 baseline
+        run: target/release/r9 baseline --row amd64 --accel kvm --timeout 1800
       - name: r9 build, first
         run: target/release/r9 build --side G --row amd64 --accel kvm --out "$RUNNER_TEMP/g1"
       - name: r9 build, second
@@ -69,6 +74,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/out"
           cp baselines/*.toml "$RUNNER_TEMP/out/" || true
+          cp -r baselines/*/ "$RUNNER_TEMP/out/" || true
           for d in image g1 g2; do
             mkdir -p "$RUNNER_TEMP/out/$d"
             cp "$RUNNER_TEMP/$d"/*.toml "$RUNNER_TEMP/$d"/console.log "$RUNNER_TEMP/out/$d/" || true

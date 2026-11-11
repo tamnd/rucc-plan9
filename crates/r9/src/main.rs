@@ -65,6 +65,16 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
+        "baseline" => {
+            let repo = Repo::find()?;
+            let (ok, report) = r9::baseline::command(&repo, args)?;
+            print!("{report}");
+            Ok(if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
         "build" => {
             let repo = Repo::find()?;
             let (summary, report) = r9::build::command(&repo, args)?;
