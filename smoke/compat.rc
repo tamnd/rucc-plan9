@@ -1,0 +1,13 @@
+# The rucc-compat plan9 corpora in a guest (plan 15). Run r9 ccd on the host first. Then run
+# r9 boot with --net --in DIR --collect 16, where DIR holds the guest directory of this
+# repository as r9, and the plan9 directory of rucc-compat as compat/const and compat/cpp.
+# Each case is built and run by the compiler of the image (G) and by rucc through r9 ccd (R).
+# The outputs come back in compat.tar, and r9 compares them on the host.
+mkdir -p /tmp/in /usr/glenda/r9/bin && cd /tmp/in && tar xf $r9in
+cp /tmp/in/r9/r9-build /usr/glenda/r9/bin/ && cd /tmp/in/r9/r9-cc && mk install
+ip/ipconfig
+cp /tmp/in/r9/compat/run.rc /tmp/in/r9/compat/mkfile /tmp/in/compat/
+cd /tmp/in/compat && rc ./run.rc G
+r9ccd='tcp!10.0.2.2!5640' /usr/glenda/r9/bin/r9-build /tmp/in/compat R && cp /tmp/r9/compile.jsonl /tmp/in/compat/R.jsonl
+! grep -s -v '"origin":"rucc"' /tmp/in/compat/R.jsonl
+cd /tmp/in && tar cf $r9collect compat

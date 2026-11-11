@@ -1,0 +1,31 @@
+#!/bin/rc
+# run.rc: build and run each case of the rucc-compat plan9 corpora in a guest.
+#
+# usage: run.rc SIDE
+# For each DIR/NAME.c under the current directory, compile it with the compiler of $objtype,
+# link it, run it, and write what it printed to DIR/NAME.SIDE. A case that does not compile
+# or link has the line "did not build" in that file. Run it as G with the compiler of the
+# image, and as R under r9-build with $r9ccd set, so that each compile goes to rucc.
+
+rfork e
+side=$1
+switch($objtype){
+case amd64
+	O=6
+case arm64
+	O=7
+case 386
+	O=8
+case *
+	echo run.rc: no compiler for $objtype >[1=2]
+	exit objtype
+}
+for(c in */*.c){
+	stem=`{echo $c | sed 's/\.c$//'}
+	rm -f /tmp/compat.$O /tmp/compat.out
+	if($O^c -o /tmp/compat.$O $c >[2]/tmp/compat.err && $O^l -o /tmp/compat.out /tmp/compat.$O >>[2]/tmp/compat.err)
+		/tmp/compat.out >$stem.$side >[2=1]
+	if not
+		echo did not build >$stem.$side
+}
+exit ''
