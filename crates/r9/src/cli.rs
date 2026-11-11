@@ -193,8 +193,9 @@ usage:
       Compare the files that two builds wrote. A and B are the directories of two builds, or
       their changed.sha256 files. Print the files that only one build wrote, the files with
       different contents, and the archives whose members are the same but whose dates differ.
-      At most N names (20 by default) are printed in each group. Exit with failure when the
-      builds differ.
+      The raced group has the archives that differ only by a member that two ar commands put
+      in them, and the APE programs that link such an archive. At most N names (20 by default)
+      are printed in each group. Exit with failure when the builds differ.
   r9 ccd [--port N] [--rucc PATH] [--work DIR]
       Serve the compiler slot of a guest (plan 05.4). r9-cc in the guest sends each call of 6c
       and 7c to port N on the host (5640 by default), as tcp!10.0.2.2!N, with the name space of
