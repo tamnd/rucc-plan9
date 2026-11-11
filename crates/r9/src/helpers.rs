@@ -6,7 +6,7 @@
 //! of the tree has as an identifier. That list is the set of calls that the compiler makes by
 //! itself. rucc can call only these symbols, with the same convention as kencc.
 //!
-//! The sources are the files under the tree that end in `.c`, `.h`, `.s`, `.y` or `.l`. An
+//! The sources are the files under the tree that end in `.c`, `.h`, `.s`, `.y`, `.l` or `.mp`. An
 //! identifier is a word of letters, digits and `_` that does not start with a digit. The match is
 //! on words, so a name in a comment or a string counts too. Thus the list can only be too short,
 //! never too long.
