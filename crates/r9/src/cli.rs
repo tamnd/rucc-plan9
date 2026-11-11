@@ -92,7 +92,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["tree", "days"],
             switches: &["write"],
         },
-        "tree-diff" => Accepts {
+        "flags-diff" | "tree-diff" => Accepts {
             positional: true,
             values: &["with", "top"],
             switches: &[],
@@ -166,6 +166,12 @@ usage:
       R9_RUCC, or from the path. --flags gives more rucc flags, separated by spaces. --kencc
       compiles each unit with the kencc driver of rucc and the Plan 9 target, as r9 ccd does,
       with DIR as the sysroot.
+  r9 flags-diff A --with B [--top N]
+      Compare the arguments that two builds gave the compiler slot (plan 05.5). A and B are the
+      compile.jsonl files of the builds. A unit is the compiler name, the directory and the
+      sources. Print the units with other arguments and the units that only one build has. At
+      most N units (20 by default) are printed in each group. Exit with failure when the builds
+      differ.
   r9 tree-diff A --with B [--top N]
       Compare the files that two builds wrote. A and B are the directories of two builds, or
       their changed.sha256 files. Print the files that only one build wrote, the files with
