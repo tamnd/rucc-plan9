@@ -19,6 +19,7 @@ pub mod fetch;
 pub mod flagsdiff;
 pub mod image;
 pub mod locate;
+pub mod mix;
 pub mod obj;
 pub mod objcheck;
 pub mod optab;

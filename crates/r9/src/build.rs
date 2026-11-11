@@ -224,11 +224,16 @@ pub fn command(
     repo: &crate::repo::Repo,
     args: &crate::cli::Args,
 ) -> Result<(Summary, String), String> {
-    let r = match args.get("side") {
-        Some("G" | "g") => false,
-        Some("R" | "r") => true,
+    // `r9 mix` is side R with a mix.
+    let mix = crate::mix::from_args(args)?;
+    let r = match (args.command.as_str(), args.get("side")) {
+        ("mix", _) | (_, Some("R" | "r")) => true,
+        (_, Some("G" | "g")) => false,
         _ => return Err("give --side G or --side R".into()),
     };
+    if args.command == "mix" && mix.is_none() {
+        return Err("give the mix with --file, --mix or --default".into());
+    }
     let mut req = boot::request_from(repo, args)?;
     let release = req
         .base
@@ -248,7 +253,11 @@ pub fn command(
         req.work = repo.root.join("work").join("build").join(format!(
             "{release}-{}-{}",
             req.objtype,
-            if r { "R" } else { "G" }
+            match (&mix, r) {
+                (Some(_), _) => "mix",
+                (None, true) => "R",
+                (None, false) => "G",
+            }
         ));
     }
     let slot = if r {
@@ -259,11 +268,21 @@ pub fn command(
             || std::env::var_os("R9_RUCC").map_or_else(|| "rucc".into(), Into::into),
             Into::into,
         );
+        let bringup = std::env::var("R9_BRINGUP").unwrap_or_else(|_| "cc:auto".into());
+        if let Some(m) = &mix {
+            // r9-cc runs kencc for a call on side G only under cc:auto.
+            if !bringup.contains("cc:auto") {
+                return Err("a mix needs cc:auto in R9_BRINGUP".into());
+            }
+            let path = req.work.join("mix.txt");
+            std::fs::write(&path, m.text()).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
         let cfg = crate::ccd::Config {
             port: 0,
             rucc,
             work: req.work.join("ccd"),
             log: Some(std::sync::Arc::new(std::sync::Mutex::new(file))),
+            mix: mix.map(std::sync::Arc::new),
         };
         let port = crate::ccd::start(&cfg)?;
         eprintln!(
@@ -271,10 +290,7 @@ pub fn command(
             cfg.rucc.display(),
             log.display()
         );
-        Slot::R {
-            port,
-            bringup: std::env::var("R9_BRINGUP").unwrap_or_else(|_| "cc:auto".into()),
-        }
+        Slot::R { port, bringup }
     } else {
         Slot::G
     };
