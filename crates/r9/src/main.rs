@@ -132,6 +132,28 @@ fn locate(args: &Args) -> Result<ExitCode, String> {
 /// Run a command that reads the compile records of a build.
 fn run_records(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
+        "flags-diff" => {
+            let a = args
+                .target
+                .as_deref()
+                .ok_or("give the compile.jsonl file of the first build")?;
+            let b = args
+                .get("with")
+                .ok_or("give --with, the compile.jsonl file of the second build")?;
+            let top = args
+                .get("top")
+                .map_or(Ok(20), str::parse)
+                .map_err(|e| format!("--top: {e}"))?;
+            let a = r9::census::load(std::path::Path::new(a))?;
+            let b = r9::census::load(std::path::Path::new(b))?;
+            let d = r9::flagsdiff::diff(&a, &b);
+            print!("{}", r9::flagsdiff::report(&d, top));
+            Ok(if d.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
         "tree-diff" => {
             let a = args
                 .target
