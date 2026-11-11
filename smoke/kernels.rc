@@ -1,0 +1,4 @@
+# What mk kernels needs (plan 09.1), run by r9 boot with --in guest. guest/r9-kernels builds each
+# kernel of /sys/src/9 and prints one result line for each, with the missing files of a failure.
+mkdir -p /tmp/r9in && cd /tmp/r9in && tar xf $r9in
+rc /tmp/r9in/r9-kernels
