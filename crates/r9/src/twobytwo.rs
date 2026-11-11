@@ -147,15 +147,18 @@ fn boot_once(
     image: &Path,
     work: &Path,
 ) -> Result<Results, String> {
+    // The suite is the target of `r9 2x2`, and the target of `r9 boot` is the release, so the
+    // boot does not get it.
+    let mut a = args.clone();
+    a.target = None;
     if suite == "diffrun" {
-        return crate::diffrun::boot_once(repo, args, objtype, image, work);
+        return crate::diffrun::boot_once(repo, &a, objtype, image, work);
     }
     let file = baseline::SUITES
         .iter()
         .find(|s| s.0 == suite)
         .map(|s| s.1)
         .ok_or_else(|| format!("there is no suite {suite}"))?;
-    let mut a = args.clone();
     let path = |p: &Path| p.display().to_string();
     a.values.insert("row".into(), objtype.to_string());
     a.values.insert("image".into(), path(image));
