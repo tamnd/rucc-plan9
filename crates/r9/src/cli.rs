@@ -42,6 +42,10 @@ impl Accepts {
 
 /// What each command of `r9` accepts, or `None` for a command `r9` does not have.
 #[must_use]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one table with a line for each option"
+)]
 pub fn accepted(command: &str) -> Option<Accepts> {
     Some(match command {
         "help" | "version" | "check" => Accepts::NOTHING,
@@ -68,10 +72,22 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         "build" | "mix" => Accepts {
             positional: true,
             values: &[
-                "side", "row", "accel", "timeout", "firmware", "dir", "out", "image", "rucc",
-                "default", "file", "mix",
+                "side",
+                "row",
+                "accel",
+                "timeout",
+                "firmware",
+                "dir",
+                "out",
+                "image",
+                "rucc",
+                "default",
+                "file",
+                "mix",
+                "test",
+                "test-timeout",
             ],
-            switches: &["keep"],
+            switches: &["keep", "bisect"],
         },
         "image" => Accepts {
             positional: true,
@@ -175,7 +191,8 @@ usage:
       after the root disk. The writes of the guest to it are not kept. --net gives the guest a
       network card on the user network of QEMU, where the host is 10.0.2.2.
   r9 build [NAME] --side G|R [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
-          [--firmware PATH] [--image FILE] [--out DIR] [--rucc PATH] [--keep]
+          [--firmware PATH] [--image FILE] [--out DIR] [--rucc PATH] [--keep] [--test CMD]
+          [--test-timeout SECS]
       Boot the g-base image of the row, or the image of the release NAME when there is no
       g-base image, and run mk install in DIR (/sys/src by default) with r9-cc in the compiler
       slot. --image boots FILE. Collect the compile records, the mk log, the files that the
@@ -183,7 +200,11 @@ usage:
       DIR/collected. Write the summary to build.toml and print the census. Side G runs kencc.
       Side R starts r9 ccd on a free port and sends each call to rucc (PATH, or R9_RUCC, or rucc
       on the path). R9_BRINGUP gives the bring-up words (cc:auto by default), so that a call
-      that rucc fails goes to kencc. The line of each call is in ccd.log.
+      that rucc fails goes to kencc. The line of each call is in ccd.log. --test runs the rc
+      command CMD in the guest after the build, in a new note group. After SECS seconds (600
+      by default) the guest kills the test, and the status is timeout. The status and the
+      output go to test.status and test.log in DIR/collected. The command fails when the
+      build or the test fails.
   r9 mix [NAME] [--file UNIT=R|G,...] [--mix FILE] [--default R|G] [r9 build options]
       Build with some units from rucc and the others from kencc (plan 05.7, 12.8). A unit is a
       source file of the guest, such as /sys/src/libc/port/strcmp.c, or a directory, which
@@ -192,6 +213,13 @@ usage:
       line. This is r9 build --side R, but r9 ccd gives the status mix: G to a call that has a
       source on side G, and r9-cc then runs kencc. ccd.log marks such a call with G. The mix
       goes to mix.txt in the output directory. r9 build and r9 ccd take the same options.
+  r9 mix --bisect --test CMD [r9 build options]
+      Find the unit whose rucc object makes the test fail (plan 12.8). Build DIR with kencc,
+      and the test must pass. Build it with rucc, and the test must fail. The units are the
+      files that rucc compiled. Then build half of the units that are left with rucc and the
+      others with kencc, until one unit is left. When the test fails only with units from both
+      halves, print the units that are left. Each build goes to stepN in the output directory.
+      The exit status is 1 only when the test fails with kencc alone.
   r9 baseline [NAME] [--row OBJTYPE,...] [--runs N] [--suites boot,smoke,test] [--pin PIN]
           [--image FILE] [--accel kvm|hvf|tcg] [--timeout SECS] [--firmware PATH] [--out DIR]
       Run each suite N times (3 by default) on the g-base image of each row (amd64,arm64 by

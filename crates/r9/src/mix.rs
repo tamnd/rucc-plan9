@@ -149,6 +149,147 @@ pub fn from_args(args: &crate::cli::Args) -> Result<Option<Mix>, String> {
     Ok(Some(mix))
 }
 
+/// What a bisection found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Found {
+    /// The R object of this unit alone makes the test fail.
+    One(String),
+    /// The test fails only with R objects from both halves of this set, which is an ABI or a
+    /// layout disagreement between units.
+    Several(Vec<String>),
+}
+
+/// Find the unit whose R object makes the test fail (plan 12.8). `fails(units)` builds with
+/// `units` from R and each other unit from G, and tells whether the test fails. The caller makes
+/// sure that the test fails with each unit from R.
+pub fn bisect(
+    units: &[String],
+    mut fails: impl FnMut(&[String]) -> Result<bool, String>,
+) -> Result<Found, String> {
+    let mut left = units.to_vec();
+    while left.len() > 1 {
+        let (a, b) = left.split_at(left.len() / 2);
+        if fails(a)? {
+            left = a.to_vec();
+        } else if fails(b)? {
+            left = b.to_vec();
+        } else {
+            return Ok(Found::Several(left));
+        }
+    }
+    left.pop()
+        .map(Found::One)
+        .ok_or_else(|| "mix: no unit to bisect".to_owned())
+}
+
+/// The units that rucc compiled, from the text of a `ccd.log`. A line is `ok CC DIR FILE...
+/// TIME STATUS`, and each file becomes an absolute path of the guest.
+#[must_use]
+pub fn units_of_log(text: &str) -> Vec<String> {
+    let mut units = Vec::new();
+    for line in text.lines() {
+        let mut words = line.split(' ');
+        if words.next() != Some("ok") {
+            continue;
+        }
+        let (Some(_cc), Some(dir)) = (words.next(), words.next()) else {
+            continue;
+        };
+        for w in words {
+            if w.strip_suffix("ms")
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            {
+                break;
+            }
+            units.push(crate::ccd::absolute(dir, w));
+        }
+    }
+    units.sort();
+    units.dedup();
+    units
+}
+
+/// `r9 mix --bisect`: find the unit of `one.dir` whose R object makes the test fail.
+///
+/// The first build is side G, and the test must pass. The second build is side R, and the test
+/// must fail. The units are the files that rucc compiled in the second build. Then each step
+/// builds half of the units that are left from R and the others from G. The result is false only
+/// when the test fails with G alone, because then the test is wrong.
+pub fn bisect_command(
+    one: &crate::build::Build,
+    req: &crate::boot::Request,
+    has_mix: bool,
+) -> Result<(bool, String), String> {
+    if has_mix {
+        return Err("--bisect takes no mix; it makes its own".into());
+    }
+    let mut report = String::new();
+    let mut step = 0;
+    let mut build =
+        |side_r: Option<Option<Mix>>, what: &str| -> Result<(bool, std::path::PathBuf), String> {
+            step += 1;
+            let mut r = req.clone();
+            r.work = req.work.join(format!("step{step}"));
+            let (summary, _) = one.run(r.clone(), side_r)?;
+            let status = summary.test_status.unwrap_or_default();
+            let failed = !summary.passed || !status.is_empty();
+            let text = format!(
+                "step {step}: {what}: build {}, test {}",
+                if summary.passed { "passed" } else { "failed" },
+                if status.is_empty() { "passed" } else { &status }
+            );
+            eprintln!("r9 mix: {text}");
+            let _ = writeln!(report, "{text}");
+            Ok((failed, r.work))
+        };
+    if build(None, "each unit from G")?.0 {
+        let _ = writeln!(
+            report,
+            "the test fails with G alone, so there is no unit to find"
+        );
+        return Ok((false, report));
+    }
+    let (failed, work) = build(Some(None), "each unit from R")?;
+    if !failed {
+        let _ = writeln!(
+            report,
+            "the test passes with R, so there is no unit to find"
+        );
+        return Ok((true, report));
+    }
+    let log = std::fs::read_to_string(work.join("ccd.log")).unwrap_or_default();
+    let units = units_of_log(&log);
+    let found = bisect(&units, |half| {
+        let mut m = Mix::new(Side::G);
+        for u in half {
+            m.units.insert(u.clone(), Side::R);
+        }
+        let what = if half.len() == 1 {
+            format!("{} from R", half[0])
+        } else {
+            format!("{} of {} units from R", half.len(), units.len())
+        };
+        build(Some(Some(m)), &what).map(|(failed, _)| failed)
+    })?;
+    match found {
+        Found::One(unit) => {
+            let _ = writeln!(report, "the unit is {unit}");
+            let _ = writeln!(report, "next: r9 sdiff on the R and G objects of the unit");
+        }
+        Found::Several(set) => {
+            let _ = writeln!(
+                report,
+                "the test fails only with units from both halves of these {} units:",
+                set.len()
+            );
+            for u in set {
+                let _ = writeln!(report, "  {u}");
+            }
+        }
+    }
+    Ok((true, report))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +320,39 @@ mod tests {
         let mut again = Mix::new(Side::R);
         again.add_file(&mix.text()).unwrap();
         assert_eq!(again, mix);
+    }
+
+    #[test]
+    fn bisection_finds_one_unit_or_says_that_it_needs_several() {
+        let units: Vec<String> = (0..7).map(|i| format!("/u/{i}.c")).collect();
+        let mut steps = 0;
+        let found = bisect(&units, |half| {
+            steps += 1;
+            Ok(half.iter().any(|u| u == "/u/5.c"))
+        });
+        assert_eq!(found, Ok(Found::One("/u/5.c".into())));
+        assert!(steps <= 6, "{steps} steps");
+        let found = bisect(&units, |half| {
+            Ok(half.iter().any(|u| u == "/u/1.c") && half.iter().any(|u| u == "/u/6.c"))
+        });
+        assert_eq!(found, Ok(Found::Several(units.clone())));
+    }
+
+    #[test]
+    fn the_units_come_from_the_ok_lines_of_ccd_log() {
+        let log = "ok 6c /sys/src/cmd/mk arc.c 120ms \n\
+                   ok 6c /sys/src/cmd/mk ../x/a.c b.c 3ms \n\
+                   G 6c /sys/src/cmd/mk c.c 1ms mix: G\n\
+                   FAIL 6c /sys/src/cmd/mk d.c 9ms rucc failed\n";
+        assert_eq!(
+            units_of_log(log),
+            [
+                "/sys/src/cmd/mk/arc.c",
+                "/sys/src/cmd/mk/b.c",
+                "/sys/src/cmd/x/a.c"
+            ]
+            .map(String::from)
+        );
     }
 
     #[test]
