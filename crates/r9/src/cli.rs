@@ -71,7 +71,9 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         },
         "diffrun" => Accepts {
             positional: false,
-            values: &["row", "r", "g", "runs", "accel", "timeout", "firmware", "out"],
+            values: &[
+                "row", "r", "g", "runs", "accel", "timeout", "firmware", "out",
+            ],
             switches: &[],
         },
         "build" | "mix" => Accepts {
