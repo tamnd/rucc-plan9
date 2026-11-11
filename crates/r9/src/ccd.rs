@@ -183,16 +183,45 @@ pub fn translate(call: &Call, root: &str) -> Result<Translated, String> {
             args.push(remote(a));
         }
     }
+    let here = remote(".");
+    // With `-.`, kencc searches the current directory first for a quoted include, in place of
+    // the directory of the source (`include[0]` in `cc/lex.c`). rucc's kencc driver gives `-.`
+    // as `-I.`, and `.` of rucc is a directory of the host. So the directory of the guest goes
+    // in front of the other directories here.
+    if call.args.iter().any(|a| dot_flag(a)) {
+        args.insert(3, format!("-I{here}"));
+    }
     let include = format!(
         "{root}/{objtype}/include {root}/sys/include",
         objtype = call.objtype
     );
-    let options = format!("-idirafter {root}{}", absolute("/", &call.dir));
+    // When no directory has the file, kencc opens the name from the current directory, so it
+    // goes last. gcc and rucc drop a `-I` directory that is also an `-idirafter` directory, so
+    // the `-idirafter` is left out when a `-I` names the current directory. Else the `-I.` of
+    // the pc64 kernel moved after /sys/include, and `#include "mp.h"` found the header of
+    // libmp.
+    let options = if args
+        .iter()
+        .any(|a| a.strip_prefix("-I") == Some(here.as_str()))
+    {
+        String::new()
+    } else {
+        format!("-idirafter {here}")
+    };
     Ok(Translated {
         args,
         include,
         options,
         renamed,
+    })
+}
+
+/// Whether `arg` is a cluster of kencc flags with `.` in it, such as `-.` or `-w.`.
+fn dot_flag(arg: &str) -> bool {
+    arg.strip_prefix('-').is_some_and(|flags| {
+        flags.contains('.')
+            && !flags.starts_with(['D', 'I', 'o'])
+            && flags.chars().all(|c| c == '.' || c.is_ascii_alphabetic())
     })
 }
 
@@ -741,6 +770,43 @@ mod tests {
             "-idirafter 9p:tcp!127.0.0.1!4000/sys/src/cmd/acme"
         );
         assert!(t.renamed.is_empty());
+    }
+
+    #[test]
+    fn the_current_directory_is_not_dropped_after_sys_include() {
+        let root = "9p:a";
+        let mut c = call(&["-FTVw", "-I.", "-.", "../pc/mp.c"]);
+        c.dir = "/sys/src/9/pc64".into();
+        let t = translate(&c, root).unwrap();
+        assert_eq!(
+            t.args,
+            [
+                "--driver=kencc",
+                "--target=aarch64-plan9",
+                "--sysroot=9p:a",
+                "-I9p:a/sys/src/9/pc64",
+                "-FTVw",
+                "-I9p:a/sys/src/9/pc64",
+                "-.",
+                "9p:a/sys/src/9/pc/mp.c",
+            ]
+        );
+        assert_eq!(t.options, "");
+    }
+
+    #[test]
+    fn dot_puts_the_current_directory_first() {
+        let mut c = call(&["-FVw", "-.", "../omap/fpi.c"]);
+        c.dir = "/sys/src/9/teg2".into();
+        let t = translate(&c, "9p:a").unwrap();
+        assert_eq!(t.args[3], "-I9p:a/sys/src/9/teg2");
+        assert_eq!(t.options, "");
+        let t = translate(&call(&["-w.", "a.c"]), "9p:a").unwrap();
+        assert_eq!(t.args[3], "-I9p:a/sys/src/cmd/acme");
+        assert!(!dot_flag("-DX=1.0"));
+        assert!(!dot_flag("-I."));
+        assert!(!dot_flag("-oa.6"));
+        assert!(dot_flag("-."));
     }
 
     #[test]
