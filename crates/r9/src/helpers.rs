@@ -17,8 +17,9 @@ use std::path::{Path, PathBuf};
 
 use crate::obj::{self, Object};
 
-/// The extensions of the files that are sources.
-const SOURCES: &[&str] = &["c", "h", "s", "y", "l"];
+/// The extensions of the files that are sources. An `.mp` file is the input of mpc, which makes C
+/// code with names such as `edwards_add`.
+const SOURCES: &[&str] = &["c", "h", "s", "y", "l", "mp"];
 
 /// Add each identifier of `text` to `set`.
 pub fn identifiers(text: &[u8], set: &mut BTreeSet<String>) {

@@ -300,8 +300,9 @@ impl Checker {
 pub fn file(c: &Checker, name: &str, bytes: &[u8]) -> Result<(String, usize), String> {
     let mut objects = Vec::new();
     if let Some(members) = obj::archive(bytes)? {
+        let arch_of = obj::member_arch(&members);
         for m in members {
-            if Arch::of_name(&m.name) != Some(Arch::Amd64) {
+            if arch_of(&m.name) != Some(Arch::Amd64) {
                 continue;
             }
             let o = obj::decode(Arch::Amd64, &m.data)

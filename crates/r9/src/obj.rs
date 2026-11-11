@@ -837,12 +837,21 @@ pub fn diff_objects(a: &Object, b: &Object, context: usize) -> String {
     rep
 }
 
-/// Decode a file of `arch`: one object, or the members of an archive that end in `.6` or `.7`.
+/// The machine of each member of an archive, by its name. `ar` keeps 16 bytes of a name, so a
+/// long name loses its `.6` or `.7`. Such a member has the machine of the first member whose name
+/// has the suffix.
+pub fn member_arch(members: &[Member]) -> impl Fn(&str) -> Option<Arch> + use<> {
+    let first = members.iter().find_map(|m| Arch::of_name(&m.name));
+    move |name: &str| Arch::of_name(name).or(first)
+}
+
+/// Decode a file: one object, or the members of an archive that are `.6` or `.7` objects.
 pub fn objects(name: &str, bytes: &[u8]) -> Result<Vec<(String, Object)>, String> {
     if let Some(members) = archive(bytes)? {
         let mut out = Vec::new();
+        let arch_of = member_arch(&members);
         for m in members {
-            let arch = Arch::of_name(&m.name)
+            let arch = arch_of(&m.name)
                 .ok_or_else(|| format!("{name}({}): not a .6 or .7 member", m.name))?;
             let o = decode(arch, &m.data).map_err(|e| format!("{name}({}): {e}", m.name))?;
             out.push((m.name, o));
@@ -1079,6 +1088,14 @@ pub(crate) mod tests {
             ("a.6", &b"ab"[..])
         );
         assert!(archive(b"not").unwrap().is_none());
+        let m = |n: &str| Member {
+            name: n.into(),
+            data: Vec::new(),
+        };
+        let arch_of = member_arch(&[m("threadpostmounts"), m("a.6")]);
+        assert_eq!(arch_of("threadpostmounts"), Some(Arch::Amd64));
+        assert_eq!(arch_of("b.7"), Some(Arch::Arm64));
+        assert_eq!(member_arch(&[m("x")])("x"), None);
     }
 
     #[test]
