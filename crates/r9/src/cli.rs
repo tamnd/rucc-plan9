@@ -42,6 +42,10 @@ impl Accepts {
 
 /// What each command of `r9` accepts, or `None` for a command `r9` does not have.
 #[must_use]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one table with a line for each option"
+)]
 pub fn accepted(command: &str) -> Option<Accepts> {
     Some(match command {
         "help" | "version" | "check" => Accepts::NOTHING,
@@ -65,12 +69,25 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             ],
             switches: &[],
         },
-        "build" => Accepts {
+        "build" | "mix" => Accepts {
             positional: true,
             values: &[
-                "side", "row", "accel", "timeout", "firmware", "dir", "out", "image",
+                "side",
+                "row",
+                "accel",
+                "timeout",
+                "firmware",
+                "dir",
+                "out",
+                "image",
+                "rucc",
+                "default",
+                "file",
+                "mix",
+                "test",
+                "test-timeout",
             ],
-            switches: &["keep"],
+            switches: &["keep", "bisect"],
         },
         "image" => Accepts {
             positional: true,
@@ -91,7 +108,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         },
         "ccd" => Accepts {
             positional: false,
-            values: &["port", "rucc", "work"],
+            values: &["port", "rucc", "work", "default", "file", "mix"],
             switches: &[],
         },
         "locate" => Accepts {
@@ -107,6 +124,31 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         "rtt" => Accepts {
             positional: false,
             values: &["port", "count", "file", "wait"],
+            switches: &[],
+        },
+        "objdiff" => Accepts {
+            positional: true,
+            values: &["with", "context"],
+            switches: &[],
+        },
+        "optab" => Accepts {
+            positional: false,
+            values: &["root", "pin", "out"],
+            switches: &[],
+        },
+        "sdiff" => Accepts {
+            positional: true,
+            values: &["with", "function", "width"],
+            switches: &["all"],
+        },
+        "helpers" => Accepts {
+            positional: true,
+            values: &["src", "with"],
+            switches: &[],
+        },
+        "objcheck" => Accepts {
+            positional: true,
+            values: &[],
             switches: &[],
         },
         "demands" => Accepts {
@@ -130,7 +172,9 @@ usage:
   r9 sets [--write] [--as-of TIME]
       Read what 9front publishes and expand sets.toml into pins. Print the pins, and say whether
       pins.toml has them. --write writes pins.toml. --as-of takes the pins at a UTC time, such as
-      2026-11-09T06:00:00Z.
+      2026-11-09T06:00:00Z. For the tree, --as-of uses the commit date that GitHub keeps, not
+      the time of the push. Thus a commit that 9front pushed after TIME with an older date can
+      be taken.
   r9 check
       Check sets.toml, pins.toml, rows.toml and machines.toml with no network. A hand edit of
       pins.toml fails here.
@@ -151,13 +195,36 @@ usage:
       in place of the release image, with a fresh overlay on top. --disk attaches a qcow2 file
       after the root disk. The writes of the guest to it are not kept. --net gives the guest a
       network card on the user network of QEMU, where the host is 10.0.2.2.
-  r9 build [NAME] --side G [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
-          [--firmware PATH] [--image FILE] [--out DIR] [--keep]
+  r9 build [NAME] --side G|R [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
+          [--firmware PATH] [--image FILE] [--out DIR] [--rucc PATH] [--keep] [--test CMD]
+          [--test-timeout SECS]
       Boot the g-base image of the row, or the image of the release NAME when there is no
-      g-base image, and run mk install in DIR (/sys/src by default) with r9-cc in the
-      compiler slot. --image boots FILE. Collect the compile records, the mk log, the files that the build wrote
-      with their SHA-256, and the generated C sources and headers into DIR/collected. Write the
-      summary to build.toml and print the census. Side R comes at P1.
+      g-base image, and run mk install in DIR (/sys/src by default) with r9-cc in the compiler
+      slot. --image boots FILE. Collect the compile records, the mk log, the files that the
+      build wrote with their SHA-256, and the generated C sources and headers into
+      DIR/collected. Write the summary to build.toml and print the census. Side G runs kencc.
+      Side R starts r9 ccd on a free port and sends each call to rucc (PATH, or R9_RUCC, or rucc
+      on the path). R9_BRINGUP gives the bring-up words (cc:auto by default), so that a call
+      that rucc fails goes to kencc. The line of each call is in ccd.log. --test runs the rc
+      command CMD in the guest after the build, in a new note group. After SECS seconds (600
+      by default) the guest kills the test, and the status is timeout. The status and the
+      output go to test.status and test.log in DIR/collected. The command fails when the
+      build or the test fails.
+  r9 mix [NAME] [--file UNIT=R|G,...] [--mix FILE] [--default R|G] [r9 build options]
+      Build with some units from rucc and the others from kencc (plan 05.7, 12.8). A unit is a
+      source file of the guest, such as /sys/src/libc/port/strcmp.c, or a directory, which
+      applies to each file under it. The longest unit that matches a file gives its side, and
+      the other files get the default side (R by default). FILE has one UNIT=R or UNIT=G on each
+      line. This is r9 build --side R, but r9 ccd gives the status mix: G to a call that has a
+      source on side G, and r9-cc then runs kencc. ccd.log marks such a call with G. The mix
+      goes to mix.txt in the output directory. r9 build and r9 ccd take the same options.
+  r9 mix --bisect --test CMD [r9 build options]
+      Find the unit whose rucc object makes the test fail (plan 12.8). Build DIR with kencc,
+      and the test must pass. Build it with rucc, and the test must fail. The units are the
+      files that rucc compiled. Then build half of the units that are left with rucc and the
+      others with kencc, until one unit is left. When the test fails only with units from both
+      halves, print the units that are left. Each build goes to stepN in the output directory.
+      The exit status is 1 only when the test fails with kencc alone.
   r9 baseline [NAME] [--row OBJTYPE,...] [--runs N] [--suites boot,smoke,test] [--pin PIN]
           [--image FILE] [--accel kvm|hvf|tcg] [--timeout SECS] [--firmware PATH] [--out DIR]
       Run each suite N times (3 by default) on the g-base image of each row (amd64,arm64 by
@@ -196,15 +263,50 @@ usage:
       Compare the files that two builds wrote. A and B are the directories of two builds, or
       their changed.sha256 files. Print the files that only one build wrote, the files with
       different contents, and the archives whose members are the same but whose dates differ.
-      At most N names (20 by default) are printed in each group. Exit with failure when the
-      builds differ.
-  r9 ccd [--port N] [--rucc PATH] [--work DIR]
+      The raced group has the archives that differ only by a member that two ar commands put
+      in them, and the APE programs that link such an archive. At most N names (20 by default)
+      are printed in each group. Exit with failure when the builds differ.
+  r9 objdiff A [--with B] [--context N]
+      Compare two objects of 6c or 7c, or two archives of them, record by record (plan 07.6).
+      The objects are decoded as 6l and 7l read them, and each symbol is printed as 6c -S and
+      7c -S print it. Line numbers and the order of the symbol slots are not compared. Print
+      the symbols that only one file has, and the lines that differ in each function, with N
+      same lines (3 by default) around each change. Exit with failure when the records
+      differ. With no --with, print the listing of A.
+  r9 sdiff A --with B [--function NAME] [--width N] [--all]
+      Show the code of two objects of 6c or 7c, or of two archives of them, side by side,
+      function by function (plan 12.8). A is on the left and B is on the right. The lines are
+      aligned as in r9 objdiff. The middle column is | for a changed line, < for a line that
+      only A has and > for a line that only B has. Show only the functions that differ, or all
+      of them with --all, or only NAME. Each side is N characters wide (60 by default). Exit
+      with failure when a function differs.
+  r9 helpers PATH --src DIR
+  r9 helpers R --with G
+      List the external symbols that the objects at PATH refer to and that no source under DIR
+      names (plan 08.6). PATH is a .6 or .7 file, an archive, or a directory of them. A source is
+      a file that ends in .c, .h, .s, .y, .l or .mp. The list is the set of calls that the
+      compiler makes by itself, and rucc calls only these. With --with, R has the objects of
+      rucc and G has the objects of kencc, in the same layout. Compare each R object with the
+      G object of the same name, and list the symbols that R refers to and G does not. Exit
+      with failure when there is one.
+  r9 optab --root DIR [--pin PIN] [--out FILE]
+      Read the instruction tables of 6l under DIR/sys/src/cmd/6l (plan 07.3): the Y classes of
+      l.h, optab and its ytab arrays in optab.c, ymovtab in span.c, and ycover in obj.c. Write them as Rust to
+      FILE, or print them. PIN goes in the header. The file crates/r9/src/optab6.rs is the
+      output for the pin, and r9 objcheck uses it.
+  r9 objcheck FILE
+      Check a .6 file, or each .6 member of an archive, against the instruction tables of 6l
+      (plan 07.6). Each instruction gets the classes of its operands as oclass in 6l/span.c
+      gives them, after the changes that 6l makes when it reads an object. An instruction that
+      no pair of its ytab or of ymovtab covers is the link error doasm: notfound. Print each
+      such instruction, and exit with failure when there is one.
+  r9 ccd [--port N] [--rucc PATH] [--work DIR] [--file UNIT=R|G,...] [--mix FILE] [--default R|G]
       Serve the compiler slot of a guest (plan 05.4). r9-cc in the guest sends each call of 6c
       and 7c to port N on the host (5640 by default), as tcp!10.0.2.2!N, with the name space of
       the build on a second connection. ccd runs rucc (PATH, or R9_RUCC, or rucc on the path)
       with the sysroot on that name space and sends the objects back. The outputs of each call
       go in a new directory under DIR (a temporary directory by default) while rucc runs. Each
-      call prints one line. Boot the guest with --net.
+      call prints one line. Boot the guest with --net. The mix options are as in r9 mix.
   r9 rtt [--port N] [--count N] [--file PATH] [--wait SECS]
       Time 9P round trips from a guest to a host process (open question 10). Listen on the port
       (5641 by default) and wait up to SECS (1800 by default) for r9rtt in the guest, which

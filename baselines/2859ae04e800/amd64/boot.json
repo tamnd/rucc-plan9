@@ -1,0 +1,45 @@
+{
+  "flaky": 0,
+  "flaky_results": {},
+  "graded": 14,
+  "graded_fail": 0,
+  "objtype": "amd64",
+  "pin": "2859ae04e800",
+  "results": {
+    "console": "value 136c9f5b97ed37513a75587bd5d65b3f9e14d069b93a803fae94491f6cc2ce19",
+    "halted": "ok",
+    "step-1": "ok",
+    "step-10": "ok",
+    "step-11": "ok",
+    "step-12": "ok",
+    "step-2": "ok",
+    "step-3": "ok",
+    "step-4": "ok",
+    "step-5": "ok",
+    "step-6": "ok",
+    "step-7": "ok",
+    "step-8": "ok",
+    "step-9": "ok"
+  },
+  "runs": [
+    {
+      "passed": true,
+      "seconds": 31.1,
+      "sha256": "0c3ffd38fdab208fc104b1109be9924cadaa0ba78abc2bba5e447156b24e1cc9",
+      "tests": 14
+    },
+    {
+      "passed": true,
+      "seconds": 31.8,
+      "sha256": "0c3ffd38fdab208fc104b1109be9924cadaa0ba78abc2bba5e447156b24e1cc9",
+      "tests": 14
+    },
+    {
+      "passed": true,
+      "seconds": 35.5,
+      "sha256": "0c3ffd38fdab208fc104b1109be9924cadaa0ba78abc2bba5e447156b24e1cc9",
+      "tests": 14
+    }
+  ],
+  "suite": "boot"
+}

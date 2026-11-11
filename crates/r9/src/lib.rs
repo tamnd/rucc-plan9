@@ -4,6 +4,7 @@
 //! The commands arrive one milestone at a time, in the order of plan 16. Each command has its own
 //! module, and the binary only parses the command line and calls it.
 
+pub mod anames;
 pub mod baseline;
 pub mod boot;
 pub mod build;
@@ -16,10 +17,18 @@ pub mod demands;
 pub mod disk;
 pub mod fetch;
 pub mod flagsdiff;
+pub mod helpers;
 pub mod image;
 pub mod locate;
+pub mod mix;
+pub mod obj;
+pub mod objcheck;
+pub mod optab;
+#[rustfmt::skip]
+pub mod optab6;
 pub mod repo;
 pub mod rtt;
+pub mod sdiff;
 pub mod sets;
 pub mod tar;
 pub mod treediff;

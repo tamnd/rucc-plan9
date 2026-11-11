@@ -38,13 +38,18 @@
 //!
 //! An empty status is success. The status `rucc failed` asks `r9-cc` to say what happened, and
 //! the status of a call that could not run starts with `ccd:`.
+//!
+//! Before the reply, `r9 ccd` checks each `.6` file that rucc wrote with the instruction tables
+//! of `6l` (plan 07.3). When `6l` cannot encode an instruction of the file, the status is
+//! `objcheck failed`, standard error tells the instructions, and the directory of the call stays
+//! on the host with the object in it.
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -376,6 +381,10 @@ pub struct Config {
     pub rucc: PathBuf,
     /// A directory for the outputs of each call.
     pub work: PathBuf,
+    /// The file that gets the line of each call. With none, the lines go to standard output.
+    pub log: Option<Arc<Mutex<std::fs::File>>>,
+    /// The side of each unit. With none, each call goes to rucc.
+    pub mix: Option<Arc<crate::mix::Mix>>,
 }
 
 /// Copy bytes from `from` to `to` until the end of `from`, then close the write side of `to`.
@@ -413,6 +422,12 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
     let Some(guest) = exports.take(id, EXPORT_WAIT) else {
         return fail(format!("ccd: no export for call {id}"));
     };
+    if let Some(mix) = &cfg.mix
+        && mix.side_of_call(sources(call).iter().map(String::as_str)) == crate::mix::Side::G
+    {
+        let _ = guest.shutdown(Shutdown::Both);
+        return fail(crate::mix::STATUS_G.to_owned());
+    }
     let shut = guest.try_clone().ok();
     let port = match relay(guest) {
         Ok(p) => p,
@@ -463,7 +478,13 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
             };
             if out.status.success() {
                 match outputs(&dir, &t.renamed) {
-                    Ok(files) => reply.files = files,
+                    Ok(files) => match check_objects(&files) {
+                        None => reply.files = files,
+                        Some(report) => {
+                            "objcheck failed".clone_into(&mut reply.status);
+                            reply.stderr.extend_from_slice(report.as_bytes());
+                        }
+                    },
                     Err(e) => reply.status = format!("ccd: {e}"),
                 }
             }
@@ -482,6 +503,44 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
         }
     }
     reply
+}
+
+/// The source files of a call, as absolute paths of the guest. A call that reads its standard
+/// input gives its directory.
+#[must_use]
+pub fn sources(call: &Call) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut args = call.args.iter();
+    while let Some(a) = args.next() {
+        if a == "-I" || a == "-o" {
+            args.next();
+        } else if !a.starts_with('-') {
+            out.push(absolute(&call.dir, a));
+        }
+    }
+    if out.is_empty() {
+        out.push(absolute("/", &call.dir));
+    }
+    out
+}
+
+/// Check each `.6` file of a reply with the instruction tables of `6l`. Return what `6l` cannot
+/// encode, or `None` when each instruction has an encoding.
+fn check_objects(files: &[(String, Vec<u8>)]) -> Option<String> {
+    static CHECKER: OnceLock<crate::objcheck::Checker> = OnceLock::new();
+    let checker = CHECKER.get_or_init(crate::objcheck::Checker::new);
+    let mut report = String::new();
+    for (name, bytes) in files.iter().filter(|(n, _)| n.ends_with(".6")) {
+        match crate::objcheck::file(checker, name, bytes) {
+            Ok((_, 0)) => {}
+            Ok((text, _)) => report.push_str(&text),
+            Err(e) => {
+                report.push_str(&e);
+                report.push('\n');
+            }
+        }
+    }
+    (!report.is_empty()).then_some(report)
 }
 
 /// The files that rucc wrote in `dir`, with their names in the guest.
@@ -532,10 +591,12 @@ fn serve(cfg: &Config, exports: &Exports, stream: TcpStream) -> io::Result<()> {
         .filter(|a| !a.starts_with('-'))
         .map(String::as_str)
         .collect();
-    println!(
+    let text = format!(
         "{} {} {} {} {}ms {}",
         if reply.status.is_empty() {
             "ok"
+        } else if reply.status == crate::mix::STATUS_G {
+            "G"
         } else {
             "FAIL"
         },
@@ -545,6 +606,13 @@ fn serve(cfg: &Config, exports: &Exports, stream: TcpStream) -> io::Result<()> {
         start.elapsed().as_millis(),
         reply.status
     );
+    match &cfg.log {
+        Some(log) => {
+            let mut f = log.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = writeln!(f, "{text}");
+        }
+        None => println!("{text}"),
+    }
     let mut w = io::BufWriter::new(stream);
     write_reply(&mut w, &reply)?;
     w.flush()
@@ -561,6 +629,27 @@ pub fn run(cfg: &Config) -> Result<(), String> {
         cfg.rucc.display(),
         cfg.port
     );
+    accept(&listener, cfg);
+    Ok(())
+}
+
+/// Start `r9 ccd` on a free port of the loopback address, in a thread that runs until the
+/// process exits. `cfg.port` is not used. Return the port.
+pub fn start(cfg: &Config) -> Result<u16, String> {
+    let listener =
+        TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("ccd: a free port: {e}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("ccd: {e}"))?
+        .port();
+    std::fs::create_dir_all(&cfg.work).map_err(|e| format!("ccd: {}: {e}", cfg.work.display()))?;
+    let cfg = cfg.clone();
+    thread::spawn(move || accept(&listener, &cfg));
+    Ok(port)
+}
+
+/// Serve each connection to `listener` in its own thread.
+fn accept(listener: &TcpListener, cfg: &Config) {
     let cfg = Arc::new(cfg.clone());
     let exports = Arc::new(Exports::default());
     for stream in listener.incoming() {
@@ -573,7 +662,6 @@ pub fn run(cfg: &Config) -> Result<(), String> {
             }
         });
     }
-    Ok(())
 }
 
 /// Run `r9 ccd` with the options of `args`.
@@ -590,7 +678,13 @@ pub fn command(args: &crate::cli::Args) -> Result<(), String> {
         || std::env::temp_dir().join(format!("r9-ccd-{}", std::process::id())),
         Into::into,
     );
-    run(&Config { port, rucc, work })
+    run(&Config {
+        port,
+        rucc,
+        work,
+        log: None,
+        mix: crate::mix::from_args(args)?.map(Arc::new),
+    })
 }
 
 #[cfg(test)]
@@ -698,5 +792,56 @@ mod tests {
         exports.put("7".into(), server);
         assert!(t.join().unwrap());
         assert!(exports.take("8", Duration::from_millis(10)).is_none());
+    }
+
+    #[test]
+    fn the_mix_sends_a_call_on_side_g_to_kencc() {
+        let c = call(&[
+            "-FTVw",
+            "-I",
+            "../common",
+            "-o",
+            "x.7",
+            "exec.c",
+            "/sys/src/x/y.c",
+        ]);
+        assert_eq!(
+            sources(&c),
+            ["/sys/src/cmd/acme/exec.c", "/sys/src/x/y.c"].map(String::from)
+        );
+        assert_eq!(sources(&call(&["-"])), ["/sys/src/cmd/acme".to_owned()]);
+        let mut mix = crate::mix::Mix::new(crate::mix::Side::R);
+        mix.add("/sys/src/cmd/acme/exec.c=G").unwrap();
+        let work = std::env::temp_dir().join(format!("r9-mix-test-{}", std::process::id()));
+        let cfg = Config {
+            port: 0,
+            rucc: "/nonexistent/rucc".into(),
+            work: work.clone(),
+            log: None,
+            mix: Some(Arc::new(mix)),
+        };
+        let exports = Exports::default();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let _client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        exports.put("1".into(), listener.accept().unwrap().0);
+        let reply = compile(&cfg, &exports, "1", &call(&["exec.c"]));
+        assert_eq!(reply.status, crate::mix::STATUS_G);
+        assert!(!work.join("1").exists());
+    }
+
+    #[test]
+    fn objcheck_passes_a_good_object_and_names_a_bad_one() {
+        use crate::obj::tests::amd64_object_to;
+        let good = vec![("a.6".to_string(), amd64_object_to(16))];
+        assert_eq!(check_objects(&good), None);
+        let bad = vec![
+            ("x.7".to_string(), b"not an amd64 object".to_vec()),
+            ("b.6".to_string(), amd64_object_to(crate::obj::d6::CONST)),
+        ];
+        let report = check_objects(&bad).unwrap();
+        assert!(report.contains("b.6: main: MOVQ $1,$0"), "{report}");
+        assert!(!report.contains("x.7"));
+        let broken = vec![("c.6".to_string(), b"xx".to_vec())];
+        assert!(check_objects(&broken).unwrap().starts_with("c.6: "));
     }
 }

@@ -10,7 +10,9 @@
 //! the release's tools and the new tools. The second build uses only the tools of the first
 //! build, and the third build uses only the tools of the second. The second and third builds
 //! must give the same bytes: that is the fixed point of kencc (04.2 and open question 2). The
-//! tools of the third build are G's tools. The guest also builds `r9-cc` with them.
+//! tools of the third build are G's tools. With them, the guest builds and installs the
+//! libraries of the pinned tree, because the tests of the tree link with them. It also builds
+//! `r9-cc`.
 //!
 //! The overlay is kept in the cache as the `g-base` image, and `baselines/` gets a summary
 //! with its hash.
@@ -86,7 +88,14 @@ pub fn commands(paths: &[String]) -> Vec<String> {
             "mkdir -p {d}; s=(); for(d in {tools}) @{{cd /sys/src/cmd/$d && mk clean > /dev/null && mk install}} >> {d}.log >[2=1] || s=($s $d); for(t in {tools}) cp /$objtype/bin/$t {d}/$t; tail -3 {d}.log; echo failed: $s; ~ $#s 0"
         ));
     }
-    let logs: Vec<String> = (1..=STAGES).map(|n| format!("stage{n}.log")).collect();
+    // The libraries of the release are older than the pinned sources, and a test of the tree
+    // links with them. Thus G's tools build and install the libraries of the pinned tree. A
+    // library that does not build makes mk write "exit status", and the command fails.
+    c.push(format!(
+        "cd /sys/src && mk libs > {W}/libs.log >[2=1]; tail -3 {W}/libs.log; ! grep -s 'exit status' {W}/libs.log"
+    ));
+    let mut logs: Vec<String> = (1..=STAGES).map(|n| format!("stage{n}.log")).collect();
+    logs.push("libs.log".into());
     c.push(format!("sha1sum -2 256 {W}/stage*/* > {W}/tools.sha256"));
     c.push(
         "cp /tmp/r9in/r9-build /usr/glenda/r9/bin/ && cd /tmp/r9in/r9-cc && mk install && mk clean"
@@ -433,6 +442,12 @@ mod tests {
         assert!(c[3].starts_with("mkdir -p /tmp/r9/stage1; s=(); for(d in 6c 6l 6a 7c 7l 7a) @{cd /sys/src/cmd/$d && mk clean > /dev/null && mk install} >> /tmp/r9/stage1.log >[2=1] || s=($s $d)"));
         assert!(c[5].contains("cp /$objtype/bin/$t /tmp/r9/stage3/$t"));
         assert!(c[5].ends_with("~ $#s 0"));
+        assert!(c[6].starts_with("cd /sys/src && mk libs > /tmp/r9/libs.log"));
+        assert!(
+            c.last()
+                .unwrap()
+                .contains("stage3.log libs.log tools.sha256")
+        );
         assert!(c.last().unwrap().contains("tar cf $r9collect"));
         assert!(c.iter().all(|l| !l.contains('\n')));
     }

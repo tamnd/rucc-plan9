@@ -14,8 +14,15 @@
 //! The mkfile of gs runs `genarch` to write `$objtype.h`. `genarch` times `memset` on blocks of
 //! growing size to find the sizes of the caches, so the header differs from run to run on the
 //! same machine. It is in the dated group too.
+//!
+//! Some archives get two members with the same name from two directories. `libap.a` of APE gets
+//! `strtod.7` from `ap/gen` and from `ap/stdio`. mk installs both with `ar vu`, and `ar u` keeps
+//! the old member when the new file is not newer than the date of the member. Dates have a
+//! resolution of one second. Thus the member that the archive keeps depends on whether the two
+//! compiles end in the same second, and the programs that link the archive differ too. These
+//! files are in the raced group. They are not a failure of the compiler, but they are reported.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -29,6 +36,13 @@ pub struct Outputs {
     pub files: Hashes,
     /// The hash of each member of each archive, keyed by `archive(member)`.
     pub members: Hashes,
+    /// The members, as `archive(member)`, that two or more `ar` commands of the build put in the
+    /// same archive.
+    pub twice: BTreeSet<String>,
+    /// The directories of the APE units: the units that `pcc` sends to the compiler on standard
+    /// input, and the units with an include directory of APE. The headers of APE add `libap.a`
+    /// with `#pragma lib`, so the programs of these directories link it.
+    pub ape_dirs: BTreeSet<String>,
 }
 
 /// How two builds differ.
@@ -43,6 +57,11 @@ pub struct Diff {
     /// The files that differ only by the date or the speed of the build: archives with the same
     /// members, the files of cwfs, and the header that gs measures the caches into.
     pub dated: Vec<String>,
+    /// The archives whose different members are all members that two `ar` commands wrote, and
+    /// the APE programs that link such an archive.
+    pub raced: Vec<String>,
+    /// The members that make the archives of `raced` differ.
+    pub raced_members: Vec<String>,
     /// The files in both builds.
     pub same: usize,
 }
@@ -87,10 +106,73 @@ pub fn load(path: &Path) -> Result<Outputs, String> {
     let text =
         std::fs::read_to_string(&changed).map_err(|e| format!("{}: {e}", changed.display()))?;
     let members = std::fs::read_to_string(dir.join("members.sha256")).unwrap_or_default();
+    let log = std::fs::read_to_string(dir.join("mk.log")).unwrap_or_default();
+    let compile = std::fs::read_to_string(dir.join("compile.jsonl")).unwrap_or_default();
     Ok(Outputs {
         files: parse(&text),
         members: parse(&members),
+        twice: twice(&log),
+        ape_dirs: ape_dirs(&compile),
     })
+}
+
+/// The members that two or more `ar` commands in the mk log put in the same archive, as
+/// `archive(member)`. The commands are the lines that start with `ar` and a key with `r` or `u`.
+#[must_use]
+pub fn twice(log: &str) -> BTreeSet<String> {
+    let mut count: BTreeMap<String, usize> = BTreeMap::new();
+    for line in log.lines() {
+        let mut words = line.split_whitespace();
+        if words.next() != Some("ar") {
+            continue;
+        }
+        let (Some(key), Some(archive)) = (words.next(), words.next()) else {
+            continue;
+        };
+        if !key.chars().all(|c| "rvuc".contains(c)) || !(key.contains('r') || key.contains('u')) {
+            continue;
+        }
+        for member in words {
+            *count.entry(format!("{archive}({member})")).or_default() += 1;
+        }
+    }
+    count
+        .into_iter()
+        .filter(|&(_, n)| n > 1)
+        .map(|(k, _)| k)
+        .collect()
+}
+
+/// The directories of the compile records that read standard input or that give an include
+/// directory of APE.
+#[must_use]
+pub fn ape_dirs(compile: &str) -> BTreeSet<String> {
+    compile
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|r| {
+            r["stdin"].as_bool() == Some(true)
+                || r["argv"].as_array().is_some_and(|a| {
+                    a.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .any(|w| w.starts_with("-I") && w.ends_with("/include/ape"))
+                })
+        })
+        .filter_map(|r| r["dir"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// The members of `archive` that differ between `a` and `b`, or that only one of them has.
+/// `__.SYMDEF` is left out, because `ar` writes it from the other members.
+fn changed_members(a: &Hashes, b: &Hashes, archive: &str) -> Vec<String> {
+    let ma: BTreeMap<_, _> = members_of(a, archive).into_iter().collect();
+    let mb: BTreeMap<_, _> = members_of(b, archive).into_iter().collect();
+    let names: BTreeSet<&str> = ma.keys().chain(mb.keys()).copied().collect();
+    names
+        .into_iter()
+        .filter(|n| !n.ends_with("(__.SYMDEF)") && ma.get(n) != mb.get(n))
+        .map(str::to_string)
+        .collect()
 }
 
 /// The members of `archive` in `members`.
@@ -157,6 +239,7 @@ pub fn diff(a: &Outputs, b: &Outputs) -> Diff {
             }
         }
     }
+    raced(a, b, &mut d);
     d.only_b = b
         .files
         .keys()
@@ -164,6 +247,59 @@ pub fn diff(a: &Outputs, b: &Outputs) -> Diff {
         .cloned()
         .collect();
     d
+}
+
+/// Move the raced archives and the APE programs that follow them from `changed` to `raced`.
+fn raced(a: &Outputs, b: &Outputs, d: &mut Diff) {
+    let mut ape = false;
+    let mut keep = Vec::new();
+    for path in std::mem::take(&mut d.changed) {
+        let members = if is_archive(&path) {
+            changed_members(&a.members, &b.members, &path)
+        } else {
+            Vec::new()
+        };
+        if !members.is_empty()
+            && members
+                .iter()
+                .all(|m| a.twice.contains(m) && b.twice.contains(m))
+        {
+            ape |= path.contains("/lib/ape/");
+            d.raced_members.extend(members);
+            d.raced.push(path);
+        } else {
+            keep.push(path);
+        }
+    }
+    if ape {
+        let in_ape_dir = |path: &str, dirs: &BTreeSet<String>| {
+            Path::new(path)
+                .parent()
+                .and_then(Path::to_str)
+                .is_some_and(|dir| dirs.contains(dir))
+        };
+        let programs: Vec<String> = keep
+            .iter()
+            .filter(|p| in_ape_dir(p, &a.ape_dirs) && in_ape_dir(p, &b.ape_dirs))
+            .cloned()
+            .collect();
+        let hashes = |files: &Hashes| -> BTreeSet<String> {
+            programs
+                .iter()
+                .filter_map(|p| files.get(p).cloned())
+                .collect()
+        };
+        let (ha, hb) = (hashes(&a.files), hashes(&b.files));
+        let (follow, rest): (Vec<String>, Vec<String>) = keep.into_iter().partition(|p| {
+            programs.contains(p)
+                || (a.files.get(p).is_some_and(|h| ha.contains(h))
+                    && b.files.get(p).is_some_and(|h| hb.contains(h)))
+        });
+        d.raced.extend(follow);
+        d.raced.sort();
+        keep = rest;
+    }
+    d.changed = keep;
 }
 
 /// The report of a comparison. At most `top` names are printed in each group.
@@ -176,6 +312,7 @@ pub fn report(d: &Diff, top: usize) -> String {
         ("only in B", &d.only_b),
         ("changed", &d.changed),
         ("dated", &d.dated),
+        ("raced", &d.raced),
     ] {
         let _ = writeln!(s, "{title:<10} {}", list.len());
         for p in list.iter().take(top) {
@@ -185,13 +322,18 @@ pub fn report(d: &Diff, top: usize) -> String {
             let _ = writeln!(s, "  and {} more", list.len() - top);
         }
     }
+    for m in &d.raced_members {
+        let _ = writeln!(s, "  raced by ar u: {m}");
+    }
     let _ = writeln!(
         s,
         "{}",
-        if d.is_empty() {
+        if !d.is_empty() {
+            "the builds differ"
+        } else if d.raced.is_empty() {
             "the builds are the same"
         } else {
-            "the builds differ"
+            "the builds are the same, except for the members that ar u keeps by the time of the build"
         }
     );
     s
@@ -205,6 +347,7 @@ mod tests {
         Outputs {
             files: parse(files),
             members: parse(members),
+            ..Outputs::default()
         }
     }
 
@@ -257,5 +400,51 @@ mod tests {
         let a = outputs("4\t/l.a\n", "8\t/l.a(p.7)\n");
         let b = outputs("5\t/l.a\n", "8\t/l.a(p.7)\n");
         assert!(diff(&a, &b).is_empty());
+    }
+
+    #[test]
+    fn a_member_from_two_ar_commands_is_found() {
+        let log = "ar vu /arm64/lib/ape/libap.a abs.7 strtod.7\nr - strtod.7\n\
+                   ar vu /arm64/lib/ape/libap.a fopen.7 strtod.7\nar t x.a\n";
+        let t = twice(log);
+        assert_eq!(
+            t.into_iter().collect::<Vec<_>>(),
+            ["/arm64/lib/ape/libap.a(strtod.7)"]
+        );
+        let c = "{\"dir\":\"/sys/src/cmd/eqn\",\"stdin\":true}\n\
+                 {\"dir\":\"/sys/src/cmd/cat\",\"stdin\":false,\"argv\":[\"-I/sys/include\"]}\n\
+                 {\"dir\":\"/a/w\",\"stdin\":false,\"argv\":[\"-Bp\",\"-I/sys/include/ape\"]}\n";
+        assert_eq!(
+            ape_dirs(c).into_iter().collect::<Vec<_>>(),
+            ["/a/w", "/sys/src/cmd/eqn"]
+        );
+    }
+
+    #[test]
+    fn a_raced_archive_and_its_programs_are_not_changed() {
+        let lib = "/arm64/lib/ape/libap.a";
+        let race = |s: &str, m: &str| {
+            let mut o = outputs(
+                &format!(
+                    "{s}\t{lib}\n{s}\t/sys/src/cmd/eqn/7.out\n{s}\t/arm64/bin/eqn\n1\t/arm64/bin/cat\n"
+                ),
+                &format!("{m}\t{lib}(strtod.7)\n{m}\t{lib}(__.SYMDEF)\n2\t{lib}(abs.7)\n"),
+            );
+            o.twice.insert(format!("{lib}(strtod.7)"));
+            o.ape_dirs.insert("/sys/src/cmd/eqn".into());
+            o
+        };
+        let (a, b) = (race("5", "6"), race("7", "8"));
+        let d = diff(&a, &b);
+        assert!(d.is_empty(), "{d:?}");
+        assert_eq!(d.raced, ["/arm64/bin/eqn", lib, "/sys/src/cmd/eqn/7.out"]);
+        assert_eq!(d.raced_members, [format!("{lib}(strtod.7)")]);
+        assert!(report(&d, 5).contains("except for the members that ar u keeps"));
+
+        let mut c = race("7", "8");
+        c.twice.clear();
+        let d = diff(&a, &c);
+        assert_eq!(d.changed.len(), 3, "{d:?}");
+        assert!(d.raced.is_empty());
     }
 }

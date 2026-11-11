@@ -75,11 +75,11 @@ fn run(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
-        "build" => {
+        "build" | "mix" => {
             let repo = Repo::find()?;
-            let (summary, report) = r9::build::command(&repo, args)?;
+            let (passed, report) = r9::build::command(&repo, args)?;
             print!("{report}");
-            Ok(if summary.passed {
+            Ok(if passed {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
@@ -143,6 +143,116 @@ fn locate(args: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// `r9 optab` and `r9 objcheck`: the instruction tables of `6l`, and the check against them.
+fn run_optab(args: &Args) -> Result<ExitCode, String> {
+    match args.command.as_str() {
+        "objcheck" => {
+            let path = args
+                .target
+                .as_deref()
+                .ok_or("give a .6 file or an archive of them")?;
+            let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+            let (report, bad) = r9::objcheck::file(&r9::objcheck::Checker::new(), path, &bytes)?;
+            print!("{report}");
+            Ok(if bad == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        "optab" => {
+            let root = args
+                .get("root")
+                .ok_or("give --root, a tree with sys/src/cmd/6l")?;
+            let t = r9::optab::load(std::path::Path::new(root))?;
+            let text = t.rust(args.get("pin").unwrap_or("(not given)"));
+            match args.get("out") {
+                Some(out) => std::fs::write(out, text).map_err(|e| format!("{out}: {e}"))?,
+                None => print!("{text}"),
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        _ => unreachable!("run_optab takes objcheck and optab"),
+    }
+}
+
+/// Run `r9 objdiff`: list one object, or compare two.
+fn run_objdiff(args: &Args) -> Result<ExitCode, String> {
+    let a = args
+        .target
+        .as_deref()
+        .ok_or("give a .6 or .7 file, or an archive of them")?;
+    let read = |p: &str| std::fs::read(p).map_err(|e| format!("{p}: {e}"));
+    let bytes = read(a)?;
+    let Some(b) = args.get("with") else {
+        print!("{}", r9::obj::listing(a, &bytes)?);
+        return Ok(ExitCode::SUCCESS);
+    };
+    let context = args
+        .get("context")
+        .map_or(Ok(3), str::parse)
+        .map_err(|e| format!("--context: {e}"))?;
+    let (report, same) = r9::obj::diff_files(a, &bytes, b, &read(b)?, context)?;
+    print!("{report}");
+    Ok(if same {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
+
+/// `r9 sdiff`: two objects side by side, function by function.
+fn run_helpers(args: &Args) -> Result<ExitCode, String> {
+    let path = args
+        .target
+        .as_deref()
+        .ok_or("give a directory of objects and archives, or one file")?;
+    if let Some(g) = args.get("with") {
+        let r = r9::helpers::load_relative(std::path::Path::new(path))?;
+        let g = r9::helpers::load_relative(std::path::Path::new(g))?;
+        let (found, pairs, alone) = r9::helpers::added(&r, &g);
+        print!("{}", r9::helpers::added_report(&found, pairs, &alone));
+        return Ok(if found.is_empty() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
+    }
+    let src = args
+        .get("src")
+        .ok_or("give the tree with --src, or G objects with --with")?;
+    let objects = r9::helpers::load(std::path::Path::new(path))?;
+    let (ids, sources) = r9::helpers::source_identifiers(std::path::Path::new(src))?;
+    let found = r9::helpers::helpers(&objects, &ids);
+    print!("{}", r9::helpers::report(objects.len(), sources, &found));
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_sdiff(args: &Args) -> Result<ExitCode, String> {
+    let a = args
+        .target
+        .as_deref()
+        .ok_or("give a .6 or .7 file, or an archive of them")?;
+    let b = args.get("with").ok_or("give the other file with --with")?;
+    let read = |p: &str| std::fs::read(p).map_err(|e| format!("{p}: {e}"));
+    let width = args
+        .get("width")
+        .map_or(Ok(60), str::parse)
+        .map_err(|e| format!("--width: {e}"))?;
+    let opt = r9::sdiff::Options {
+        function: args.get("function"),
+        width,
+        all: args.has("all"),
+    };
+    let (report, differ) = r9::sdiff::files(a, &read(a)?, b, &read(b)?, opt)?;
+    print!("{report}");
+    Ok(if differ {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
 /// Run a command that reads the compile records of a build.
 fn run_records(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
@@ -190,6 +300,10 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
+        "objdiff" => run_objdiff(args),
+        "sdiff" => run_sdiff(args),
+        "helpers" => run_helpers(args),
+        "objcheck" | "optab" => run_optab(args),
         "census" => {
             let path = args
                 .target
