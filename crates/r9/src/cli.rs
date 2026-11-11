@@ -68,7 +68,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         "build" => Accepts {
             positional: true,
             values: &[
-                "side", "row", "accel", "timeout", "firmware", "dir", "out", "image",
+                "side", "row", "accel", "timeout", "firmware", "dir", "out", "image", "rucc",
             ],
             switches: &["keep"],
         },
@@ -153,13 +153,16 @@ usage:
       in place of the release image, with a fresh overlay on top. --disk attaches a qcow2 file
       after the root disk. The writes of the guest to it are not kept. --net gives the guest a
       network card on the user network of QEMU, where the host is 10.0.2.2.
-  r9 build [NAME] --side G [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
-          [--firmware PATH] [--image FILE] [--out DIR] [--keep]
+  r9 build [NAME] --side G|R [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
+          [--firmware PATH] [--image FILE] [--out DIR] [--rucc PATH] [--keep]
       Boot the g-base image of the row, or the image of the release NAME when there is no
-      g-base image, and run mk install in DIR (/sys/src by default) with r9-cc in the
-      compiler slot. --image boots FILE. Collect the compile records, the mk log, the files that the build wrote
-      with their SHA-256, and the generated C sources and headers into DIR/collected. Write the
-      summary to build.toml and print the census. Side R comes at P1.
+      g-base image, and run mk install in DIR (/sys/src by default) with r9-cc in the compiler
+      slot. --image boots FILE. Collect the compile records, the mk log, the files that the
+      build wrote with their SHA-256, and the generated C sources and headers into
+      DIR/collected. Write the summary to build.toml and print the census. Side G runs kencc.
+      Side R starts r9 ccd on a free port and sends each call to rucc (PATH, or R9_RUCC, or rucc
+      on the path). R9_BRINGUP gives the bring-up words (cc:auto by default), so that a call
+      that rucc fails goes to kencc. The line of each call is in ccd.log.
   r9 baseline [NAME] [--row OBJTYPE,...] [--runs N] [--suites boot,smoke,test] [--pin PIN]
           [--image FILE] [--accel kvm|hvf|tcg] [--timeout SECS] [--firmware PATH] [--out DIR]
       Run each suite N times (3 by default) on the g-base image of each row (amd64,arm64 by

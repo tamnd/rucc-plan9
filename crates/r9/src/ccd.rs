@@ -376,6 +376,8 @@ pub struct Config {
     pub rucc: PathBuf,
     /// A directory for the outputs of each call.
     pub work: PathBuf,
+    /// The file that gets the line of each call. With none, the lines go to standard output.
+    pub log: Option<Arc<Mutex<std::fs::File>>>,
 }
 
 /// Copy bytes from `from` to `to` until the end of `from`, then close the write side of `to`.
@@ -532,7 +534,7 @@ fn serve(cfg: &Config, exports: &Exports, stream: TcpStream) -> io::Result<()> {
         .filter(|a| !a.starts_with('-'))
         .map(String::as_str)
         .collect();
-    println!(
+    let text = format!(
         "{} {} {} {} {}ms {}",
         if reply.status.is_empty() {
             "ok"
@@ -545,6 +547,13 @@ fn serve(cfg: &Config, exports: &Exports, stream: TcpStream) -> io::Result<()> {
         start.elapsed().as_millis(),
         reply.status
     );
+    match &cfg.log {
+        Some(log) => {
+            let mut f = log.lock().unwrap_or_else(PoisonError::into_inner);
+            let _ = writeln!(f, "{text}");
+        }
+        None => println!("{text}"),
+    }
     let mut w = io::BufWriter::new(stream);
     write_reply(&mut w, &reply)?;
     w.flush()
@@ -561,6 +570,27 @@ pub fn run(cfg: &Config) -> Result<(), String> {
         cfg.rucc.display(),
         cfg.port
     );
+    accept(&listener, cfg);
+    Ok(())
+}
+
+/// Start `r9 ccd` on a free port of the loopback address, in a thread that runs until the
+/// process exits. `cfg.port` is not used. Return the port.
+pub fn start(cfg: &Config) -> Result<u16, String> {
+    let listener =
+        TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("ccd: a free port: {e}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("ccd: {e}"))?
+        .port();
+    std::fs::create_dir_all(&cfg.work).map_err(|e| format!("ccd: {}: {e}", cfg.work.display()))?;
+    let cfg = cfg.clone();
+    thread::spawn(move || accept(&listener, &cfg));
+    Ok(port)
+}
+
+/// Serve each connection to `listener` in its own thread.
+fn accept(listener: &TcpListener, cfg: &Config) {
     let cfg = Arc::new(cfg.clone());
     let exports = Arc::new(Exports::default());
     for stream in listener.incoming() {
@@ -573,7 +603,6 @@ pub fn run(cfg: &Config) -> Result<(), String> {
             }
         });
     }
-    Ok(())
 }
 
 /// Run `r9 ccd` with the options of `args`.
@@ -590,7 +619,12 @@ pub fn command(args: &crate::cli::Args) -> Result<(), String> {
         || std::env::temp_dir().join(format!("r9-ccd-{}", std::process::id())),
         Into::into,
     );
-    run(&Config { port, rucc, work })
+    run(&Config {
+        port,
+        rucc,
+        work,
+        log: None,
+    })
 }
 
 #[cfg(test)]
