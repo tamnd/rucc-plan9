@@ -106,6 +106,36 @@ pub fn commands(dir: &str, slot: &Slot) -> Vec<String> {
     ]
 }
 
+/// A test that the guest runs after the build (plan 12.8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Test {
+    /// The rc command.
+    pub command: String,
+    /// The longest time of the test. After it, the guest kills the test.
+    pub seconds: u64,
+}
+
+/// The files of a test on the collect disk.
+pub const TEST_FILES: &[&str] = &["test.status", "test.log"];
+
+/// The command that runs `test` in the guest, after the build.
+///
+/// The test runs in the background in a new note group, so that the watchdog can kill the test
+/// and each process it started, and not the shell of the console. The watchdog writes `timeout`
+/// to `test.status` and then kills the group. When the test exits first, its status goes to
+/// `test.status`, and an empty status is a pass. After a timeout the watchdog is gone, and a
+/// write to its note file fails. In the console rc, a failed redirection stops the rest of the line,
+/// so the command writes the note only when the process is there.
+#[must_use]
+pub fn test_command(test: &Test) -> String {
+    let w = "/tmp/r9";
+    format!(
+        "rm -f {w}/test.status; {{rfork s; {cmd}}} < /dev/null > {w}/test.log >[2=1] & r9t=$apid; {{sleep {n}; echo timeout > {w}/test.status; echo kill > /proc/$r9t/notepg}} & r9w=$apid; wait $r9t; s=$status; test -d /proc/$r9w && echo kill > /proc/$r9w/note; test -f {w}/test.status || echo $s > {w}/test.status; echo r9-test `{{cat {w}/test.status}}",
+        cmd = test.command,
+        n = test.seconds
+    )
+}
+
 /// The summary in `build.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Summary {
@@ -139,6 +169,10 @@ pub struct Summary {
     pub kencc_calls: usize,
     /// The files that the build wrote.
     pub changed_files: usize,
+    /// The status of the test: empty for a pass, `timeout`, or the exit status. With no test,
+    /// there is no value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_status: Option<String>,
 }
 
 /// Read a collected file as text, or an empty string when the guest did not write it.
@@ -154,8 +188,19 @@ pub fn run(
     mut req: Request,
     repo_root: &Path,
     slot: &Slot,
+    guest_test: Option<&Test>,
 ) -> Result<(Summary, String), String> {
     req.commands = commands(dir, slot);
+    if let Some(t) = guest_test {
+        // After the tail of the log, and before the walk and the collection.
+        req.commands.insert(4, test_command(t));
+        if let Some(last) = req.commands.last_mut() {
+            for f in TEST_FILES {
+                last.push(' ');
+                last.push_str(f);
+            }
+        }
+    }
     req.net |= matches!(slot, Slot::R { .. });
     req.input = Some(repo_root.join("guest"));
     req.collect_mib = Some(COLLECT_MIB);
@@ -194,6 +239,14 @@ pub fn run(
         rucc_calls: count(&records, "rucc"),
         kencc_calls: count(&records, "ref-c"),
         changed_files: read(&collected, "changed").lines().count(),
+        test_status: guest_test.map(|_| {
+            let text = read(&collected, "test.status");
+            if text.is_empty() {
+                "no status".to_owned()
+            } else {
+                text.trim().to_owned()
+            }
+        }),
     };
     let text = toml::to_string(&summary).map_err(|e| e.to_string())?;
     let path = req.work.join("build.toml");
@@ -208,6 +261,13 @@ pub fn run(
         Slot::R { .. } => census::Side::R,
     };
     report.push_str(&c.report(side));
+    if let Some(t) = &summary.test_status {
+        let _ = writeln!(
+            report,
+            "test {}",
+            if t.is_empty() { "passed" } else { t.as_str() }
+        );
+    }
     let _ = writeln!(
         report,
         "build {} in {} s, {} files written; summary in {}",
@@ -219,11 +279,12 @@ pub fn run(
     Ok((summary, report))
 }
 
-/// `r9 build` from the command line.
+/// `r9 build` and `r9 mix` from the command line. Return whether the build passed, and the
+/// test too when there is one, and the report.
 pub fn command(
     repo: &crate::repo::Repo,
     args: &crate::cli::Args,
-) -> Result<(Summary, String), String> {
+) -> Result<(bool, String), String> {
     // `r9 mix` is side R with a mix.
     let mix = crate::mix::from_args(args)?;
     let r = match (args.command.as_str(), args.get("side")) {
@@ -231,9 +292,21 @@ pub fn command(
         (_, Some("G" | "g")) => false,
         _ => return Err("give --side G or --side R".into()),
     };
-    if args.command == "mix" && mix.is_none() {
+    let bisect = args.has("bisect");
+    if args.command == "mix" && mix.is_none() && !bisect {
         return Err("give the mix with --file, --mix or --default".into());
     }
+    let test = match args.get("test") {
+        None if bisect => return Err("--bisect needs --test".into()),
+        None => None,
+        Some(command) => Some(Test {
+            command: command.to_owned(),
+            seconds: args
+                .get("test-timeout")
+                .map_or(Ok(600), str::parse)
+                .map_err(|e| format!("--test-timeout: {e}"))?,
+        }),
+    };
     let mut req = boot::request_from(repo, args)?;
     let release = req
         .base
@@ -254,53 +327,98 @@ pub fn command(
             "{release}-{}-{}",
             req.objtype,
             match (&mix, r) {
+                _ if bisect => "bisect",
                 (Some(_), _) => "mix",
                 (None, true) => "R",
                 (None, false) => "G",
             }
         ));
     }
-    let slot = if r {
-        let log = req.work.join("ccd.log");
-        std::fs::create_dir_all(&req.work).map_err(|e| format!("{}: {e}", req.work.display()))?;
-        let file = std::fs::File::create(&log).map_err(|e| format!("{}: {e}", log.display()))?;
-        let rucc = args.get("rucc").map_or_else(
-            || std::env::var_os("R9_RUCC").map_or_else(|| "rucc".into(), Into::into),
-            Into::into,
-        );
-        let bringup = std::env::var("R9_BRINGUP").unwrap_or_else(|_| "cc:auto".into());
-        if let Some(m) = &mix {
-            // r9-cc runs kencc for a call on side G only under cc:auto.
-            if !bringup.contains("cc:auto") {
-                return Err("a mix needs cc:auto in R9_BRINGUP".into());
-            }
-            let path = req.work.join("mix.txt");
-            std::fs::write(&path, m.text()).map_err(|e| format!("{}: {e}", path.display()))?;
-        }
-        let cfg = crate::ccd::Config {
-            port: 0,
-            rucc,
-            work: req.work.join("ccd"),
-            log: Some(std::sync::Arc::new(std::sync::Mutex::new(file))),
-            mix: mix.map(std::sync::Arc::new),
-        };
-        let port = crate::ccd::start(&cfg)?;
-        eprintln!(
-            "r9 build: r9 ccd is on 127.0.0.1:{port} with {}; the calls go to {}",
-            cfg.rucc.display(),
-            log.display()
-        );
-        Slot::R { port, bringup }
-    } else {
-        Slot::G
+    let rucc: std::path::PathBuf = args.get("rucc").map_or_else(
+        || std::env::var_os("R9_RUCC").map_or_else(|| "rucc".into(), Into::into),
+        Into::into,
+    );
+    let one = Build {
+        release,
+        dir: args.get("dir").unwrap_or("/sys/src").to_owned(),
+        repo_root: repo.root.clone(),
+        rucc,
+        test,
     };
-    run(
-        &release,
-        args.get("dir").unwrap_or("/sys/src"),
-        req,
-        &repo.root,
-        &slot,
-    )
+    if bisect {
+        return crate::mix::bisect_command(&one, &req, mix.is_some());
+    }
+    let (summary, report) = one.run(req, r.then_some(mix))?;
+    let passed = summary.passed && summary.test_status.as_ref().is_none_or(String::is_empty);
+    Ok((passed, report))
+}
+
+/// What each build of a command has in common.
+#[derive(Debug, Clone)]
+pub struct Build {
+    /// The release of the image.
+    pub release: String,
+    /// The tree to build in the guest.
+    pub dir: String,
+    /// The root of the repository.
+    pub repo_root: std::path::PathBuf,
+    /// The rucc program for side R.
+    pub rucc: std::path::PathBuf,
+    /// The test to run after the build.
+    pub test: Option<Test>,
+}
+
+impl Build {
+    /// Run one build with the boot request `req`. With `side_r`, start r9 ccd with the mix, or
+    /// with no mix when the value is `None`; with no `side_r`, build side G.
+    pub fn run(
+        &self,
+        req: Request,
+        side_r: Option<Option<crate::mix::Mix>>,
+    ) -> Result<(Summary, String), String> {
+        let slot = match side_r {
+            None => Slot::G,
+            Some(mix) => {
+                let log = req.work.join("ccd.log");
+                std::fs::create_dir_all(&req.work)
+                    .map_err(|e| format!("{}: {e}", req.work.display()))?;
+                let file =
+                    std::fs::File::create(&log).map_err(|e| format!("{}: {e}", log.display()))?;
+                let bringup = std::env::var("R9_BRINGUP").unwrap_or_else(|_| "cc:auto".into());
+                if let Some(m) = &mix {
+                    // r9-cc runs kencc for a call on side G only under cc:auto.
+                    if !bringup.contains("cc:auto") {
+                        return Err("a mix needs cc:auto in R9_BRINGUP".into());
+                    }
+                    let path = req.work.join("mix.txt");
+                    std::fs::write(&path, m.text())
+                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                }
+                let cfg = crate::ccd::Config {
+                    port: 0,
+                    rucc: self.rucc.clone(),
+                    work: req.work.join("ccd"),
+                    log: Some(std::sync::Arc::new(std::sync::Mutex::new(file))),
+                    mix: mix.map(std::sync::Arc::new),
+                };
+                let port = crate::ccd::start(&cfg)?;
+                eprintln!(
+                    "r9 build: r9 ccd is on 127.0.0.1:{port} with {}; the calls go to {}",
+                    cfg.rucc.display(),
+                    log.display()
+                );
+                Slot::R { port, bringup }
+            }
+        };
+        run(
+            &self.release,
+            &self.dir,
+            req,
+            &self.repo_root,
+            &slot,
+            self.test.as_ref(),
+        )
+    }
 }
 
 /// The records with `origin`.
@@ -330,6 +448,21 @@ mod tests {
                 .ends_with("changed.sha256 members.sha256 gen.tar rucc.err")
         );
         assert!(c.iter().all(|l| !l.contains('\n')));
+    }
+
+    #[test]
+    fn the_test_runs_in_its_own_note_group_with_a_watchdog() {
+        let c = test_command(&Test {
+            command: "cd /sys/src/cmd/mothra && mk -n".into(),
+            seconds: 30,
+        });
+        assert!(c.contains("{rfork s; cd /sys/src/cmd/mothra && mk -n} < /dev/null"));
+        assert!(c.contains(
+            "{sleep 30; echo timeout > /tmp/r9/test.status; echo kill > /proc/$r9t/notepg}"
+        ));
+        assert!(c.contains("wait $r9t; s=$status;"));
+        assert!(c.contains("test -d /proc/$r9w && echo kill > /proc/$r9w/note;"));
+        assert!(!c.contains('\n'));
     }
 
     #[test]

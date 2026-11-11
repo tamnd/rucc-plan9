@@ -77,9 +77,9 @@ fn run(args: &Args) -> Result<ExitCode, String> {
         }
         "build" | "mix" => {
             let repo = Repo::find()?;
-            let (summary, report) = r9::build::command(&repo, args)?;
+            let (passed, report) = r9::build::command(&repo, args)?;
             print!("{report}");
-            Ok(if summary.passed {
+            Ok(if passed {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
