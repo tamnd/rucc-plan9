@@ -50,6 +50,7 @@ If rucc at `-O0` is within twice `6c`'s time, a fast `-O0` mode for edit-compile
 **Belief.** kencc's output depends only on its input, so building the tree twice with G gives byte-identical objects and binaries. 12.4's fixed point test (Rk equals G) rests on this. It does not hold for every file:
 - **Archives.** `ar` records a date for each member, so `libc.a` differs by date. `r9 objdiff --tree` compares archives member by member.
 - **Generated files.** A generator that writes the date, the host name or a process id differs too. Each such file is listed in the comparison's exclusions, with the line that varies.
+- **Members with the same name.** APE puts `strtod.7` from `ap/gen` and from `ap/stdio` in `libap.a`, and mk installs both with `ar vu`. `ar u` keeps the old member when the new file is not newer than the member date, and dates have a resolution of one second. Thus a fast build keeps the copy of `ap/gen`, and a slow build keeps the copy of `ap/stdio`. The APE programs that use `strtod` differ too.
 
 Apart from those, we believe the objects and the linked binaries are identical.
 
@@ -66,6 +67,8 @@ Apart from those, we believe the objects and the linked binaries are identical.
 A difference with no explanation is a finding against 9front, reported by a person (question 15).
 
 **Deadline.** P0. If the fixed point does not hold, 12.4 is redesigned to compare after normalization before P3 relies on it.
+
+**Result at P0.** Four arm64 G builds at 2859ae04e800 on the M4 took 212 s, 111 s, 65 s and 49 s for `mk install`. Builds 1 and 2 are the same. Builds 3 and 4 are the same. Between the two pairs, only `libap.a(strtod.7)` and the 26 files of the 13 APE programs that link it differ, by the `ar u` race above. `r9 tree-diff` puts these files in its raced group. Apart from the dated archives, cwfs, the header of gs and this race, the objects and the binaries are identical. Two amd64 G builds on CI are also the same.
 
 ## 3. Whether the tree is clean enough for strict aliasing
 
