@@ -1,0 +1,6 @@
+# program: sort
+# sort with several keys over the sources and the manual.
+cat /sys/src/cmd/rc/*.c | sort
+ls -l /sys/man/1 | sort -k5n -k10
+cat /sys/man/1/* | tr -cs 'A-Za-z' '\012' | sort -f -u
+sort -t: -k3n /adm/users

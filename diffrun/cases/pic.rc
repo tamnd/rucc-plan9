@@ -1,0 +1,4 @@
+# program: pic
+# pic and troff on pictures of the inputs.
+pic $inputs/pic.ms
+pic $inputs/pic.ms | troff -ms

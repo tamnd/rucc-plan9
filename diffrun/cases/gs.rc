@@ -1,0 +1,5 @@
+# program: gs
+# gs renders the PostScript of a paper to a Plan 9 image.
+troff -ms /sys/doc/utf.ms | aux/tr2post >/tmp/r9diff/utf.ps
+gs -q -dSAFER -dNOPAUSE -dBATCH '-dFirstPage=1' '-dLastPage=2' -r50 '-sDEVICE=plan9' '-sOutputFile=/tmp/r9diff/utf.%d' /tmp/r9diff/utf.ps </dev/null >[2=1]
+cat /tmp/r9diff/utf.1 /tmp/r9diff/utf.2

@@ -1,0 +1,4 @@
+# program: eqn
+# eqn and troff on equations of the inputs.
+eqn $inputs/eqn.ms
+eqn $inputs/eqn.ms | troff -ms

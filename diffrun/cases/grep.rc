@@ -1,0 +1,7 @@
+# program: grep
+# grep with regular expressions over the sources of the tree.
+cd /sys/src/libc
+grep -n '^[a-z]+\(' port/*.c
+grep -c 'if\(.*(==|!=)' port/*.c
+grep -v '^$' 9sys/*.c | grep -i 'errstr'
+grep -e '[0-9][0-9]*[uUlL]+' -n port/*.c

@@ -1,0 +1,4 @@
+# program: audio/flacenc
+# flacenc encodes PCM to FLAC.
+audio/wavdec <$inputs/tone.wav >/tmp/r9diff/tone.pcm
+audio/flacenc </tmp/r9diff/tone.pcm

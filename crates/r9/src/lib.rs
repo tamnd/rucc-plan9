@@ -14,6 +14,7 @@ pub mod check;
 pub mod cli;
 pub mod console;
 pub mod demands;
+pub mod diffrun;
 pub mod disk;
 pub mod fetch;
 pub mod fixedpoint;

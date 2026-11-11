@@ -1,0 +1,3 @@
+# program: dc
+# dc on expressions of the inputs.
+dc $inputs/dc.in

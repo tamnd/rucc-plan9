@@ -1,0 +1,6 @@
+# program: yacc
+# yacc on the grammars of the tree.
+for(g in /sys/src/cmd/bc.y /sys/src/cmd/cc/cc.y /sys/src/cmd/awk/awkgram.y /sys/src/cmd/rc/syn.y /sys/src/cmd/pic/picy.y){
+	yacc -vd $g
+	cat y.tab.c y.tab.h y.output
+}

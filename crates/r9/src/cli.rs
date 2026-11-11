@@ -69,6 +69,13 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             ],
             switches: &[],
         },
+        "diffrun" => Accepts {
+            positional: false,
+            values: &[
+                "row", "r", "g", "runs", "accel", "timeout", "firmware", "out",
+            ],
+            switches: &[],
+        },
         "build" | "mix" => Accepts {
             positional: true,
             values: &[
@@ -242,6 +249,13 @@ usage:
       the hash of each run, the graded results and the flaky ones, and print the flaky ones. The
       pin comes from the image name. --image boots FILE in place of the g-base image. The boots
       go to work/baseline.
+  r9 diffrun --r FILE [--g FILE] [--row OBJTYPE] [--runs N] [--accel kvm|hvf|tcg]
+          [--timeout SECS] [--firmware PATH] [--out DIR]
+      Run the cases of diffrun/ (plan 12.5) on the G image N times (3 by default) and on the R
+      image FILE once, and compare the SHA-1 of the output of each case. FILE is the root.qcow2
+      that r9 build --side R --keep left. The G image is the g-base image of the row by default.
+      A case is compared only when each G run gives the same value. Write DIR/diffrun.txt
+      (work/diffrun by default). The command fails when a case differs.
   r9 image build [--release NAME] [--tree NAME] [--row OBJTYPE] [--accel kvm|hvf|tcg]
           [--timeout SECS] [--firmware PATH] [--out DIR]
       Make the g-base image of a pinned tree (the first tree of pins.toml by default). Boot the

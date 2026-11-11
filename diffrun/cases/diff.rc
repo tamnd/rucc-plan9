@@ -1,0 +1,9 @@
+# program: diff
+# diff between versions of the sources of the tree.
+cd /sys/src/cmd
+diff 6c/txt.c 8c/txt.c
+diff -e 6c/peep.c 8c/peep.c
+diff -c 6a/lex.c 8a/lex.c
+diff -r /sys/man/3 /sys/man/4
+# diff exits with the status some when the files differ.
+~ $status *some

@@ -1,0 +1,5 @@
+# program: troff
+# troff -ms on two papers of /sys/doc.
+tbl /sys/doc/rc.ms | troff -ms
+troff -ms /sys/doc/utf.ms
+troff -man /sys/man/1/rc

@@ -1,0 +1,4 @@
+# The cases of diffrun (plan 12.5), run by r9 diffrun. guest/r9-diffrun runs each case of
+# diffrun/cases, and prints one value for each.
+mkdir -p /tmp/r9in && cd /tmp/r9in && tar xf $r9in
+rc /tmp/r9in/r9-diffrun /tmp/r9in

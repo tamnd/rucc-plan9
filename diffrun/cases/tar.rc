@@ -1,0 +1,6 @@
+# program: tar
+# tar writes and reads an archive of sources.
+cd /sys/src/libc/port && tar c *.c >/tmp/r9diff/port.tar
+cat /tmp/r9diff/port.tar
+tar t </tmp/r9diff/port.tar
+mkdir -p /tmp/r9diff/x && cd /tmp/r9diff/x && tar x </tmp/r9diff/port.tar && cat *.c
