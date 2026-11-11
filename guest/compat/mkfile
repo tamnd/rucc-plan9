@@ -1,0 +1,3 @@
+# The targets of r9-build for the compat cases. "mk R" under r9-build runs the R side.
+G R:V:
+	rc ./run.rc $target
