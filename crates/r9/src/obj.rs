@@ -734,14 +734,14 @@ pub fn archive(bytes: &[u8]) -> Result<Option<Vec<Member>>, String> {
     Ok(Some(out))
 }
 
-/// The lines of a listing that differ, as a short diff from the longest common subsequence.
-/// Lines that only `a` has start with `-`, and lines that only `b` has start with `+`. At most
-/// `context` same lines are kept around each change.
+/// The edit of `left` into `right` from the longest common subsequence: `' '` for a line that
+/// both have, `-` for a line that only `left` has and `+` for a line that only `right` has. A
+/// `-` comes before a `+` where the order is free. `None` when the table would be too large.
 #[must_use]
-pub fn line_diff(left: &[String], right: &[String], context: usize) -> Vec<String> {
+pub fn edit_ops<'a>(left: &'a [String], right: &'a [String]) -> Option<Vec<(char, &'a str)>> {
     let (nl, nr) = (left.len(), right.len());
     if nl.saturating_mul(nr) > 16_000_000 {
-        return vec![format!("- {nl} lines"), format!("+ {nr} lines")];
+        return None;
     }
     let mut lcs = vec![vec![0u32; nr + 1]; nl + 1];
     for i in (0..nl).rev() {
@@ -768,6 +768,20 @@ pub fn line_diff(left: &[String], right: &[String], context: usize) -> Vec<Strin
             j += 1;
         }
     }
+    Some(ops)
+}
+
+/// The lines of a listing that differ, as a short diff from the longest common subsequence.
+/// Lines that only `a` has start with `-`, and lines that only `b` has start with `+`. At most
+/// `context` same lines are kept around each change.
+#[must_use]
+pub fn line_diff(left: &[String], right: &[String], context: usize) -> Vec<String> {
+    let Some(ops) = edit_ops(left, right) else {
+        return vec![
+            format!("- {} lines", left.len()),
+            format!("+ {} lines", right.len()),
+        ];
+    };
     let near: BTreeSet<usize> = ops
         .iter()
         .enumerate()
@@ -824,7 +838,7 @@ pub fn diff_objects(a: &Object, b: &Object, context: usize) -> String {
 }
 
 /// Decode a file of `arch`: one object, or the members of an archive that end in `.6` or `.7`.
-fn objects(name: &str, bytes: &[u8]) -> Result<Vec<(String, Object)>, String> {
+pub fn objects(name: &str, bytes: &[u8]) -> Result<Vec<(String, Object)>, String> {
     if let Some(members) = archive(bytes)? {
         let mut out = Vec::new();
         for m in members {
