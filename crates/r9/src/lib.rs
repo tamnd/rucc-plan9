@@ -20,6 +20,10 @@ pub mod flagsdiff;
 pub mod image;
 pub mod locate;
 pub mod obj;
+pub mod objcheck;
+pub mod optab;
+#[rustfmt::skip]
+pub mod optab6;
 pub mod repo;
 pub mod sets;
 pub mod tar;
