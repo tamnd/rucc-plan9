@@ -83,7 +83,7 @@ pub(crate) mod d6 {
 }
 
 /// The operand types of arm64 that the decoder needs, from `7.out.h`.
-mod d7 {
+pub(crate) mod d7 {
     pub const NONE: u8 = 1;
     pub const EXTERN: u8 = 2;
     pub const STATIC: u8 = 3;
