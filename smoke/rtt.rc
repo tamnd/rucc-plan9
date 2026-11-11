@@ -1,0 +1,7 @@
+# The 9P round trips from a guest to a host process (open question 10). Run r9 rtt on the host
+# first, then run r9 boot with --net --in guest. The guest builds r9rtt with its own compiler and
+# serves its name space to r9 rtt over the user network of QEMU.
+mkdir -p /tmp/r9in && cd /tmp/r9in && tar xf $r9in
+ip/ipconfig
+O=7; ~ $cputype amd64 && O=6; cd /tmp/r9in/rtt && $O^c -FTVw r9rtt.c && $O^l -o r9rtt r9rtt.$O
+/tmp/r9in/rtt/r9rtt

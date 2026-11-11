@@ -103,6 +103,10 @@ fn run(args: &Args) -> Result<ExitCode, String> {
             );
             Ok(ExitCode::SUCCESS)
         }
+        "rtt" => {
+            print!("{}", r9::rtt::command(args)?);
+            Ok(ExitCode::SUCCESS)
+        }
         "ccd" => {
             r9::ccd::command(args)?;
             Ok(ExitCode::SUCCESS)

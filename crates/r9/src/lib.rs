@@ -19,6 +19,7 @@ pub mod flagsdiff;
 pub mod image;
 pub mod locate;
 pub mod repo;
+pub mod rtt;
 pub mod sets;
 pub mod tar;
 pub mod treediff;
