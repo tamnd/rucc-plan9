@@ -10,7 +10,7 @@ use r9_pins::rows::Row;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -277,8 +277,7 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
             type_text(&text, &mut stdin, &rx, &mut log, &mut lines, &mut session)?;
         }
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    stop(&mut child);
     let _ = reader.join();
     clean_up(req)?;
     let passed = session.passed() && session.phase == Phase::Halted && !timed_out;
@@ -293,6 +292,30 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
     };
     write_steps(&req.work.join("steps.json"), &outcome)?;
     Ok(outcome)
+}
+
+/// Stop QEMU. QEMU keeps a part of the qcow2 metadata of the overlay in memory, and writes it
+/// when it closes the disk. SIGKILL loses that metadata, and with it each write of the session.
+/// The amd64 guest powers off after `fshalt` and QEMU exits by itself, but the arm64 guest does
+/// not. Thus QEMU gets SIGTERM, which makes it close its disks and exit, and SIGKILL only when it
+/// did not exit in 10 seconds.
+fn stop(child: &mut Child) {
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .stderr(Stdio::null())
+        .status();
+    let limit = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < limit {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Type `text` into the console. The guest drops characters when they come faster than it reads
