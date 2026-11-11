@@ -57,8 +57,9 @@ pub fn parse<S: AsRef<str>>(lines: &[S]) -> Results {
 }
 
 /// The boot console up to the first shell prompt, with the numbers taken out. Each run of digits
-/// becomes `N`, so that times, addresses, pids and sizes do not differ between runs. Blank lines
-/// and the lines of the memory size are left out.
+/// becomes `N`, so that times, addresses, pids and sizes do not differ between runs. A rate at the
+/// end of a line, such as `(N.N KiB/s)`, is taken out. Blank lines and the lines of the memory
+/// size are left out.
 #[must_use]
 pub fn normalize(console: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -83,6 +84,12 @@ pub fn normalize(console: &str) -> Vec<String> {
                 n.push(c);
                 digits = false;
             }
+        }
+        // U-Boot gives the rate of a load only when the load took some time.
+        if n.ends_with("/s)")
+            && let Some(i) = n.rfind(" (N")
+        {
+            n.truncate(i);
         }
         out.push(n);
     }
@@ -378,8 +385,16 @@ mod tests {
 
     #[test]
     fn the_console_loses_its_numbers() {
-        let c = "\r\nPlan 9\r\n126 holes free\r\n2048M memory: 1024M kernel\r\nE820: 0x0000 1234\r\n\r\nterm% ls\r\nafter\r\n";
-        assert_eq!(normalize(c), vec!["Plan N", "N holes free", "EN: NxN N"]);
+        let c = "\r\nPlan 9\r\n9 bytes read in 2 ms (4.4 KiB/s)\r\n126 holes free\r\n2048M memory: 1024M kernel\r\nE820: 0x0000 1234\r\n\r\nterm% ls\r\nafter\r\n";
+        assert_eq!(
+            normalize(c),
+            vec![
+                "Plan N",
+                "N bytes read in N ms",
+                "N holes free",
+                "EN: NxN N"
+            ]
+        );
     }
 
     fn run(pairs: &[(&str, &str)]) -> Run {
