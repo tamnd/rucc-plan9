@@ -61,7 +61,7 @@ impl Arch {
 }
 
 /// The operand types of amd64 that the decoder needs, from `6.out.h`.
-mod d6 {
+pub(crate) mod d6 {
     pub const NONE: u8 = 111;
     pub const BRANCH: u8 = 112;
     pub const EXTERN: u8 = 113;
@@ -920,12 +920,17 @@ pub fn diff_files(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// An amd64 object: `TEXT main(SB),0,$8`, `MOVQ $1,AX`, `JMP` back to the `MOVQ`, `RET`,
     /// `END`, with `main` in slot 1.
-    fn amd64_object() -> Vec<u8> {
+    pub(crate) fn amd64_object() -> Vec<u8> {
+        amd64_object_to(16)
+    }
+
+    /// The object of `amd64_object`, with the operand type `to` as the destination of `MOVQ`.
+    pub(crate) fn amd64_object_to(to: u8) -> Vec<u8> {
         let a = Arch::Amd64;
         let op = |n: &str| a.op(n).to_le_bytes();
         let mut b = Vec::new();
@@ -952,7 +957,7 @@ mod tests {
         b.extend([d6::T_OFFSET | d6::T_TYPE]);
         b.extend(1u32.to_le_bytes());
         b.push(d6::CONST);
-        b.extend([d6::T_TYPE, 16]);
+        b.extend([d6::T_TYPE, to]);
         // JMP 1(PC), back to the MOVQ
         b.extend(op("JMP"));
         b.extend(9u32.to_le_bytes());

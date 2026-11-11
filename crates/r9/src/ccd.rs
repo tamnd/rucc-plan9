@@ -38,13 +38,18 @@
 //!
 //! An empty status is success. The status `rucc failed` asks `r9-cc` to say what happened, and
 //! the status of a call that could not run starts with `ccd:`.
+//!
+//! Before the reply, `r9 ccd` checks each `.6` file that rucc wrote with the instruction tables
+//! of `6l` (plan 07.3). When `6l` cannot encode an instruction of the file, the status is
+//! `objcheck failed`, standard error tells the instructions, and the directory of the call stays
+//! on the host with the object in it.
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -465,7 +470,13 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
             };
             if out.status.success() {
                 match outputs(&dir, &t.renamed) {
-                    Ok(files) => reply.files = files,
+                    Ok(files) => match check_objects(&files) {
+                        None => reply.files = files,
+                        Some(report) => {
+                            "objcheck failed".clone_into(&mut reply.status);
+                            reply.stderr.extend_from_slice(report.as_bytes());
+                        }
+                    },
                     Err(e) => reply.status = format!("ccd: {e}"),
                 }
             }
@@ -484,6 +495,25 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
         }
     }
     reply
+}
+
+/// Check each `.6` file of a reply with the instruction tables of `6l`. Return what `6l` cannot
+/// encode, or `None` when each instruction has an encoding.
+fn check_objects(files: &[(String, Vec<u8>)]) -> Option<String> {
+    static CHECKER: OnceLock<crate::objcheck::Checker> = OnceLock::new();
+    let checker = CHECKER.get_or_init(crate::objcheck::Checker::new);
+    let mut report = String::new();
+    for (name, bytes) in files.iter().filter(|(n, _)| n.ends_with(".6")) {
+        match crate::objcheck::file(checker, name, bytes) {
+            Ok((_, 0)) => {}
+            Ok((text, _)) => report.push_str(&text),
+            Err(e) => {
+                report.push_str(&e);
+                report.push('\n');
+            }
+        }
+    }
+    (!report.is_empty()).then_some(report)
 }
 
 /// The files that rucc wrote in `dir`, with their names in the guest.
@@ -732,5 +762,21 @@ mod tests {
         exports.put("7".into(), server);
         assert!(t.join().unwrap());
         assert!(exports.take("8", Duration::from_millis(10)).is_none());
+    }
+
+    #[test]
+    fn objcheck_passes_a_good_object_and_names_a_bad_one() {
+        use crate::obj::tests::amd64_object_to;
+        let good = vec![("a.6".to_string(), amd64_object_to(16))];
+        assert_eq!(check_objects(&good), None);
+        let bad = vec![
+            ("x.7".to_string(), b"not an amd64 object".to_vec()),
+            ("b.6".to_string(), amd64_object_to(crate::obj::d6::CONST)),
+        ];
+        let report = check_objects(&bad).unwrap();
+        assert!(report.contains("b.6: main: MOVQ $1,$0"), "{report}");
+        assert!(!report.contains("x.7"));
+        let broken = vec![("c.6".to_string(), b"xx".to_vec())];
+        assert!(check_objects(&broken).unwrap().starts_with("c.6: "));
     }
 }
