@@ -1,4 +1,4 @@
 # program: bzip2
 # bzip2 on a tar stream of sources.
-cd /sys/src/cmd/rc && tar c *.c *.h mkfile >/tmp/r9diff/rc.tar
+cd /sys/src/cmd/rc && tar c `{ls *.c *.h mkfile | grep -v '^y\.tab'} >/tmp/r9diff/rc.tar
 for(l in 1 9) bzip2 -c -$l </tmp/r9diff/rc.tar

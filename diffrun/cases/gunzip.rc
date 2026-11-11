@@ -1,5 +1,5 @@
 # program: gunzip
 # gunzip on a stream that gzip made.
-cd /sys/src/cmd/awk && tar c *.c *.h *.y >/tmp/r9diff/awk.tar
+cd /sys/src/cmd/awk && tar c `{ls *.c *.h *.y | grep -v '^(y\.tab|awkgram\.c|proctab\.c)'} >/tmp/r9diff/awk.tar
 gzip -c -9 </tmp/r9diff/awk.tar >/tmp/r9diff/awk.tgz
 gunzip -c </tmp/r9diff/awk.tgz
