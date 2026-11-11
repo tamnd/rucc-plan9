@@ -197,6 +197,32 @@ fn run_objdiff(args: &Args) -> Result<ExitCode, String> {
     })
 }
 
+/// `r9 sdiff`: two objects side by side, function by function.
+fn run_sdiff(args: &Args) -> Result<ExitCode, String> {
+    let a = args
+        .target
+        .as_deref()
+        .ok_or("give a .6 or .7 file, or an archive of them")?;
+    let b = args.get("with").ok_or("give the other file with --with")?;
+    let read = |p: &str| std::fs::read(p).map_err(|e| format!("{p}: {e}"));
+    let width = args
+        .get("width")
+        .map_or(Ok(60), str::parse)
+        .map_err(|e| format!("--width: {e}"))?;
+    let opt = r9::sdiff::Options {
+        function: args.get("function"),
+        width,
+        all: args.has("all"),
+    };
+    let (report, differ) = r9::sdiff::files(a, &read(a)?, b, &read(b)?, opt)?;
+    print!("{report}");
+    Ok(if differ {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
 /// Run a command that reads the compile records of a build.
 fn run_records(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
@@ -245,6 +271,7 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
             })
         }
         "objdiff" => run_objdiff(args),
+        "sdiff" => run_sdiff(args),
         "objcheck" | "optab" => run_optab(args),
         "census" => {
             let path = args

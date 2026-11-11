@@ -114,6 +114,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["root", "pin", "out"],
             switches: &[],
         },
+        "sdiff" => Accepts {
+            positional: true,
+            values: &["with", "function", "width"],
+            switches: &["all"],
+        },
         "objcheck" => Accepts {
             positional: true,
             values: &[],
@@ -221,6 +226,13 @@ usage:
       the symbols that only one file has, and the lines that differ in each function, with N
       same lines (3 by default) around each change. Exit with failure when the records
       differ. With no --with, print the listing of A.
+  r9 sdiff A --with B [--function NAME] [--width N] [--all]
+      Show the code of two objects of 6c or 7c, or of two archives of them, side by side,
+      function by function (plan 12.8). A is on the left and B is on the right. The lines are
+      aligned as in r9 objdiff. The middle column is | for a changed line, < for a line that
+      only A has and > for a line that only B has. Show only the functions that differ, or all
+      of them with --all, or only NAME. Each side is N characters wide (60 by default). Exit
+      with failure when a function differs.
   r9 optab --root DIR [--pin PIN] [--out FILE]
       Read the instruction tables of 6l under DIR/sys/src/cmd/6l (plan 07.3): the Y classes of
       l.h, optab and its ytab arrays in optab.c, ymovtab in span.c, and ycover in obj.c. Write them as Rust to
