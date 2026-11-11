@@ -20,6 +20,7 @@ pub mod flagsdiff;
 pub mod helpers;
 pub mod image;
 pub mod locate;
+pub mod mix;
 pub mod obj;
 pub mod objcheck;
 pub mod optab;

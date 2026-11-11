@@ -65,10 +65,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             ],
             switches: &[],
         },
-        "build" => Accepts {
+        "build" | "mix" => Accepts {
             positional: true,
             values: &[
                 "side", "row", "accel", "timeout", "firmware", "dir", "out", "image", "rucc",
+                "default", "file", "mix",
             ],
             switches: &["keep"],
         },
@@ -91,7 +92,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         },
         "ccd" => Accepts {
             positional: false,
-            values: &["port", "rucc", "work"],
+            values: &["port", "rucc", "work", "default", "file", "mix"],
             switches: &[],
         },
         "locate" => Accepts {
@@ -183,6 +184,14 @@ usage:
       Side R starts r9 ccd on a free port and sends each call to rucc (PATH, or R9_RUCC, or rucc
       on the path). R9_BRINGUP gives the bring-up words (cc:auto by default), so that a call
       that rucc fails goes to kencc. The line of each call is in ccd.log.
+  r9 mix [NAME] [--file UNIT=R|G,...] [--mix FILE] [--default R|G] [r9 build options]
+      Build with some units from rucc and the others from kencc (plan 05.7, 12.8). A unit is a
+      source file of the guest, such as /sys/src/libc/port/strcmp.c, or a directory, which
+      applies to each file under it. The longest unit that matches a file gives its side, and
+      the other files get the default side (R by default). FILE has one UNIT=R or UNIT=G on each
+      line. This is r9 build --side R, but r9 ccd gives the status mix: G to a call that has a
+      source on side G, and r9-cc then runs kencc. ccd.log marks such a call with G. The mix
+      goes to mix.txt in the output directory. r9 build and r9 ccd take the same options.
   r9 baseline [NAME] [--row OBJTYPE,...] [--runs N] [--suites boot,smoke,test] [--pin PIN]
           [--image FILE] [--accel kvm|hvf|tcg] [--timeout SECS] [--firmware PATH] [--out DIR]
       Run each suite N times (3 by default) on the g-base image of each row (amd64,arm64 by
@@ -258,13 +267,13 @@ usage:
       gives them, after the changes that 6l makes when it reads an object. An instruction that
       no pair of its ytab or of ymovtab covers is the link error doasm: notfound. Print each
       such instruction, and exit with failure when there is one.
-  r9 ccd [--port N] [--rucc PATH] [--work DIR]
+  r9 ccd [--port N] [--rucc PATH] [--work DIR] [--file UNIT=R|G,...] [--mix FILE] [--default R|G]
       Serve the compiler slot of a guest (plan 05.4). r9-cc in the guest sends each call of 6c
       and 7c to port N on the host (5640 by default), as tcp!10.0.2.2!N, with the name space of
       the build on a second connection. ccd runs rucc (PATH, or R9_RUCC, or rucc on the path)
       with the sysroot on that name space and sends the objects back. The outputs of each call
       go in a new directory under DIR (a temporary directory by default) while rucc runs. Each
-      call prints one line. Boot the guest with --net.
+      call prints one line. Boot the guest with --net. The mix options are as in r9 mix.
   r9 locate NAME --tree DIR [--days N] [--write]
       Find the commit that the release NAME was cut from. DIR holds the release's sys/src and
       sys/include, as a boot with --collect gives them. DIR can also be the collected.tar of

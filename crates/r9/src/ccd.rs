@@ -383,6 +383,8 @@ pub struct Config {
     pub work: PathBuf,
     /// The file that gets the line of each call. With none, the lines go to standard output.
     pub log: Option<Arc<Mutex<std::fs::File>>>,
+    /// The side of each unit. With none, each call goes to rucc.
+    pub mix: Option<Arc<crate::mix::Mix>>,
 }
 
 /// Copy bytes from `from` to `to` until the end of `from`, then close the write side of `to`.
@@ -420,6 +422,12 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
     let Some(guest) = exports.take(id, EXPORT_WAIT) else {
         return fail(format!("ccd: no export for call {id}"));
     };
+    if let Some(mix) = &cfg.mix
+        && mix.side_of_call(sources(call).iter().map(String::as_str)) == crate::mix::Side::G
+    {
+        let _ = guest.shutdown(Shutdown::Both);
+        return fail(crate::mix::STATUS_G.to_owned());
+    }
     let shut = guest.try_clone().ok();
     let port = match relay(guest) {
         Ok(p) => p,
@@ -497,6 +505,25 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
     reply
 }
 
+/// The source files of a call, as absolute paths of the guest. A call that reads its standard
+/// input gives its directory.
+#[must_use]
+pub fn sources(call: &Call) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut args = call.args.iter();
+    while let Some(a) = args.next() {
+        if a == "-I" || a == "-o" {
+            args.next();
+        } else if !a.starts_with('-') {
+            out.push(absolute(&call.dir, a));
+        }
+    }
+    if out.is_empty() {
+        out.push(absolute("/", &call.dir));
+    }
+    out
+}
+
 /// Check each `.6` file of a reply with the instruction tables of `6l`. Return what `6l` cannot
 /// encode, or `None` when each instruction has an encoding.
 fn check_objects(files: &[(String, Vec<u8>)]) -> Option<String> {
@@ -568,6 +595,8 @@ fn serve(cfg: &Config, exports: &Exports, stream: TcpStream) -> io::Result<()> {
         "{} {} {} {} {}ms {}",
         if reply.status.is_empty() {
             "ok"
+        } else if reply.status == crate::mix::STATUS_G {
+            "G"
         } else {
             "FAIL"
         },
@@ -654,6 +683,7 @@ pub fn command(args: &crate::cli::Args) -> Result<(), String> {
         rucc,
         work,
         log: None,
+        mix: crate::mix::from_args(args)?.map(Arc::new),
     })
 }
 
@@ -762,6 +792,41 @@ mod tests {
         exports.put("7".into(), server);
         assert!(t.join().unwrap());
         assert!(exports.take("8", Duration::from_millis(10)).is_none());
+    }
+
+    #[test]
+    fn the_mix_sends_a_call_on_side_g_to_kencc() {
+        let c = call(&[
+            "-FTVw",
+            "-I",
+            "../common",
+            "-o",
+            "x.7",
+            "exec.c",
+            "/sys/src/x/y.c",
+        ]);
+        assert_eq!(
+            sources(&c),
+            ["/sys/src/cmd/acme/exec.c", "/sys/src/x/y.c"].map(String::from)
+        );
+        assert_eq!(sources(&call(&["-"])), ["/sys/src/cmd/acme".to_owned()]);
+        let mut mix = crate::mix::Mix::new(crate::mix::Side::R);
+        mix.add("/sys/src/cmd/acme/exec.c=G").unwrap();
+        let work = std::env::temp_dir().join(format!("r9-mix-test-{}", std::process::id()));
+        let cfg = Config {
+            port: 0,
+            rucc: "/nonexistent/rucc".into(),
+            work: work.clone(),
+            log: None,
+            mix: Some(Arc::new(mix)),
+        };
+        let exports = Exports::default();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let _client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        exports.put("1".into(), listener.accept().unwrap().0);
+        let reply = compile(&cfg, &exports, "1", &call(&["exec.c"]));
+        assert_eq!(reply.status, crate::mix::STATUS_G);
+        assert!(!work.join("1").exists());
     }
 
     #[test]
