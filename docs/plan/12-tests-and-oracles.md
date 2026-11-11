@@ -4,7 +4,7 @@ The oracle is always G: the same tree, built by kencc, run the same way. R passe
 
 ## 12.1 The oracle and flakiness
 
-Each test runs three times on G at each pin. A test is **graded** when G gives the same result all three times. A test whose G result varies is **flaky**. It is reported with its variation, and it does not grade R. A flaky test that becomes stable is graded again from the next pin. `r9 baseline` stores G's results per pin under `baselines/<pin>/<suite>.json` with the three runs' hashes.
+Each test runs three times on G at each pin. A test is **graded** when G gives the same result all three times. A test whose G result varies is **flaky**. It is reported with its variation, and it does not grade R. A flaky test that becomes stable is graded again from the next pin. `r9 baseline` stores G's results per pin under `baselines/<pin>/<objtype>/<suite>.json` with the hash of each run.
 
 R runs once. A graded test that fails on R runs twice more. If it fails all three times, it is a **failure**. If it fails once or twice, it is an **R-flake**. R-flakes are reported, filed with the `flaky` label, and counted. They are not failures, but more than three R-flakes in one suite, in one run, fail the run. A miscompile can look like a flake when it depends on timing, and that rule stops flakes from hiding one.
 
