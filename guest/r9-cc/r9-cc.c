@@ -26,9 +26,11 @@
 enum {
 	Maxfiles = 256,
 	Hexlen = 2*SHA2_256dlen+1,
+	Tries = 3,	/* calls to r9 ccd before a lost call goes to kencc */
 };
 
 char *records = "/tmp/r9/compile.jsonl";
+char incomplete[] = "r9-cc: the reply of r9 ccd is not complete";
 
 typedef struct Buf Buf;
 struct Buf {
@@ -399,7 +401,7 @@ forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, c
 	Bterm(&b);
 
 	Binit(&b, cfd, OREAD);
-	*status = "r9-cc: the reply of r9 ccd is not complete";
+	*status = incomplete;
 	if((v = field(&b, "status")) == nil)
 		goto out;
 	*status = strdup(v);
@@ -433,11 +435,22 @@ forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, c
 	close(cfd);
 	return 0;
 bad:
-	*status = "r9-cc: the reply of r9 ccd is not complete";
+	*status = incomplete;
 out:
 	Bterm(&b);
 	close(cfd);
 	return -1;
+}
+
+/*
+ * Whether status is a call that did not get to r9 ccd or whose reply did not come back. Such a
+ * call is tried again: a guest that the host stops for a while can lose the reply of a call that
+ * rucc compiled, and kencc must not compile a unit for that reason.
+ */
+int
+lost(char *status)
+{
+	return strcmp(status, incomplete) == 0 || strncmp(status, "r9-cc: dial ", 12) == 0;
 }
 
 void
@@ -507,7 +520,14 @@ main(int argc, char **argv)
 			fd = 2;
 		}else
 			fprint(fd, "== %s %s\n", cc, dir);
-		if(forward(ccd, cc, objtype, dir, argc, argv, text, ntext, fd, &status) == 0 && status[0] == 0)
+		for(i = 0; i < Tries; i++){
+			if(forward(ccd, cc, objtype, dir, argc, argv, text, ntext, fd, &status) == 0)
+				break;
+			if(!lost(status))
+				break;
+			fprint(fd, "%s; try %d of %d\n", status, i+1, Tries);
+		}
+		if(i < Tries && status[0] == 0)
 			origin = "rucc";
 		else if(fd != 2){
 			fprint(fd, "%s\n", status);
