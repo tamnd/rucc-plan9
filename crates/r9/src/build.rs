@@ -71,7 +71,9 @@ impl Slot {
 #[must_use]
 pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
     let w = "/tmp/r9";
-    // rucc.err is append-only, because each call of r9-cc opens it to write.
+    // rucc.err is append-only, because each call of r9-cc opens it to write. /tmp is on the disk
+    // of the image, so an image that an earlier build left has the files of that build. The work
+    // directory is made empty first: an old t1 stops the progress loop at once.
     let (net, env) = match slot {
         Slot::G => (String::new(), String::new()),
         Slot::R { port, bringup } => (
@@ -81,14 +83,16 @@ pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
     };
     vec![
         format!(
-            "mkdir -p /tmp/r9in /usr/glenda/r9/bin {w} && touch {w}/rucc.err && chmod +a {w}/rucc.err && cd /tmp/r9in && tar xf $r9in{net}"
+            "rm -rf /tmp/r9in {w} && mkdir -p /tmp/r9in /usr/glenda/r9/bin {w} && touch {w}/rucc.err && chmod +a {w}/rucc.err && cd /tmp/r9in && tar xf $r9in{net}"
         ),
         "cp /tmp/r9in/r9-build /usr/glenda/r9/bin/ && cd /tmp/r9in/r9-cc && mk install".into(),
         // A loop in the background prints a progress line to the console every minute: the
         // time, the lines of the log, its last line and the memory in use. The console log on
-        // the host keeps it when the guest stops before its file server writes the log out.
+        // the host keeps it when the guest stops before its file server writes the log out. The
+        // loop is stopped only when it still runs, because rc drops the rest of the line when a
+        // redirection fails, and the prompt then never gets the status.
         format!(
-            "date -n > {w}/t0; {{while(! test -f {w}/t1){{sleep 60; echo r9-progress `{{date -n}} `{{wc -l < {w}/mk.log}} `{{tail -1 {w}/mk.log}}; grep memory /dev/swap}}}} & r9p=$apid; {env}/usr/glenda/r9/bin/r9-build {dir} {targets} < /dev/null > {w}/mk.log >[2=1]; s=$status; date -n > {w}/t1; echo kill > /proc/$r9p/note; echo $s > {w}/status; test -z $s"
+            "date -n > {w}/t0; {{while(! test -f {w}/t1){{sleep 60; echo r9-progress `{{date -n}} `{{wc -l < {w}/mk.log}} `{{tail -1 {w}/mk.log}}; grep memory /dev/swap}}}} & r9p=$apid; {env}/usr/glenda/r9/bin/r9-build {dir} {targets} < /dev/null > {w}/mk.log >[2=1]; s=$status; date -n > {w}/t1; test -d /proc/$r9p && echo kill > /proc/$r9p/note; echo $s > {w}/status; test -z $s"
         ),
         format!("tail -20 {w}/mk.log"),
         format!("walk -f -e msp {dir} /$objtype/bin /$objtype/lib > {w}/walk"),
@@ -442,6 +446,8 @@ mod tests {
         let c = commands("/sys/src", "install", &Slot::G);
         assert!(c[2].contains("r9-build /sys/src install < /dev/null"));
         assert!(c[2].contains("{while(! test -f /tmp/r9/t1){sleep 60; echo r9-progress"));
+        assert!(c[2].contains("test -d /proc/$r9p && echo kill > /proc/$r9p/note;"));
+        assert!(c[0].starts_with("rm -rf /tmp/r9in /tmp/r9 && mkdir -p"));
         assert!(c[5].contains("awk -v 't='$t0 '$1 >= t+0 {print $3}'"));
         assert!(c[6].starts_with("sha1sum -2 256 /tmp/r9/t0 `{cat /tmp/r9/changed}"));
         assert_eq!(
