@@ -6,7 +6,7 @@
   "objtype": "amd64",
   "pin": "2859ae04e800",
   "results": {
-    "console": "value 136c9f5b97ed37513a75587bd5d65b3f9e14d069b93a803fae94491f6cc2ce19",
+    "console": "value 3c4b9ea9f9ab9c28169bf9b436143ae206cc51e48e61c0e7aa4e40e638d68731",
     "halted": "ok",
     "step-1": "ok",
     "step-10": "ok",
@@ -24,20 +24,20 @@
   "runs": [
     {
       "passed": true,
-      "seconds": 31.1,
-      "sha256": "0c3ffd38fdab208fc104b1109be9924cadaa0ba78abc2bba5e447156b24e1cc9",
+      "seconds": 20.1,
+      "sha256": "88a45a2c14af17df16159b49a9d23d448090ce6f6519a8585914fa8f2b90d773",
       "tests": 14
     },
     {
       "passed": true,
-      "seconds": 31.8,
-      "sha256": "0c3ffd38fdab208fc104b1109be9924cadaa0ba78abc2bba5e447156b24e1cc9",
+      "seconds": 19.6,
+      "sha256": "88a45a2c14af17df16159b49a9d23d448090ce6f6519a8585914fa8f2b90d773",
       "tests": 14
     },
     {
       "passed": true,
-      "seconds": 35.5,
-      "sha256": "0c3ffd38fdab208fc104b1109be9924cadaa0ba78abc2bba5e447156b24e1cc9",
+      "seconds": 20.5,
+      "sha256": "88a45a2c14af17df16159b49a9d23d448090ce6f6519a8585914fa8f2b90d773",
       "tests": 14
     }
   ],
