@@ -2,14 +2,14 @@
   "flaky": 2,
   "flaky_results": {
     "cmd/git/test/rebase.out": [
-      "value 0d3a699080ee8ea122727c417f0006cc960cbcf8",
-      "value 4d0d0ba648dea6663aff1e0d28397c560d61c7a7",
-      "value d710e23b12c7b891988a8a6a0286b6f604731c6a"
+      "value a61fed9cbfae512311ebceca369a9d8d6093c5e8",
+      "value 4bab719c4a6c5cda9e1dadb80bfcffd41cbc8d76",
+      "value 01312358680a2256494753988c20249c57ae9a16"
     ],
     "libmemdraw/test/drawtest.out": [
-      "value 03e0abc1da2fd4da6287bf268b05a0430f134c42",
-      "value a282592110385c850c8763bd295d8159193ca20d",
-      "value c410a886d3406ba8198a8acfc4ae779a0f52d4b7"
+      "value b8359b492ca765faef2b26a65f1c0cea54dad72a",
+      "value 1e50292cae8bef3caad37318222d081cb88632d9",
+      "value ad53d636ed4b55f7d1372a3dc933c9fd752b9186"
     ]
   },
   "graded": 87,
@@ -18,7 +18,7 @@
   "pin": "2859ae04e800",
   "results": {
     "cmd/awk/test/awk": "ok",
-    "cmd/awk/test/awk.out": "value 8cfbdc056010becc3745238bb3503fcbde10ccf8",
+    "cmd/awk/test/awk.out": "value 8eac1b33e769dfa126382a44bd78490e0fc1a430",
     "cmd/cpp/test/edges": "ok",
     "cmd/cpp/test/edges.out": "value 351361b692f85bbc36e0beace4fd94019d902302",
     "cmd/diff/test/diff": "ok",
@@ -108,20 +108,20 @@
   "runs": [
     {
       "passed": true,
-      "seconds": 162.1,
-      "sha256": "6905d9539465860c27638c1905b13cff95056a50be10eb2e89b2af0fbcfce952",
+      "seconds": 154.5,
+      "sha256": "8ba7e485187f0497018373750ef624363f0b21f0440f847437a5eb2bc612b4fb",
       "tests": 89
     },
     {
       "passed": true,
-      "seconds": 127.0,
-      "sha256": "b760c2f82b5a58e20a6d411608e5a4095d40fda351b780c825c4e3d6e2d04d13",
+      "seconds": 130.3,
+      "sha256": "087b97b37cbea901e662a85385960de116b0225b5dd566a7c6d085fb5a186134",
       "tests": 89
     },
     {
       "passed": true,
-      "seconds": 119.0,
-      "sha256": "0bdfb729e65d4725f29b5b1dc0391f196e25237f445735740ba2b5738cdd007a",
+      "seconds": 157.1,
+      "sha256": "af4eeee2a2db568272810c44914baafe035ce988c4f948cee1bad18f5762f120",
       "tests": 89
     }
   ],

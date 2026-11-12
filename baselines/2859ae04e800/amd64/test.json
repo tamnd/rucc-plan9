@@ -1,29 +1,24 @@
 {
-  "flaky": 3,
+  "flaky": 2,
   "flaky_results": {
     "cmd/git/test/rebase.out": [
-      "value d2b4447250bd951fffa69e2278baf4007e0743be",
-      "value 797d06187cb155224d7c7c3d19106412fd9bbdb3",
-      "value 15c603ce14c3a9ae8aab370b681900e5b4222c4b"
+      "value 1e8d56caec51ddd1815e4ad2bfe359072358479f",
+      "value ded1d7d9efddf80d4ef9403fc924f42d3ee0a875",
+      "value e329baf15e449fe9fe29296fed2eec25f32be67f"
     ],
     "libmemdraw/test/drawtest.out": [
-      "value bf694c56f6b095d3c311104417825ad80bf07161",
-      "value 1d99098aa516570bb6e5224ef39a7f121f744dd2",
-      "value 178588cc1ffe637ee4b180586847a692a26b1971"
-    ],
-    "libregexp/test/basic.out": [
-      "value 238aa4e5bfcadb82034e1b54a3d990d219069894",
-      "value 238aa4e5bfcadb82034e1b54a3d990d219069894",
-      "value 060336727c1b9575983287c114c9457ef63e25a5"
+      "value bda23eef36a1c4418288099fe13669d6defb9552",
+      "value e4e169b187af6d7d4c47cc9999084c674f9130c5",
+      "value 00f6f7a981f28e58a9373ffd02756707c64dbe92"
     ]
   },
-  "graded": 86,
+  "graded": 87,
   "graded_fail": 0,
   "objtype": "amd64",
   "pin": "2859ae04e800",
   "results": {
     "cmd/awk/test/awk": "ok",
-    "cmd/awk/test/awk.out": "value 8cfbdc056010becc3745238bb3503fcbde10ccf8",
+    "cmd/awk/test/awk.out": "value 8eac1b33e769dfa126382a44bd78490e0fc1a430",
     "cmd/cpp/test/edges": "ok",
     "cmd/cpp/test/edges.out": "value 351361b692f85bbc36e0beace4fd94019d902302",
     "cmd/diff/test/diff": "ok",
@@ -82,6 +77,7 @@
     "libmp/test/main": "ok",
     "libmp/test/main.out": "value 6ea7a7e06425697ad4f33b63bcea0a175d9bdd6d",
     "libregexp/test/basic": "ok",
+    "libregexp/test/basic.out": "value 238aa4e5bfcadb82034e1b54a3d990d219069894",
     "libsec/test/aesgcm": "ok",
     "libsec/test/aesgcm.out": "value e2a84ac60d5b91982490748e89427133c1455fee",
     "libsec/test/bf": "ok",
@@ -112,20 +108,20 @@
   "runs": [
     {
       "passed": true,
-      "seconds": 959.9,
-      "sha256": "7ec42eec82c5e8334d8a3ac3a1b3ebcdfd7335669e86c8fb4620bc422e166b52",
+      "seconds": 570.0,
+      "sha256": "08401c1363db57accfd9a8470e80383d1edf194cbf23ff538139eb12ff4775f3",
       "tests": 89
     },
     {
       "passed": true,
-      "seconds": 797.8,
-      "sha256": "fbeca63750b7881e5a29a2afabe185f6704d1f5a0150f3f195be6349a223d7ad",
+      "seconds": 1245.0,
+      "sha256": "bed81d20c1e1cf1a7e9a289c9b05ca408ba89aa9a83e9ab221fd0550e35216db",
       "tests": 89
     },
     {
       "passed": true,
-      "seconds": 906.0,
-      "sha256": "43bbfebe42be2910eb32d69b5f11e7b871ec34e46681aad3f6cef77886099214",
+      "seconds": 1730.1,
+      "sha256": "e531e192af21a71de322f17990447f354a6e8041c267037a00a56b6b4029e280",
       "tests": 89
     }
   ],
