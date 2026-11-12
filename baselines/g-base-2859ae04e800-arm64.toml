@@ -4,10 +4,10 @@ commit = "2859ae04e800737307470538a942ab8f8261253b"
 release = "11952"
 objtype = "arm64"
 image = "g-base-2859ae04e800.arm64.qcow2"
-sha256 = "43a80bc1f91b4998036e3cccd34b496553c444da5d3737ac2c0a1d9e9a054027"
+sha256 = "059975d50cf462f96278edd3da82d3d770efcbd55c4ffa116b6dd340462a1472"
 fixed_point = true
 same_as_first = true
-boot_seconds = 50.854818708
+boot_seconds = 226.736502541
 
 [[tool]]
 name = "6c"
