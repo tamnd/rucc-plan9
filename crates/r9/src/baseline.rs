@@ -57,9 +57,14 @@ pub fn parse<S: AsRef<str>>(lines: &[S]) -> Results {
 }
 
 /// The boot console up to the first shell prompt, with the numbers taken out. Each run of digits
-/// becomes `N`, so that times, addresses, pids and sizes do not differ between runs. A rate at the
-/// end of a line, such as `(N.N KiB/s)`, is taken out. Blank lines and the lines of the memory
-/// size are left out.
+/// becomes `N`, so that times, addresses, pids and sizes do not differ between runs. A word of hex
+/// digits with a digit in it, such as `669a5000`, also becomes `N`. A rate at the end of a line,
+/// such as `(N.N KiB/s)`, is taken out. Blank lines and the lines of the memory size are left out.
+///
+/// The lines that identify the kernel are also left out, because a kernel of a different build
+/// gives different values in them. These are the line of the loader that counts the kernel in
+/// with backspaces, and the two lines that paqfs writes for the boot file system: the label with
+/// the build date, such as `pc64.bootfs: Thu Jul 30 07:08:11 GMT 2026`, and the `fingerprint:`.
 #[must_use]
 pub fn normalize(console: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -69,22 +74,26 @@ pub fn normalize(console: &str) -> Vec<String> {
             break;
         }
         let line = line.trim();
-        if line.is_empty() || line.contains(" memory") {
+        if line.is_empty()
+            || line.contains(" memory")
+            || line.contains('\u{8}')
+            || line.contains(".bootfs: ")
+            || line.starts_with("fingerprint: ")
+        {
             continue;
         }
         let mut n = String::new();
-        let mut digits = false;
+        let mut word = String::new();
         for c in line.chars() {
-            if c.is_ascii_digit() {
-                if !digits {
-                    n.push('N');
-                }
-                digits = true;
+            if c.is_ascii_alphanumeric() {
+                word.push(c);
             } else {
+                numbers(&word, &mut n);
+                word.clear();
                 n.push(c);
-                digits = false;
             }
         }
+        numbers(&word, &mut n);
         // U-Boot gives the rate of a load only when the load took some time.
         if n.ends_with("/s)")
             && let Some(i) = n.rfind(" (N")
@@ -94,6 +103,39 @@ pub fn normalize(console: &str) -> Vec<String> {
         out.push(n);
     }
     out
+}
+
+/// Writes one word of the console to `out` with its numbers taken out. A word of hex digits with a
+/// digit in it becomes `N`, and `0x` and hex digits becomes `NxN`. In other words each run of
+/// digits becomes `N`.
+fn numbers(word: &str, out: &mut String) {
+    let hex = |w: &str| {
+        !w.is_empty()
+            && w.chars().all(|c| c.is_ascii_hexdigit())
+            && w.chars().any(|c| c.is_ascii_digit())
+    };
+    if let Some(rest) = word.strip_prefix("0x").or_else(|| word.strip_prefix("0X"))
+        && (rest.is_empty() || rest.chars().all(|c| c.is_ascii_hexdigit()))
+    {
+        out.push_str("NxN");
+        return;
+    }
+    if hex(word) {
+        out.push('N');
+        return;
+    }
+    let mut digits = false;
+    for c in word.chars() {
+        if c.is_ascii_digit() {
+            if !digits {
+                out.push('N');
+            }
+            digits = true;
+        } else {
+            out.push(c);
+            digits = false;
+        }
+    }
 }
 
 /// The SHA-256 of some text, in hex.
@@ -388,13 +430,19 @@ mod tests {
         let c = "\r\nPlan 9\r\n9 bytes read in 2 ms (4.4 KiB/s)\r\n126 holes free\r\n2048M memory: 1024M kernel\r\nE820: 0x0000 1234\r\n\r\nterm% ls\r\nafter\r\n";
         assert_eq!(
             normalize(c),
-            vec![
-                "Plan N",
-                "N bytes read in N ms",
-                "N holes free",
-                "EN: NxN N"
-            ]
+            vec!["Plan N", "N bytes read in N ms", "N holes free", "N: NxN N"]
         );
+    }
+
+    #[test]
+    fn the_console_loses_the_identity_of_the_kernel() {
+        let a = "\r\n \u{8}1\u{8}2\u{8}\r\n0x0060e000 0x669a5000 1715040256\r\npc64.bootfs: Thu Jul 30 07:08:11 GMT 2026\r\nfingerprint: 0368af54765999c0feb827d1038ac2c575379162\r\ncpu3: AX 00000663 CX F6F8320B\r\nsdE0: ich\r\ncpu% ";
+        let b = "\r\n \u{8}1\u{8}2\u{8}3\u{8}\r\n0x0062d000 0x669b8000 1714991104\r\npc64.bootfs: Wed Nov 11 14:27:57 GMT 2026\r\nfingerprint: 1de86c4be9d7451ea3264a0b0cac80356c14ecfb\r\ncpu3: AX 00000663 CX F6F8320B\r\nsdE0: ich\r\ncpu% ";
+        assert_eq!(
+            normalize(a),
+            vec!["NxN NxN N", "cpuN: AX N CX N", "sdEN: ich"]
+        );
+        assert_eq!(normalize(a), normalize(b));
     }
 
     fn run(pairs: &[(&str, &str)]) -> Run {

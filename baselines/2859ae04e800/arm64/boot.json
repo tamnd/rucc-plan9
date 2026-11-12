@@ -6,7 +6,7 @@
   "objtype": "arm64",
   "pin": "2859ae04e800",
   "results": {
-    "console": "value 05f92c6fe5517bccf5ea76613820340ab5936486ed47a40dcd58d59dc4dc59d5",
+    "console": "value 14ac819c1f1febd312d0d72e12137cf17aa200f81c72fd9ea17f427afc70b660",
     "halted": "ok",
     "step-1": "ok",
     "step-10": "ok",
@@ -24,20 +24,20 @@
   "runs": [
     {
       "passed": true,
-      "seconds": 14.1,
-      "sha256": "06b5c8816f7f371a990a11634fbbe53a977d4265c08203630a7220f41009a6e6",
+      "seconds": 14.0,
+      "sha256": "56eb7709850362a365c5b572ebdaef40b2e68fad6de6448eb86d0d2da016fde1",
       "tests": 14
     },
     {
       "passed": true,
-      "seconds": 13.7,
-      "sha256": "06b5c8816f7f371a990a11634fbbe53a977d4265c08203630a7220f41009a6e6",
+      "seconds": 14.0,
+      "sha256": "56eb7709850362a365c5b572ebdaef40b2e68fad6de6448eb86d0d2da016fde1",
       "tests": 14
     },
     {
       "passed": true,
-      "seconds": 14.2,
-      "sha256": "06b5c8816f7f371a990a11634fbbe53a977d4265c08203630a7220f41009a6e6",
+      "seconds": 14.0,
+      "sha256": "56eb7709850362a365c5b572ebdaef40b2e68fad6de6448eb86d0d2da016fde1",
       "tests": 14
     }
   ],
