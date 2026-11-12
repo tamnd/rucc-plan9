@@ -12,8 +12,10 @@
 //!
 //! The user cell is the image of an R build (`r9 build --side R --keep`). `mk install` in
 //! `/sys/src` builds no kernel, so that image boots the kernel of G with the user space of R. The
-//! kernel cells need a kernel that rucc built (plan 09). Until there is one, `r9 2x2` runs the
-//! oracle and the user cell, and the report names a fault of the user space or none.
+//! kernel cells need a kernel that rucc built (plan 09). `--kernel FILE` is an image with the user
+//! space of G and the kernel of R, and `--both FILE` is an image with the user space and the
+//! kernel of R. A cell runs only when its image is given, and the report names only the faults
+//! that the cells that ran can show.
 //!
 //! The oracle is the baseline of the suite for the pin of the G image, in
 //! `baselines/PIN/OBJTYPE/SUITE.json`, when there is one. Otherwise G boots `--runs` times, and a
@@ -180,7 +182,8 @@ fn from_baseline(path: &Path) -> Option<Results> {
 }
 
 /// Run `r9 2x2 SUITE --r FILE`. `--g FILE` is the G image, and the default is the `g-base` image
-/// of the row. The work goes to `work/2x2/SUITE` or `--out`.
+/// of the row. `--kernel FILE` and `--both FILE` are the images of the kernel cells. The work goes
+/// to `work/2x2/SUITE` or `--out`.
 pub fn command(
     repo: &crate::repo::Repo,
     args: &crate::cli::Args,
@@ -243,11 +246,25 @@ pub fn command(
         baseline::combine(&runs).graded
     };
     let user = boot_once(repo, args, &objtype, suite, &r_image, &out.join("user"))?;
+    let cell = |flag: &str, dir: &str| -> Result<Option<Results>, String> {
+        args.get(flag)
+            .map(|image| {
+                boot_once(
+                    repo,
+                    args,
+                    &objtype,
+                    suite,
+                    Path::new(image),
+                    &out.join(dir),
+                )
+            })
+            .transpose()
+    };
     let cells = Cells {
         oracle,
         user: Some(user),
-        kernel: None,
-        r: None,
+        kernel: cell("kernel", "kernel")?,
+        r: cell("both", "R")?,
     };
     let (ok, text) = report(suite, &cells);
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
@@ -296,6 +313,21 @@ mod tests {
         assert!(text.ends_with(
             "2x2 smoke: cells G and user; 1 same, 1 user, 0 kernel, 0 library, 0 together, 1 fail on G\n"
         ));
+    }
+
+    #[test]
+    fn the_kernel_cells_name_the_kernel_and_the_library() {
+        let cells = Cells {
+            oracle: results(&[("cc", "ok"), ("ls", "ok"), ("halted", "ok")]),
+            user: Some(results(&[("cc", "ok"), ("ls", "FAIL"), ("halted", "ok")])),
+            kernel: Some(results(&[("cc", "ok"), ("ls", "FAIL"), ("halted", "FAIL")])),
+            r: Some(results(&[("cc", "ok"), ("ls", "FAIL"), ("halted", "FAIL")])),
+        };
+        let (ok, text) = report("smoke", &cells);
+        assert!(!ok);
+        assert!(text.contains("LIBRARY ls:"), "{text}");
+        assert!(text.contains("KERNEL halted:"), "{text}");
+        assert!(text.contains("cells G and user, kernel, R;"), "{text}");
     }
 
     #[test]
