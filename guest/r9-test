@@ -4,6 +4,7 @@
 # does. It finds each directory whose mkfile includes mktest, reads $TEST through mk, and runs
 # mk NAME.test for each test that is not a directory. Each test prints "ok NAME" or
 # "FAIL NAME: reason", and "value NAME.out HASH" with the SHA-1 of what mk and the test wrote.
+# mk runs with NPROC=1, so that what mk writes is in the same order in each run.
 # The last line is a count, and the status is empty only when each test passed.
 #
 # usage: r9-test [dir...]
@@ -57,7 +58,9 @@ for(d in $dirs){
 	for(t in $tests){
 		if(! test -d $t){
 			name=$d/$t
-			mk $t.test >$log >[2=1]
+			# One job at a time, so that the order of the commands that mk writes is the same
+			# in each run. libregexp/test builds two programs before its test.
+			NPROC=1 mk $t.test >$log >[2=1]
 			s=$status
 			if(~ $s ''){
 				echo ok $name
