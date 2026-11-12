@@ -29,6 +29,10 @@ if(~ $#targets 0)
 	targets=install
 mkdir -p /tmp/r9/shim
 rm -f /tmp/r9/compile.jsonl /tmp/r9/shim/*
+# The record file is made append-only before mk starts. If the first calls of r9-cc made it,
+# two of them could each create it, and the second create would remove the first record.
+touch /tmp/r9/compile.jsonl
+chmod +a /tmp/r9/compile.jsonl
 for(c in 6c 7c 8c 5c vc)
 	cp $r9/bin/r9-cc /tmp/r9/shim/$c
 bind -b /tmp/r9/shim /bin
