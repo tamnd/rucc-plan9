@@ -41,7 +41,10 @@ pub struct Record {
     pub stdin: bool,
     /// The exit status, empty for success.
     pub status: String,
-    /// The time of the call in milliseconds.
+    /// The time of the call in milliseconds. `r9-cc` takes it from `nsec`, which is the time of
+    /// day. When the clock of the guest steps back during a call, the record has a negative time,
+    /// and this reads it as 0.
+    #[serde(deserialize_with = "not_negative")]
     pub ms: u64,
     /// The user time of the compiler in milliseconds, from its wait message. Records from
     /// before this field have 0.
@@ -282,6 +285,12 @@ impl Side {
     }
 }
 
+/// A time in milliseconds that can be negative in the record, as 0 when it is.
+fn not_negative<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    let ms = i64::deserialize(d)?;
+    Ok(u64::try_from(ms).unwrap_or(0))
+}
+
 #[allow(clippy::cast_precision_loss)]
 fn ms_to_s(ms: u64) -> f64 {
     ms as f64 / 1000.0
@@ -296,6 +305,17 @@ mod tests {
 {"cc":"8c","objtype":"amd64","dir":"/sys/src/9/pc","argv":["-FTVw","main.c"],"in":[{"file":"main.c","sha256":"cc"}],"out":[{"file":"main.8","sha256":""}],"stdin":false,"status":"8c 99: error","ms":5,"origin":"other-arch"}
 {"cc":"6c","objtype":"amd64","dir":"/sys/src/ape/cmd","argv":["-o","x.6"],"in":[],"out":[{"file":"x.6","sha256":"dd"}],"stdin":true,"status":"","ms":7,"origin":"ref-c"}
 "#;
+
+    #[test]
+    fn a_negative_time_is_read_as_zero() {
+        let line = SAMPLE
+            .lines()
+            .next()
+            .unwrap()
+            .replace("\"ms\":268", "\"ms\":-266");
+        let records = parse(&line).unwrap();
+        assert_eq!(records[0].ms, 0);
+    }
 
     #[test]
     fn a_census_counts_the_calls() {

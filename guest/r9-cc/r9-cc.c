@@ -522,6 +522,9 @@ main(int argc, char **argv)
 	}else
 		status = runreal(real, cc, argv, nil, 0, &user, &sys);
 	t1 = nsec();
+	/* nsec is the time of day, and the clock of the guest can step back */
+	if(t1 < t0)
+		t1 = t0;
 
 	put(&b, ",\"out\":[");
 	for(i = 0; i < nout; i++){
