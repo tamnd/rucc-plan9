@@ -77,7 +77,7 @@ In recording mode, `r9-cc` also runs the real compiler. It saves the true `6c` a
 - the input hash;
 - the output hash;
 - the time;
-- the origin: `rucc`; `ref-c`; `ref-as` for `6a` calls, which `r9-as` records the same way from P6; or `other-arch` for a compiler outside the claim (`8c`, `5c`, `vc`; 09.1).
+- the origin: `rucc`; `ref-c`; `ref-as` for a `6a` or `7a` call that the assembler of the tree ran; or `other-arch` for a compiler outside the claim (`8c`, `5c`, `vc`; 09.1).
 
 ## 05.4 The host side: `r9 ccd` and rucc
 

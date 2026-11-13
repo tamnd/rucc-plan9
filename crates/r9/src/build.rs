@@ -172,6 +172,8 @@ pub struct Summary {
     pub rucc_calls: usize,
     /// The calls for the machine of the guest that went to kencc.
     pub kencc_calls: usize,
+    /// The calls for the machine of the guest that went to the assembler of the tree.
+    pub ref_as_calls: usize,
     /// The files that the build wrote.
     pub changed_files: usize,
     /// The status of the test: empty for a pass, `timeout`, or the exit status. With no test,
@@ -244,6 +246,7 @@ pub fn run(
         failed_calls: c.failed.len(),
         rucc_calls: count(&records, "rucc"),
         kencc_calls: count(&records, "ref-c"),
+        ref_as_calls: count(&records, "ref-as"),
         changed_files: read(&collected, "changed").lines().count(),
         test_status: guest_test.map(|_| {
             let text = read(&collected, "test.status");

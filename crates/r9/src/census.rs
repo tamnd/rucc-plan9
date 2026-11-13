@@ -193,8 +193,8 @@ pub fn take(records: &[Record]) -> Census {
 }
 
 impl Census {
-    /// The problems that fail the census of an R build: calls that went to kencc, and calls
-    /// that failed.
+    /// The problems that fail the census of an R build: calls that went to kencc or to the
+    /// assembler of the tree, and calls that failed.
     #[must_use]
     pub fn problems(&self, side: Side) -> Vec<String> {
         let mut p = Vec::new();
@@ -202,6 +202,12 @@ impl Census {
             let refc = self.by_origin.get("ref-c").copied().unwrap_or(0);
             if refc > 0 {
                 p.push(format!("{refc} calls went to kencc (ref-c)"));
+            }
+            let refas = self.by_origin.get("ref-as").copied().unwrap_or(0);
+            if refas > 0 {
+                p.push(format!(
+                    "{refas} calls went to the assembler of the tree (ref-as)"
+                ));
             }
         }
         if !self.failed.is_empty() {
@@ -305,6 +311,21 @@ mod tests {
 {"cc":"8c","objtype":"amd64","dir":"/sys/src/9/pc","argv":["-FTVw","main.c"],"in":[{"file":"main.c","sha256":"cc"}],"out":[{"file":"main.8","sha256":""}],"stdin":false,"status":"8c 99: error","ms":5,"origin":"other-arch"}
 {"cc":"6c","objtype":"amd64","dir":"/sys/src/ape/cmd","argv":["-o","x.6"],"in":[],"out":[{"file":"x.6","sha256":"dd"}],"stdin":true,"status":"","ms":7,"origin":"ref-c"}
 "#;
+
+    #[test]
+    fn an_assembler_call_of_the_tree_is_a_problem_of_r() {
+        let line = SAMPLE
+            .lines()
+            .next()
+            .unwrap()
+            .replace("\"origin\":\"ref-c\"", "\"origin\":\"ref-as\"");
+        let c = take(&parse(&line).unwrap());
+        assert!(c.problems(Side::G).is_empty());
+        assert_eq!(
+            c.problems(Side::R),
+            ["1 calls went to the assembler of the tree (ref-as)"]
+        );
+    }
 
     #[test]
     fn a_negative_time_is_read_as_zero() {

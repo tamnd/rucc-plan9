@@ -99,7 +99,7 @@ The tree has 35,898 lines of `.s`:
 - `libmp`'s bignum loops;
 - the boot programs.
 
-They are built by `$AS`, which is `6a` or `7a`. Until P6 they are built by the tree's own assemblers and counted `ref-as`. From P6, the `r9-as` shim, bound over `6a` and `7a` like `r9-cc`, sends them to rucc.
+They are built by `$AS`, which is `6a` or `7a`. Until P6 they are built by the tree's own assemblers and counted `ref-as`. From P6, `r9-build` also puts a copy of `r9-cc` over `6a` and `7a`, and `r9-cc` sends these calls to rucc through `r9 ccd`. rucc reads the command line of the assembler with its `plan9-as` driver.
 
 rucc's Plan 9 assembler front end goes in `rucc-asm/src/plan9/{amd64,arm64}.rs`. It reads:
 - **Instructions**: `MOVQ $1, AX` and the rest, with operands as source then destination, and size suffixes;
