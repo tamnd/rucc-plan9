@@ -172,6 +172,18 @@ hostletter(char *objtype)
 }
 
 /*
+ * Whether rucc takes a call of the compiler or assembler with the letter l. rucc replaces the
+ * tools of amd64 and arm64 only (plan 09.1). A kernel mkfile sets $objtype, so 8c of the pc
+ * kernel runs with objtype=386, and the letter matches. Such a call is other-arch, and it goes
+ * to the real tool.
+ */
+int
+claimed(int l, char *objtype)
+{
+	return (l == '6' || l == '7') && l == hostletter(objtype);
+}
+
+/*
  * Find the inputs and the outputs from the arguments, as kencc does: each argument that does
  * not start with '-' is a source file, -o names the output, and with no -o a source x.c gives
  * x.L in the current directory.
@@ -515,7 +527,7 @@ main(int argc, char **argv)
 	t0 = nsec();
 	ccd = getenv("r9ccd");
 	bringup = getenv("r9bringup");
-	if(l != hostletter(objtype))
+	if(!claimed(l, objtype))
 		origin = "other-arch";
 	else if(assembler(cc))
 		origin = "ref-as";
@@ -524,7 +536,7 @@ main(int argc, char **argv)
 	text = nil;
 	ntext = 0;
 	user = sys = 0;
-	if(ccd != nil && ccd[0] != 0 && l == hostletter(objtype)){
+	if(ccd != nil && ccd[0] != 0 && claimed(l, objtype)){
 		/* an assembler does not read its standard input */
 		if(nin == 0 && !assembler(cc))
 			text = readall(0, &ntext);
