@@ -13,6 +13,13 @@
 # the first one that fails stops the build. Thus clean install builds each file again. The
 # records go to /tmp/r9/compile.jsonl.
 #
+# The target cross is not a target of mk. mk kernels builds a kernel for each directory in ARCH
+# of /sys/src/9/mkfile, and each kernel mkfile sets its own objtype. The boot file system of a
+# kernel has programs of its objtype, such as /$objtype/bin/paqfs, and a guest has only the
+# programs of its own objtype. For each other objtype of the kernels, cross runs
+# objtype=$o mk install in /sys/src, the cross build of the tree (plan 09.1). An objtype that
+# already has /$o/bin/paqfs is not built again, so a kept image can go on after a stop.
+#
 # With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
 # machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
 # rucc fails runs the real compiler, and what rucc said goes to /tmp/r9/rucc.err.
@@ -38,9 +45,24 @@ for(c in 6c 7c 8c 5c vc 6a 7a 8a 5a va)
 bind -b /tmp/r9/shim /bin
 cd $dir || exit cd
 for(t in $targets){
-	mk $t
-	s=$status
-	if(! ~ $s '')
-		exit $s
+	if(~ $t cross){
+		kernels=`{sed -n '/^ARCH=/,/^$/p' /sys/src/9/mkfile | grep -v '^ARCH|#|^$' | tr -d '\\	 '}
+		os=`{{for(k in $kernels) grep '^objtype=' /sys/src/9/$k/mkfile} | sed 's/objtype=//' | sort -u}
+		for(o in $os){
+			if(! ~ $o $objtype && ! test -x /$o/bin/paqfs){
+				echo r9-build: cross $o
+				@{cd /sys/src && objtype=$o mk install}
+				s=$status
+				if(! ~ $s '')
+					exit $s
+			}
+		}
+	}
+	if not {
+		mk $t
+		s=$status
+		if(! ~ $s '')
+			exit $s
+	}
 }
 exit ''
