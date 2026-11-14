@@ -24,19 +24,19 @@
   "runs": [
     {
       "passed": true,
-      "seconds": 19.9,
+      "seconds": 25.5,
       "sha256": "88a45a2c14af17df16159b49a9d23d448090ce6f6519a8585914fa8f2b90d773",
       "tests": 14
     },
     {
       "passed": true,
-      "seconds": 19.1,
+      "seconds": 21.9,
       "sha256": "88a45a2c14af17df16159b49a9d23d448090ce6f6519a8585914fa8f2b90d773",
       "tests": 14
     },
     {
       "passed": true,
-      "seconds": 22.3,
+      "seconds": 27.9,
       "sha256": "88a45a2c14af17df16159b49a9d23d448090ce6f6519a8585914fa8f2b90d773",
       "tests": 14
     }
