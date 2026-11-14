@@ -65,6 +65,9 @@ pub fn parse<S: AsRef<str>>(lines: &[S]) -> Results {
 /// gives different values in them. These are the line of the loader that counts the kernel in
 /// with backspaces, and the two lines that paqfs writes for the boot file system: the label with
 /// the build date, such as `pc64.bootfs: Thu Jul 30 07:08:11 GMT 2026`, and the `fingerprint:`.
+/// On arm64, U-Boot prints the header of the kernel image. Its `Created:` line has the build date,
+/// with the hour padded by a space when it has one digit, and its `Data Size:` line gives the size
+/// as `4 MiB` or `4.1 MiB`. These two lines are left out too.
 #[must_use]
 pub fn normalize(console: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -79,6 +82,8 @@ pub fn normalize(console: &str) -> Vec<String> {
             || line.contains('\u{8}')
             || line.contains(".bootfs: ")
             || line.starts_with("fingerprint: ")
+            || line.starts_with("Created:")
+            || line.starts_with("Data Size:")
         {
             continue;
         }
@@ -460,6 +465,14 @@ mod tests {
             normalize(a),
             vec!["NxN NxN N", "cpuN: AX N CX N", "sdEN: ich"]
         );
+        assert_eq!(normalize(a), normalize(b));
+    }
+
+    #[test]
+    fn the_console_loses_the_header_of_the_image() {
+        let a = "   Image Name:   9qemu\r\n   Created:      2026-11-14  11:51:09 UTC\r\n   Data Size:    4260288 Bytes = 4.1 MiB\r\n   Load Address: 40100000\r\n";
+        let b = "   Image Name:   9qemu\r\n   Created:      2026-11-14   5:01:09 UTC\r\n   Data Size:    4194368 Bytes = 4 MiB\r\n   Load Address: 40100000\r\n";
+        assert_eq!(normalize(a), vec!["Image Name:   Nqemu", "Load Address: N"]);
         assert_eq!(normalize(a), normalize(b));
     }
 
