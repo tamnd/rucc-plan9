@@ -315,8 +315,11 @@ fn boot_once(
     })
 }
 
-/// Run `r9 baseline`. Each row in `--row` runs each suite `--runs` times, from the `g-base` image
-/// of the row. The work goes to `work/baseline`, and the files to `baselines/`.
+/// Run `r9 baseline`. Each row in `--row` runs each suite `--runs` times, from `--image` or else
+/// from the `g-base` image of the row. The work goes to `work/baseline`, and the files to
+/// `baselines/`. The baselines in the repository come from the G build of the pin, given with
+/// `--image`, because the programs in `g-base` that are not tools or libraries are those of the
+/// release (`baselines/README.md`).
 pub fn command(
     repo: &crate::repo::Repo,
     args: &crate::cli::Args,
