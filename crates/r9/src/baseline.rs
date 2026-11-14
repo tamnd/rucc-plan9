@@ -267,15 +267,30 @@ pub fn results_of(suite: &str, outcome: &boot::Outcome, console: &str) -> Result
 }
 
 /// The pin of an image: the commit in the name of a `g-base` image, or the file name up to the
-/// first dot.
+/// first dot. The image that `r9 build --keep` leaves is `root.qcow2`, and its `build.toml` names
+/// the image that the build started from. The pin of such an image is the pin of that image.
 #[must_use]
 pub fn pin_of(image: &Path) -> String {
+    let mut image = image.to_path_buf();
+    // A build can start from the image of an earlier build, so follow a short chain.
+    for _ in 0..8 {
+        let Some(base) = base_of(&image) else { break };
+        image = base;
+    }
     let name = image
         .file_name()
         .and_then(|f| f.to_str())
         .unwrap_or_default();
     let stem = name.split('.').next().unwrap_or_default();
     stem.strip_prefix("g-base-").unwrap_or(stem).to_string()
+}
+
+/// The image that the build of `image` started from, from the `build.toml` next to it.
+fn base_of(image: &Path) -> Option<std::path::PathBuf> {
+    let text = std::fs::read_to_string(image.parent()?.join("build.toml")).ok()?;
+    let table: toml::Table = text.parse().ok()?;
+    let base = std::path::PathBuf::from(table.get("image")?.as_str()?);
+    (base != image).then_some(base)
 }
 
 /// Boot the image once with the commands of one suite, and read the results.
@@ -482,6 +497,30 @@ mod tests {
             pin_of(Path::new("9front-11952.amd64.qcow2")),
             "9front-11952"
         );
+    }
+
+    #[test]
+    fn the_pin_of_a_build_is_the_pin_of_its_base() {
+        let dir = std::env::temp_dir().join(format!("r9-pin-{}", std::process::id()));
+        let g = dir.join("g");
+        std::fs::create_dir_all(&g).unwrap();
+        std::fs::write(
+            g.join("build.toml"),
+            "side = \"G\"\nimage = \"/c/images/g-base-2859ae04e800.amd64.qcow2\"\n",
+        )
+        .unwrap();
+        let k = dir.join("k");
+        std::fs::create_dir_all(&k).unwrap();
+        let root = g.join("root.qcow2");
+        std::fs::write(
+            k.join("build.toml"),
+            format!("image = {:?}\n", root.display().to_string()),
+        )
+        .unwrap();
+        assert_eq!(pin_of(&root), "2859ae04e800");
+        assert_eq!(pin_of(&k.join("root.qcow2")), "2859ae04e800");
+        assert_eq!(pin_of(&dir.join("root.qcow2")), "root");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
