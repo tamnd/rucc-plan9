@@ -14,6 +14,10 @@
  * The record then has the origin rucc. When rucc fails and $r9bringup has cc:auto, r9-cc runs
  * the real compiler, and the record has the origin ref-c.
  *
+ * r9-build also puts a copy for each of 6a, 7a, 8a, 5a and va (plan 07.5). An assembler call
+ * goes to r9 ccd the same way. When the real assembler of the guest runs, the record has the
+ * origin ref-as.
+ *
  * The record also has what the compiler that made the object wrote to standard error, so that
  * r9 warn-diff compares the warnings of G and R for each unit (plan 05.8). r9-cc still writes
  * the text to its own standard error, so mk.log does not change.
@@ -141,6 +145,13 @@ int
 letter(char *cc)
 {
 	return cc[0];
+}
+
+/* Whether cc is the name of an assembler, such as 6a. */
+int
+assembler(char *cc)
+{
+	return cc[0] != 0 && strcmp(cc+1, "a") == 0;
 }
 
 /* The letter of the objtype of this guest. */
@@ -504,12 +515,18 @@ main(int argc, char **argv)
 	t0 = nsec();
 	ccd = getenv("r9ccd");
 	bringup = getenv("r9bringup");
-	origin = l == hostletter(objtype) ? "ref-c" : "other-arch";
+	if(l != hostletter(objtype))
+		origin = "other-arch";
+	else if(assembler(cc))
+		origin = "ref-as";
+	else
+		origin = "ref-c";
 	text = nil;
 	ntext = 0;
 	user = sys = 0;
 	if(ccd != nil && ccd[0] != 0 && l == hostletter(objtype)){
-		if(nin == 0)
+		/* an assembler does not read its standard input */
+		if(nin == 0 && !assembler(cc))
 			text = readall(0, &ntext);
 		log = "/tmp/r9/rucc.err";
 		fd = open(log, OWRITE);

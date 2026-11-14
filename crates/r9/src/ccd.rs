@@ -115,6 +115,23 @@ pub fn target(objtype: &str) -> Option<&'static str> {
     }
 }
 
+/// The rucc target of the assembler `cc`, such as `6a`, or `None` when `cc` is not an assembler
+/// that rucc replaces.
+#[must_use]
+pub fn assembler(cc: &str) -> Option<&'static str> {
+    match cc {
+        "6a" => Some("x86_64-plan9"),
+        "7a" => Some("aarch64-plan9"),
+        _ => None,
+    }
+}
+
+/// Whether `cc` is the name of a Plan 9 assembler, such as `6a` or `8a`.
+#[must_use]
+pub fn is_assembler(cc: &str) -> bool {
+    cc.len() == 2 && cc.ends_with('a')
+}
+
 /// The path `path` of the guest, made absolute from the directory `dir` and cleaned as
 /// `cleanname` in the Plan 9 C library does it.
 #[must_use]
@@ -144,6 +161,9 @@ pub fn absolute(dir: &str, path: &str) -> String {
 /// is written in the directory of rucc under its base name, and goes back to the guest under
 /// the name that the call gave.
 pub fn translate(call: &Call, root: &str) -> Result<Translated, String> {
+    if is_assembler(&call.cc) {
+        return translate_as(call, root);
+    }
     let target = target(&call.objtype)
         .ok_or_else(|| format!("ccd: rucc does not compile for $objtype {}", call.objtype))?;
     let remote = |p: &str| format!("{root}{}", absolute(&call.dir, p));
@@ -212,6 +232,70 @@ pub fn translate(call: &Call, root: &str) -> Result<Translated, String> {
         args,
         include,
         options,
+        renamed,
+    })
+}
+
+/// Make the rucc command line of the assembler call `call`, for a 9P server of the guest at
+/// `root`.
+///
+/// rucc's driver for `6a` and `7a` reads the names of the call as names of the guest, from the
+/// directory of the call, so the arguments go to rucc as they are. Only an output of `-o` is
+/// written in the directory of rucc under its base name, as for a compiler call. The machine
+/// comes from the name of the assembler, because a `7a` call in an amd64 guest makes a `.7`
+/// file.
+pub fn translate_as(call: &Call, root: &str) -> Result<Translated, String> {
+    let target = assembler(&call.cc)
+        .ok_or_else(|| format!("ccd: rucc does not replace the assembler {}", call.cc))?;
+    let mut args = vec![
+        "--driver=plan9-as".to_owned(),
+        format!("--target={target}"),
+        format!("--sysroot={root}"),
+        format!("--cwd={}", absolute("/", &call.dir)),
+    ];
+    let mut renamed = Vec::new();
+    let mut i = 0;
+    // ARGBEGIN in the assembler: the options stop at the first name. In an option, the letters
+    // `o`, `D` and `I` take the rest of the argument, or else the next argument.
+    while let Some(a) = call.args.get(i) {
+        if !a.starts_with('-') || a == "-" {
+            break;
+        }
+        i += 1;
+        if a == "--" {
+            args.push(a.clone());
+            break;
+        }
+        let letters = &a[1..];
+        let Some(k) = letters.find(['o', 'D', 'I']) else {
+            args.push(a.clone());
+            continue;
+        };
+        let (head, rest) = letters.split_at(k + 1);
+        let value = if rest.is_empty() {
+            let v = call.args.get(i).cloned();
+            if v.is_some() {
+                i += 1;
+            }
+            v
+        } else {
+            Some(rest.to_owned())
+        };
+        match (head.ends_with('o'), value) {
+            (true, Some(v)) => {
+                let host = out_name(&v);
+                renamed.push((host.clone(), v));
+                args.push(format!("-{head}{host}"));
+            }
+            (_, Some(v)) => args.push(format!("-{head}{v}")),
+            (_, None) => args.push(a.clone()),
+        }
+    }
+    args.extend(call.args[i..].iter().cloned());
+    Ok(Translated {
+        args,
+        include: String::new(),
+        options: String::new(),
         renamed,
     })
 }
@@ -507,6 +591,9 @@ fn compile(cfg: &Config, exports: &Exports, id: &str, call: &Call) -> Reply {
             };
             if out.status.success() {
                 match outputs(&dir, &t.renamed) {
+                    // objcheck has the tables of the compilers' instructions. An assembler file
+                    // can use any instruction of the linker, so its object is not checked.
+                    Ok(files) if is_assembler(&call.cc) => reply.files = files,
                     Ok(files) => match check_objects(&files) {
                         None => reply.files = files,
                         Some(report) => {
@@ -541,7 +628,7 @@ pub fn sources(call: &Call) -> Vec<String> {
     let mut out = Vec::new();
     let mut args = call.args.iter();
     while let Some(a) = args.next() {
-        if a == "-I" || a == "-o" {
+        if a == "-I" || a == "-o" || (a == "-D" && is_assembler(&call.cc)) {
             args.next();
         } else if !a.starts_with('-') {
             out.push(absolute(&call.dir, a));
@@ -823,6 +910,53 @@ mod tests {
         let mut c = call(&["a.c"]);
         c.objtype = "mips".into();
         assert!(translate(&c, "9p:a").is_err());
+    }
+
+    #[test]
+    fn an_assembler_call_keeps_the_names_of_the_guest() {
+        let c = Call {
+            cc: "7a".into(),
+            objtype: "amd64".into(),
+            dir: "/sys/src/9/arm64/".into(),
+            args: [
+                "-x", "-I", "../port", "-DX=1", "-o", "../y/l.7", "l.s", "-o", "z",
+            ]
+            .map(String::from)
+            .to_vec(),
+            stdin: Vec::new(),
+        };
+        let t = translate(&c, "9p:tcp!127.0.0.1!9").unwrap();
+        assert_eq!(
+            t.args,
+            [
+                "--driver=plan9-as",
+                "--target=aarch64-plan9",
+                "--sysroot=9p:tcp!127.0.0.1!9",
+                "--cwd=/sys/src/9/arm64",
+                "-x",
+                "-I../port",
+                "-DX=1",
+                "-ol.7",
+                "l.s",
+                "-o",
+                "z",
+            ]
+        );
+        assert_eq!(t.renamed, [("l.7".to_owned(), "../y/l.7".to_owned())]);
+        assert_eq!(t.include, "");
+        assert_eq!(sources(&c), ["/sys/src/9/arm64/l.s".to_owned()]);
+    }
+
+    #[test]
+    fn an_option_cluster_of_the_assembler_ends_at_its_value() {
+        let mut c = call(&["-wo", "x.6", "-Ia", "-", "a.s"]);
+        c.cc = "6a".into();
+        let t = translate(&c, "9p:a").unwrap();
+        assert_eq!(&t.args[4..], ["-wox.6", "-Ia", "-", "a.s"]);
+        assert_eq!(t.renamed, [("x.6".to_owned(), "x.6".to_owned())]);
+        c.cc = "8a".into();
+        assert!(translate(&c, "9p:a").is_err());
+        assert!(is_assembler("va") && !is_assembler("6c") && !is_assembler("ape"));
     }
 
     #[test]
