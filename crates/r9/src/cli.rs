@@ -138,10 +138,15 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["tree", "days"],
             switches: &["write"],
         },
-        "flags-diff" | "tree-diff" | "warn-diff" => Accepts {
+        "flags-diff" | "warn-diff" => Accepts {
             positional: true,
             values: &["with", "top"],
             switches: &[],
+        },
+        "tree-diff" => Accepts {
+            positional: true,
+            values: &["with", "top"],
+            switches: &["names"],
         },
         "rtt" => Accepts {
             positional: false,
@@ -316,13 +321,15 @@ usage:
       G gives, which is lost checking, and those that only R gives, which is noise, with the
       count of each class and the count of the varargck format warnings. Show up to N units (20
       by default). This is a report, and it fails only when a file cannot be read.
-  r9 tree-diff A --with B [--top N]
+  r9 tree-diff A --with B [--top N] [--names]
       Compare the files that two builds wrote. A and B are the directories of two builds, or
       their changed.sha256 files. Print the files that only one build wrote, the files with
       different contents, and the archives whose members are the same but whose dates differ.
       The raced group has the archives that differ only by a member that two ar commands put
       in them, and the APE programs that link such an archive. At most N names (20 by default)
-      are printed in each group. Exit with failure when the builds differ.
+      are printed in each group. Exit with failure when the builds differ. With --names, compare
+      only the names of the files and their modes from the walk of each build, as for an R build
+      and a G build (plan 02.2). Exit with failure when a name or a mode differs.
   r9 objdiff A [--with B] [--context N]
       Compare two objects of 6c or 7c, or two archives of them, record by record (plan 07.6).
       The objects are decoded as 6l and 7l read them, and each symbol is printed as 6c -S and
