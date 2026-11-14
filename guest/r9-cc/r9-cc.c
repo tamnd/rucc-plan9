@@ -2,8 +2,10 @@
  * r9-cc: the compiler slot shim (plan 05.3), in recording mode.
  *
  * r9-build puts a copy of this program for each of 6c, 7c, 8c, 5c and vc in a directory that
- * it binds before /bin. For each call, r9-cc runs the real compiler, /$objtype/bin/<name>, with
- * the same arguments. Then it appends one JSON record to /tmp/r9/compile.jsonl: the compiler,
+ * it binds before /bin. For each call, r9-cc runs the real compiler, /$cputype/bin/<name>, with
+ * the same arguments. The compilers are programs of the machine of the guest, as /bin is. In a
+ * cross build and in a kernel mkfile, $objtype is not $cputype, and /$objtype/bin has the
+ * programs of the other machine. Then it appends one JSON record to /tmp/r9/compile.jsonl: the compiler,
  * objtype, the directory, the arguments, the SHA-256 of each input and output, the exit status
  * and the time. The file is append-only, so parallel calls from mk do not mix their records.
  *
@@ -479,7 +481,7 @@ lost(char *status)
 void
 main(int argc, char **argv)
 {
-	char *cc, *objtype, *real, *dir, *status, *origin, *ccd, *bringup, *text, *log;
+	char *cc, *objtype, *cputype, *real, *dir, *status, *origin, *ccd, *bringup, *text, *log;
 	char *in[Maxfiles], *out[Maxfiles], hex[Hexlen];
 	int i, nin, nout, l, fd;
 	long ntext;
@@ -491,7 +493,10 @@ main(int argc, char **argv)
 	objtype = getenv("objtype");
 	if(objtype == nil)
 		objtype = "";
-	real = smprint("/%s/bin/%s", objtype, cc);
+	cputype = getenv("cputype");
+	if(cputype == nil)
+		cputype = objtype;
+	real = smprint("/%s/bin/%s", cputype, cc);
 	dir = getwd(malloc(1024), 1024);
 	if(dir == nil)
 		dir = "";
