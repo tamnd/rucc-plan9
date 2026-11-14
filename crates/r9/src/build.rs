@@ -95,9 +95,9 @@ pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
             "date -n > {w}/t0; {{while(! test -f {w}/t1){{sleep 60; echo r9-progress `{{date -n}} `{{wc -l < {w}/mk.log}} `{{tail -1 {w}/mk.log}}; grep memory /dev/swap}}}} & r9p=$apid; {env}/usr/glenda/r9/bin/r9-build {dir} {targets} < /dev/null > {w}/mk.log >[2=1]; s=$status; date -n > {w}/t1; test -d /proc/$r9p && echo kill > /proc/$r9p/note; echo $s > {w}/status; test -z $s"
         ),
         format!("tail -20 {w}/mk.log"),
-        format!("walk -f -e msp {dir} /$objtype/bin /$objtype/lib > {w}/walk"),
+        format!("walk -f -e msxp {dir} /$objtype/bin /$objtype/lib > {w}/walk"),
         format!(
-            "t0=`{{cat {w}/t0}}; awk -v 't='$t0 '$1 >= t+0 {{print $3}}' {w}/walk > {w}/changed"
+            "t0=`{{cat {w}/t0}}; awk -v 't='$t0 '$1 >= t+0 {{print $4}}' {w}/walk > {w}/changed"
         ),
         // t0 is always named, so that an empty list does not make sha1sum read its input.
         format!("sha1sum -2 256 {w}/t0 `{{cat {w}/changed}} > {w}/changed.sha256"),
@@ -451,7 +451,7 @@ mod tests {
         assert!(c[2].contains("{while(! test -f /tmp/r9/t1){sleep 60; echo r9-progress"));
         assert!(c[2].contains("test -d /proc/$r9p && echo kill > /proc/$r9p/note;"));
         assert!(c[0].starts_with("rm -rf /tmp/r9in /tmp/r9 && mkdir -p"));
-        assert!(c[5].contains("awk -v 't='$t0 '$1 >= t+0 {print $3}'"));
+        assert!(c[5].contains("awk -v 't='$t0 '$1 >= t+0 {print $4}'"));
         assert!(c[6].starts_with("sha1sum -2 256 /tmp/r9/t0 `{cat /tmp/r9/changed}"));
         assert_eq!(
             c[7],

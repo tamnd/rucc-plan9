@@ -21,6 +21,10 @@
 //! resolution of one second. Thus the member that the archive keeps depends on whether the two
 //! compiles end in the same second, and the programs that link the archive differ too. These
 //! files are in the raced group. They are not a failure of the compiler, but they are reported.
+//!
+//! The R build and the G build of the pin use two compilers, so their files have different
+//! contents. With `--names`, `r9 tree-diff` compares only the names and the modes of the files
+//! that the two builds wrote (plan 02.2). The modes come from the `walk` file of each build.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -43,6 +47,9 @@ pub struct Outputs {
     /// input, and the units with an include directory of APE. The headers of APE add `libap.a`
     /// with `#pragma lib`, so the programs of these directories link it.
     pub ape_dirs: BTreeSet<String>,
+    /// The mode of each file that the build wrote, as `walk -e x` prints it. A build that was
+    /// collected before the walk had the mode has no modes.
+    pub modes: Hashes,
 }
 
 /// How two builds differ.
@@ -108,12 +115,114 @@ pub fn load(path: &Path) -> Result<Outputs, String> {
     let members = std::fs::read_to_string(dir.join("members.sha256")).unwrap_or_default();
     let log = std::fs::read_to_string(dir.join("mk.log")).unwrap_or_default();
     let compile = std::fs::read_to_string(dir.join("compile.jsonl")).unwrap_or_default();
+    let walk = std::fs::read_to_string(dir.join("walk")).unwrap_or_default();
+    let files = parse(&text);
+    let modes = modes(&walk)
+        .into_iter()
+        .filter(|(p, _)| files.contains_key(p))
+        .collect();
     Ok(Outputs {
-        files: parse(&text),
+        files,
+        modes,
         members: parse(&members),
         twice: twice(&log),
         ape_dirs: ape_dirs(&compile),
     })
+}
+
+/// The mode of each file in a walk with the fields `msxp`: the time, the size, the mode and the
+/// path. A walk with the old fields `msp` has no mode, and gives no lines.
+#[must_use]
+pub fn modes(walk: &str) -> Hashes {
+    walk.lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.splitn(4, char::is_whitespace).collect();
+            (f.len() == 4 && f[2].len() == 11 && f[2].ends_with(['-', 'r', 'w', 'x']))
+                .then(|| (f[3].trim().to_string(), f[2].to_string()))
+        })
+        .collect()
+}
+
+/// How the names and the modes of two builds differ.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Names {
+    /// The number of names in both builds.
+    pub same: usize,
+    /// The files that the first build wrote and the second did not.
+    pub only_a: Vec<String>,
+    /// The files that the second build wrote and the first did not.
+    pub only_b: Vec<String>,
+    /// The files with two modes, as `path A-mode B-mode`.
+    pub modes: Vec<String>,
+    /// The number of files in both builds that have a mode in both walks.
+    pub with_mode: usize,
+}
+
+impl Names {
+    /// True when the builds wrote the same names with the same modes.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.only_a.is_empty() && self.only_b.is_empty() && self.modes.is_empty()
+    }
+}
+
+/// Compare the names and the modes of the files of two builds.
+#[must_use]
+pub fn names(a: &Outputs, b: &Outputs) -> Names {
+    let mut n = Names::default();
+    for path in a.files.keys() {
+        if !b.files.contains_key(path) {
+            n.only_a.push(path.clone());
+            continue;
+        }
+        n.same += 1;
+        if let (Some(ma), Some(mb)) = (a.modes.get(path), b.modes.get(path)) {
+            n.with_mode += 1;
+            if ma != mb {
+                n.modes.push(format!("{path} {ma} {mb}"));
+            }
+        }
+    }
+    n.only_b = b
+        .files
+        .keys()
+        .filter(|p| !a.files.contains_key(*p))
+        .cloned()
+        .collect();
+    n
+}
+
+/// The report of a comparison of names. At most `top` names are printed in each group.
+#[must_use]
+pub fn report_names(n: &Names, top: usize) -> String {
+    let mut s = String::new();
+    let _ = writeln!(s, "same names {}", n.same);
+    let _ = writeln!(s, "with mode  {}", n.with_mode);
+    for (title, list) in [
+        ("only in A", &n.only_a),
+        ("only in B", &n.only_b),
+        ("mode", &n.modes),
+    ] {
+        let _ = writeln!(s, "{title:<10} {}", list.len());
+        for p in list.iter().take(top) {
+            let _ = writeln!(s, "  {p}");
+        }
+        if list.len() > top {
+            let _ = writeln!(s, "  and {} more", list.len() - top);
+        }
+    }
+    let _ = writeln!(
+        s,
+        "{}",
+        if !n.is_empty() {
+            "the names of the builds differ"
+        } else if n.with_mode < n.same {
+            "the builds wrote the same names, but some files have no mode in a walk"
+        } else {
+            "the builds wrote the same names with the same modes"
+        }
+    );
+    s
 }
 
 /// The members that two or more `ar` commands in the mk log put in the same archive, as
@@ -378,6 +487,30 @@ mod tests {
         let r = report(&d, 1);
         assert!(r.contains("dated      1\n  /l.a\n"), "{r}");
         assert!(r.contains("changed    2\n  /m.a\n  and 1 more\n"), "{r}");
+    }
+
+    #[test]
+    fn the_names_and_the_modes_are_compared() {
+        let walk = "1794498647 27618 --rw-rw-r-- /sys/src/x.6\n\
+                    1794498647 10 --rwxrwxr-x /amd64/bin/x\n\
+                    1794498647 19279 /sys/src/9/ip/ip.h\n";
+        let m = modes(walk);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m["/amd64/bin/x"], "--rwxrwxr-x");
+        let mut a = outputs("1\t/sys/src/x.6\n2\t/amd64/bin/x\n3\t/amd64/bin/y\n", "");
+        let mut b = outputs("4\t/sys/src/x.6\n5\t/amd64/bin/x\n6\t/amd64/bin/z\n", "");
+        a.modes = m.clone();
+        b.modes = m;
+        let n = names(&a, &b);
+        assert_eq!(n.same, 2);
+        assert_eq!(n.with_mode, 2);
+        assert_eq!(n.only_a, ["/amd64/bin/y"]);
+        assert_eq!(n.only_b, ["/amd64/bin/z"]);
+        assert!(n.modes.is_empty());
+        b.modes.insert("/amd64/bin/x".into(), "--rw-rw-r--".into());
+        let n = names(&a, &b);
+        assert_eq!(n.modes, ["/amd64/bin/x --rwxrwxr-x --rw-rw-r--"]);
+        assert!(report_names(&n, 5).ends_with("the names of the builds differ\n"));
     }
 
     #[test]
