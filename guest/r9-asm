@@ -1,0 +1,21 @@
+#!/bin/rc
+# The runs of the asm corpus of rucc-compat (plan 07.5).
+# Assemble each .s file under /sys/src with 6a and with 7a, in the directory of the file. The
+# output of each run goes to /tmp/o/ASM under the name of the source: the object in NAME.obj,
+# the status in NAME.status and the messages in NAME.err. /tmp/o/list has a line for each run.
+# Then the tar of /tmp/o goes to $r9collect.
+rfork e
+mkdir -p /tmp/o
+rm -f /tmp/o/list
+files=`{du -a /sys/src | awk '{print $2}' | grep '\.s$' | sort}
+for(a in 6a 7a) for(f in $files){
+	echo $a $f >>/tmp/o/list
+	o=/tmp/o/$a^$f
+	mkdir -p `{basename -d $o}
+	cd `{basename -d $f}
+	$a -o $o.obj `{basename $f} >$o.err >[2=1]
+	echo $status >$o.status
+}
+cd /tmp/o
+echo r9-asm: `{wc -l <list} runs
+tar cf $r9collect .
