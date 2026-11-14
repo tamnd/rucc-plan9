@@ -1,0 +1,4 @@
+# The runs of the asm corpus (plan 07.5), run by r9 boot with --in guest. guest/r9-asm assembles
+# each .s file of /sys/src with 6a and with 7a, and the output goes to --collect.
+mkdir -p /tmp/r9in && cd /tmp/r9in && tar xf $r9in
+rc /tmp/r9in/r9-asm
