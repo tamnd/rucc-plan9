@@ -335,6 +335,12 @@ impl Machine {
         t
     }
 
+    /// End the session with `stop`, as the guest does with `SYSTEM_OFF`. A thread of the monitor
+    /// calls this, such as the one of a session script.
+    pub fn end(&self, stop: Stop) {
+        self.finish(Ok(stop));
+    }
+
     /// End the session with `r`, unless it has ended already, and stop each vCPU.
     fn finish(&self, r: Result<Stop, String>) {
         self.stopping.store(true, Ordering::SeqCst);

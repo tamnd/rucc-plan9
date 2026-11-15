@@ -16,10 +16,14 @@ use h9_dev::pl031::Pl031;
 use h9_vm::Ram;
 use h9_vm::fdt::Fdt;
 
+mod script;
+
+use script::{Step, Tee, Transcript};
+
 const USAGE: &str = "usage:
   9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
          [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--snarf host|memory]
-         [--ini FILE] [--strict] [--timeout SECS]
+         [--ini FILE] [--strict] [--timeout SECS] [--script FILE] [--headless]
       Run an arm64 kernel of the tree on the hypervisor of the host. FILE is a 7l a.out or the
       U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
       machine: RAM at 0x40000000 (--mem MiB, 1024 by default), the device tree at the start of
@@ -35,7 +39,11 @@ const USAGE: &str = "usage:
       clipboard with --snarf host, the default, and a buffer of the monitor with --snarf memory.
       #Z/ctl takes the requests quit and title TEXT. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
       as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
-      seconds with exit status 2.";
+      seconds with exit status 2. --script FILE drives the console with the steps of FILE: wait
+      TEXT, send TEXT, timeout SECS and quit. The script owns the input, so the monitor does
+      not read its own. The exit status is 0 when the script passes and 3 when it fails.
+      --headless opens no window. The monitor has no window yet, so each session is headless
+      now.";
 
 const RAM_BASE: u64 = 0x4000_0000;
 const DTB: u64 = RAM_BASE;
@@ -79,6 +87,8 @@ struct Options {
     snarf: Snarf,
     strict: bool,
     timeout: Option<u64>,
+    script: Option<Vec<(usize, Step)>>,
+    headless: bool,
 }
 
 /// A value with `,ro` at the end is read-only.
@@ -103,6 +113,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
         snarf: Snarf::Host,
         strict: false,
         timeout: None,
+        script: None,
+        headless: false,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -140,6 +152,12 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 };
             }
             "--strict" => o.strict = true,
+            "--headless" => o.headless = true,
+            "--script" => {
+                let f = val()?;
+                let src = std::fs::read_to_string(&f).map_err(|e| format!("{f}: {e}"))?;
+                o.script = Some(script::parse(&src).map_err(|e| format!("{f}: {e}"))?);
+            }
             "--timeout" => {
                 o.timeout = Some(
                     val()?
@@ -274,16 +292,19 @@ fn run(o: &Options) -> Result<ExitCode, String> {
     }
     let mut bus = Bus::new();
     bus.strict = o.strict;
+    let log = o.script.as_ref().map(|_| Transcript::default());
+    let console = || -> Box<dyn std::io::Write + Send> {
+        match &log {
+            Some(log) => Box::new(Tee {
+                out: std::io::stdout(),
+                log: log.clone(),
+            }),
+            None => Box::new(std::io::stdout()),
+        }
+    };
     match o.machine {
-        Machine::Virt => bus.add(
-            UART,
-            0x1000,
-            Box::new(Pl011::new(UART_SPI, Box::new(std::io::stdout()))),
-        ),
-        Machine::H9 => bus.add_hyper(Box::new(H9Cons::new(
-            h9::CONS_SPI,
-            Box::new(std::io::stdout()),
-        ))),
+        Machine::Virt => bus.add(UART, 0x1000, Box::new(Pl011::new(UART_SPI, console()))),
+        Machine::H9 => bus.add_hyper(Box::new(H9Cons::new(h9::CONS_SPI, console()))),
     }
     if !o.disks.is_empty() {
         let mut d = H9Disk::new();
@@ -322,20 +343,39 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         bus.add_hyper(Box::new(H9Ctl::new(term)));
     }
     bus.add(RTC, 0x1000, Box::new(Pl031::new()));
-    backend::run(ram, bus, o.cpus as usize, image.entry, DTB)
+    let script = o.script.clone().zip(log);
+    backend::run(ram, bus, o.cpus as usize, image.entry, DTB, script)
 }
+
+/// Type the bytes on the console of the machine.
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
+fn type_in(bus: &mut Bus, b: &[u8]) {
+    if let Some(u) = bus.device::<Pl011>(UART) {
+        for &c in b {
+            u.push(c);
+        }
+    } else if let Some(c) = bus.hyper_device::<H9Cons>() {
+        for &x in b {
+            c.push(x);
+        }
+    }
+}
+
+/// A session script and the console output that it reads.
+type Script = (Vec<(usize, Step)>, Transcript);
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod backend {
-    use super::UART;
+    use super::{Script, script, type_in};
     use h9_dev::Bus;
-    use h9_dev::h9cons::H9Cons;
-    use h9_dev::pl011::Pl011;
     use h9_hvf::{Stop, Vm};
     use h9_vm::Ram;
     use std::io::Read;
     use std::process::ExitCode;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     pub fn run(
         ram: Arc<Ram>,
@@ -343,23 +383,46 @@ mod backend {
         ncpu: usize,
         entry: u64,
         x0: u64,
+        script: Option<Script>,
     ) -> Result<ExitCode, String> {
         let vm = Vm::new(ram, bus, ncpu)?;
         let m = vm.machine();
-        std::thread::spawn(move || {
-            let mut b = [0u8; 256];
-            let mut stdin = std::io::stdin();
-            while let Ok(n @ 1..) = stdin.read(&mut b) {
-                m.with_bus(|bus| {
-                    if let Some(u) = bus.device::<Pl011>(UART) {
-                        b[..n].iter().for_each(|c| u.push(*c));
-                    } else if let Some(c) = bus.hyper_device::<H9Cons>() {
-                        b[..n].iter().for_each(|x| c.push(*x));
-                    }
-                });
-            }
-        });
-        match vm.run(entry, x0)? {
+        let done = Arc::new(Mutex::new(None));
+        let scripted = script.is_some();
+        if let Some((steps, log)) = script {
+            let done = done.clone();
+            std::thread::spawn(move || {
+                let r = script::run(&steps, &log, |b| m.with_bus(|bus| type_in(bus, b)));
+                *done.lock().unwrap() = Some(r);
+                m.end(Stop::Off);
+            });
+        } else {
+            std::thread::spawn(move || {
+                let mut b = [0u8; 256];
+                let mut stdin = std::io::stdin();
+                while let Ok(n @ 1..) = stdin.read(&mut b) {
+                    m.with_bus(|bus| type_in(bus, &b[..n]));
+                }
+            });
+        }
+        let stop = vm.run(entry, x0)?;
+        if scripted {
+            return Ok(match done.lock().unwrap().take() {
+                Some(Ok(())) => {
+                    eprintln!("\n9h: the script passed");
+                    ExitCode::SUCCESS
+                }
+                Some(Err(e)) => {
+                    eprintln!("\n9h: the script failed: {e}");
+                    ExitCode::from(3)
+                }
+                None => {
+                    eprintln!("\n9h: the session ended before the script did ({stop:?})");
+                    ExitCode::from(3)
+                }
+            });
+        }
+        match stop {
             Stop::Off => eprintln!("9h: the guest turned the machine off"),
             Stop::Reset => eprintln!("9h: the guest asked for a reset"),
         }
@@ -374,7 +437,14 @@ mod backend {
     use std::process::ExitCode;
     use std::sync::Arc;
 
-    pub fn run(_: Arc<Ram>, _: Bus, _: usize, _: u64, _: u64) -> Result<ExitCode, String> {
+    pub fn run(
+        _: Arc<Ram>,
+        _: Bus,
+        _: usize,
+        _: u64,
+        _: u64,
+        _: Option<super::Script>,
+    ) -> Result<ExitCode, String> {
         Err("this host has no back end yet: the monitor runs on macOS on arm64 only".into())
     }
 }
