@@ -49,6 +49,11 @@ impl Accepts {
 pub fn accepted(command: &str) -> Option<Accepts> {
     Some(match command {
         "help" | "version" | "check" => Accepts::NOTHING,
+        "9h" => Accepts {
+            positional: true,
+            values: &["tree", "records", "row"],
+            switches: &[],
+        },
         "sets" => Accepts {
             positional: false,
             values: &["as-of"],
@@ -287,6 +292,13 @@ usage:
       /lib, /rc and each OBJTYPE/include, and build 6c, 6l, 6a, 7c, 7l and 7a three times. The
       last two builds must give the same bytes. Then build r9-cc, keep the overlay in the cache
       as the g-base image, and write its summary to baselines/.
+  r9 9h verify --tree DIR [--records FILE] [--row OBJTYPE]
+      Check that the 9h kernel uses the pinned tree with no change (plan 10.2). DIR is the root
+      of the pinned tree on the host. No file in 9h/OBJTYPE may have the name of a file in port
+      or in the arch directory, and no device of the tree may use #Z. With --records, FILE is
+      the compile.jsonl of the build. Each source in /sys/src/9 must then be a file of the tree
+      with the hash of the pin, a file of 9h/OBJTYPE with its hash, or a $CONF.c that the build
+      made. Each C file of 9h/OBJTYPE must be in the records. OBJTYPE is arm64 by default.
   r9 census FILE [--side R|G]
       Count what reached the compiler slot in one build, from the compile.jsonl that r9-cc
       wrote: the calls by origin and by compiler, the calls that failed, the calls from pcc,

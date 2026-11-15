@@ -19,6 +19,7 @@ pub mod disk;
 pub mod fetch;
 pub mod fixedpoint;
 pub mod flagsdiff;
+pub mod h9verify;
 pub mod helpers;
 pub mod image;
 pub mod locate;
