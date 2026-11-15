@@ -9,6 +9,7 @@
 
 pub mod h9;
 pub mod h9cons;
+pub mod h9disk;
 pub mod pl011;
 pub mod pl031;
 pub mod psci;

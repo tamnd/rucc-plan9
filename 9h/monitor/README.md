@@ -23,7 +23,7 @@ This runs the `qemu` kernel of the tree, with no change, on macOS 15 or later on
 target/release/9h run --machine virt --kernel 9qemu.u --ini plan9.ini --mem 512 --cpus 4
 ```
 
-`--machine virt` adds a PL011 console for the `qemu` kernel. The default machine, `9h`, is for the 9h kernel of `9h/arm64`, which has a console of hypercalls.
+`--machine virt` adds a PL011 console for the `qemu` kernel. The default machine, `9h`, is for the 9h kernel of `9h/arm64`, which has a console and disks of hypercalls. `--disk FILE` adds a disk, which the kernel sees as `sdH0` to `sdH3`. `--disk FILE,ro` makes the disk read-only.
 
 `plan9.ini` needs `console=0`. At the `bootargs` prompt, type `!rc` for a shell. `--cpus N` gives the guest N processors, 1 to 16. A kernel of the pinned tree starts them with PSCI `CPU_ON`. The `9qemu.u` of the arm64 image runs on one processor only, because it reads `GICR_TYPER` as 32 bits, and the GIC of the framework gives 0 for such a read. `--timeout SECS` ends the session after SECS seconds. `--strict` stops the session at an access to an address that has no device. `H9_TRACE=1` logs each exit of the vCPU.
 

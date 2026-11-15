@@ -6,6 +6,7 @@ use std::sync::Arc;
 use h9_dev::Bus;
 use h9_dev::h9;
 use h9_dev::h9cons::H9Cons;
+use h9_dev::h9disk::H9Disk;
 use h9_dev::pl011::Pl011;
 use h9_dev::pl031::Pl031;
 use h9_vm::Ram;
@@ -13,7 +14,7 @@ use h9_vm::fdt::Fdt;
 
 const USAGE: &str = "usage:
   9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
-         [--ini FILE] [--strict] [--timeout SECS]
+         [--disk FILE[,ro]]... [--ini FILE] [--strict] [--timeout SECS]
       Run an arm64 kernel of the tree on the hypervisor of the host. FILE is a 7l a.out or the
       U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
       machine: RAM at 0x40000000 (--mem MiB, 1024 by default), the device tree at the start of
@@ -22,7 +23,8 @@ const USAGE: &str = "usage:
       the hypercall console, so that the qemu kernel of the tree can run. Both have a PL031
       clock. --cpus gives the number of processors, 1 to 16, and 1 by default. The guest starts
       processors 1 and up with PSCI CPU_ON. --bootargs goes in /chosen/bootargs of the device
-      tree, where the kernel reads it in place of the plan9.ini. --ini FILE is the plan9.ini,
+      tree, where the kernel reads it in place of the plan9.ini. Each --disk is a disk of the 9h
+      machine, sdH0 to sdH3 in the kernel, and ,ro makes it read-only. --ini FILE is the plan9.ini,
       which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
       as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
       seconds with exit status 2.";
@@ -54,6 +56,7 @@ struct Options {
     cpus: u32,
     bootargs: String,
     ini: Option<String>,
+    disks: Vec<(String, bool)>,
     strict: bool,
     timeout: Option<u64>,
 }
@@ -66,6 +69,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         cpus: 1,
         bootargs: String::new(),
         ini: None,
+        disks: Vec::new(),
         strict: false,
         timeout: None,
     };
@@ -94,6 +98,13 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--cpus" => o.cpus = val()?.parse().map_err(|_| "--cpus needs a number")?,
             "--bootargs" => o.bootargs = val()?,
             "--ini" => o.ini = Some(val()?),
+            "--disk" => {
+                let v = val()?;
+                o.disks.push(match v.strip_suffix(",ro") {
+                    Some(f) => (f.to_string(), true),
+                    None => (v, false),
+                });
+            }
             "--strict" => o.strict = true,
             "--timeout" => {
                 o.timeout = Some(
@@ -113,6 +124,15 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     if !(1..=MAXCPU).contains(&o.cpus) {
         return Err(format!("--cpus must be 1 to {MAXCPU}"));
+    }
+    if o.disks.len() > h9_dev::h9disk::MAX_UNITS {
+        return Err(format!(
+            "the machine has at most {} disks",
+            h9_dev::h9disk::MAX_UNITS
+        ));
+    }
+    if o.machine == Machine::Virt && !o.disks.is_empty() {
+        return Err("--disk is for the 9h machine, and the virt machine has no disk".into());
     }
     Ok(o)
 }
@@ -226,6 +246,18 @@ fn run(o: &Options) -> Result<ExitCode, String> {
             Box::new(std::io::stdout()),
         ))),
     }
+    if !o.disks.is_empty() {
+        let mut d = H9Disk::new();
+        for (f, ro) in &o.disks {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(!ro)
+                .open(f)
+                .map_err(|e| format!("{f}: {e}"))?;
+            d.add(file, *ro).map_err(|e| format!("{f}: {e}"))?;
+        }
+        bus.add_hyper(Box::new(d));
+    }
     bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     backend::run(ram, bus, o.cpus as usize, image.entry, DTB)
 }
@@ -337,6 +369,18 @@ mod tests {
         assert_eq!(parse(&args("--kernel k --cpus 4")).unwrap().cpus, 4);
         assert!(parse(&args("--kernel k --cpus 0")).is_err());
         assert!(parse(&args("--kernel k --cpus 17")).is_err());
+        let o = parse(&args("--kernel k --disk a.img --disk=b.img,ro")).unwrap();
+        assert_eq!(
+            o.disks,
+            vec![("a.img".to_string(), false), ("b.img".to_string(), true)]
+        );
+        assert!(parse(&args("--kernel k --machine virt --disk a.img")).is_err());
+        assert!(
+            parse(&args(
+                "--kernel k --disk a --disk b --disk c --disk d --disk e"
+            ))
+            .is_err()
+        );
         assert!(
             parse(&args("--kernel k --what"))
                 .unwrap_err()

@@ -15,6 +15,7 @@ dev
 	ether	netif
 	bridge	log
 	ip	arp chandial ip ipv6 ipaux iproute netlog nullmedium pktmedium inferno
+	sd
 	uart
 	rtc
 
@@ -37,6 +38,7 @@ misc
 	gic
 	h9
 	uarth9
+	sdh9
 port
 	int cpuserver = 0;
 bootdir
