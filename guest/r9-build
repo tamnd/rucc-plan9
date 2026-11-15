@@ -29,6 +29,14 @@
 # is not built, because a build does not use the network. As in mk kernels, mk clean runs before
 # and after. Thus mk kernels is the targets clean install clean in /sys/src/9, then boot.
 #
+# The target 9h is not a target of mk either. It builds the kernel of 9h (plan 10) for arm64
+# in /sys/src/9/arm64 and for amd64 in /sys/src/9/pc64. r9 build puts the kernel files of 9h in
+# $r9/9h/$o. In a new namespace, bind -ac puts them after the kernel directory, and mk CONF=9h
+# builds 99h. Because the bind has -c, each file that mk makes goes to $r9/9h/$o and not to the
+# tree. A bind -a with no -c gives a union where a create fails. The kernels go to
+# /tmp/r9/9h/$o. An objtype other than that of the guest needs /$o/bin/paqfs, which the target
+# cross makes. The targets 9h.arm64 and 9h.amd64 build one kernel only.
+#
 # With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
 # machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
 # rucc fails runs the real compiler, and what rucc said goes to /tmp/r9/rucc.err.
@@ -86,6 +94,28 @@ for(t in $targets){
 				if(! ~ $s '')
 					exit $s
 			}
+		}
+	case 9h 9h.arm64 9h.amd64
+		rows=(arm64 amd64)
+		if(~ $t 9h.*)
+			rows=`{echo $t | sed 's/^9h\.//'}
+		for(o in $rows){
+			k=$o
+			if(~ $o amd64)
+				k=pc64
+			if(! test -f $r9/9h/$o/9h){
+				echo r9-build: no $r9/9h/$o/9h
+				exit 9h
+			}
+			if(! ~ $o $objtype && ! test -x /$o/bin/paqfs){
+				echo r9-build: 9h/$o needs /$o/bin/paqfs, which the target cross makes
+				exit 9h
+			}
+			echo r9-build: 9h/$o
+			@{rfork n; cd /sys/src/9/$k && bind -ac $r9/9h/$o . && mk clean && mk 'CONF=9h' && mkdir -p /tmp/r9/9h/$o && cp 99h* /tmp/r9/9h/$o/}
+			s=$status
+			if(! ~ $s '')
+				exit $s
 		}
 	case *
 		mk $t
