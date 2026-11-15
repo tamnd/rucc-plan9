@@ -1,12 +1,16 @@
 //! The Hypervisor.framework back end of the 9h monitor, for arm64 on macOS (plan 10.3).
 //!
 //! It makes the machine that the arm64 code of the tree knows: the layout of the QEMU `virt`
-//! machine, with the `GICv3` of the framework and no PCI. It runs one vCPU on the thread that made
-//! it, and it sends each exit to the devices of the bus.
+//! machine, with the `GICv3` of the framework and no PCI. Each vCPU runs on its own thread, which
+//! made it, and the thread sends each exit to the devices of the bus. The threads make the vCPUs
+//! in order at the start, because the framework gives the redistributor frames of the GIC in that
+//! order and the kernel finds its frame by the processor number. vCPU 0 starts the session, and
+//! the others wait until the guest starts them with PSCI `CPU_ON`.
 #![cfg(all(target_os = "macos", target_arch = "aarch64"))]
 
 pub mod ffi;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -25,20 +29,51 @@ pub const VTIMER_INTID: u32 = 27;
 /// Why the session ended.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Stop {
-    /// The guest called `SYSTEM_OFF`, or vCPU 0 called `CPU_OFF`.
+    /// The guest called `SYSTEM_OFF`, or each vCPU called `CPU_OFF`.
     Off,
     /// The guest called `SYSTEM_RESET`.
     Reset,
 }
 
+/// The state of one processor of the guest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cpu {
+    /// Not started, or stopped with `CPU_OFF`.
+    Off,
+    /// `CPU_ON` was called, and the thread has not started the vCPU yet.
+    Starting {
+        /// The address of the first instruction.
+        entry: u64,
+        /// The value of X0.
+        context: u64,
+    },
+    /// The vCPU runs.
+    On,
+}
+
+/// One processor: its state, and the ID of its vCPU while the vCPU exists.
+#[derive(Debug, Clone, Copy)]
+struct Slot {
+    cpu: Cpu,
+    id: Option<ffi::hv_vcpu_t>,
+    /// The thread has ended, with or without a vCPU.
+    gone: bool,
+}
+
 /// The state that the vCPU threads and the device threads share: the bus, the levels of the
-/// interrupt lines that the GIC has now, and the wake-up of a vCPU in `WFI`.
+/// interrupt lines that the GIC has now, the processors, the wake-up of a vCPU in `WFI`, and the
+/// end of the session.
 pub struct Machine {
     /// The RAM of the guest.
     pub ram: Arc<Ram>,
     bus: Mutex<Bus>,
     levels: Mutex<Vec<(u32, bool)>>,
     wake: (Mutex<bool>, Condvar),
+    cpus: Mutex<Vec<Slot>>,
+    /// Signals a change of `cpus`.
+    cpu_change: Condvar,
+    stopping: AtomicBool,
+    end: (Mutex<Option<Result<Stop, String>>>, Condvar),
 }
 
 /// The one virtual machine of the process. The framework allows only one.
@@ -47,8 +82,8 @@ pub struct Vm {
 }
 
 impl Vm {
-    /// Make the VM, map the RAM, and make the GIC.
-    pub fn new(ram: Arc<Ram>, bus: Bus) -> Result<Vm, String> {
+    /// Make the VM with `ncpu` processors, map the RAM, and make the GIC.
+    pub fn new(ram: Arc<Ram>, bus: Bus, ncpu: usize) -> Result<Vm, String> {
         // SAFETY: a null configuration asks for the default VM.
         check("hv_vm_create", unsafe {
             ffi::hv_vm_create(std::ptr::null_mut())
@@ -65,6 +100,17 @@ impl Vm {
             bus: Mutex::new(bus),
             levels: Mutex::new(Vec::new()),
             wake: (Mutex::new(false), Condvar::new()),
+            cpus: Mutex::new(vec![
+                Slot {
+                    cpu: Cpu::Off,
+                    id: None,
+                    gone: false
+                };
+                ncpu.max(1)
+            ]),
+            cpu_change: Condvar::new(),
+            stopping: AtomicBool::new(false),
+            end: (Mutex::new(None), Condvar::new()),
         };
         Ok(Vm {
             machine: Arc::new(machine),
@@ -77,31 +123,114 @@ impl Vm {
         self.machine.clone()
     }
 
-    /// Run vCPU 0 from `entry` with `x0` in X0, on this thread, until the session ends.
+    /// Start vCPU 0 at `entry` with `x0` in X0, and wait until the session ends.
     pub fn run(&self, entry: u64, x0: u64) -> Result<Stop, String> {
-        let mut cpu = Vcpu::new(0)?;
+        let m = &self.machine;
+        let ncpu = {
+            let mut cpus = m.cpus.lock().unwrap();
+            cpus[0].cpu = Cpu::Starting { entry, context: x0 };
+            cpus.len()
+        };
+        for n in 0..ncpu {
+            processor(m.clone(), n);
+        }
         if trace() {
-            let id = cpu.id;
+            let m = m.clone();
             std::thread::spawn(move || {
                 loop {
                     std::thread::sleep(Duration::from_millis(500));
-                    // SAFETY: one vCPU id, which stays valid while the VM runs.
-                    unsafe { ffi::hv_vcpus_exit(&raw const id, 1) };
+                    m.exit_all();
                 }
             });
         }
-        cpu.set_reg(ffi::HV_REG_PC, entry)?;
-        cpu.set_reg(ffi::HV_REG_X0, x0)?;
-        // EL1 with SP_EL1, and the D, A, I and F exceptions masked, as a boot loader leaves it.
-        cpu.set_reg(ffi::HV_REG_CPSR, 0x3c5)?;
-        // The framework emulates the PMU only when PMUVer of ID_AA64DFR0_EL1 is not zero, and it
-        // is zero by default. Without this, the PMCR_EL0 store of the clockinit of the tree takes
-        // an Undefined exception in the guest, and the monitor does not see it.
-        let dfr0 = cpu.sys(ffi::HV_SYS_REG_ID_AA64DFR0_EL1);
-        if dfr0 & 0xf00 == 0 {
-            cpu.set_sys(ffi::HV_SYS_REG_ID_AA64DFR0_EL1, dfr0 | 1 << 8)?;
+        let mut end = m.end.0.lock().unwrap();
+        while end.is_none() {
+            end = m.end.1.wait(end).unwrap();
         }
-        cpu.run_loop(&self.machine)
+        let r = end.take().unwrap();
+        drop(end);
+        // Wait until each thread has destroyed its vCPU, so that the VM can go.
+        let mut cpus = m.cpus.lock().unwrap();
+        while !cpus.iter().all(|c| c.gone) {
+            drop(cpus);
+            m.exit_all();
+            m.cpu_change.notify_all();
+            std::thread::sleep(Duration::from_millis(1));
+            cpus = m.cpus.lock().unwrap();
+        }
+        r
+    }
+}
+
+/// Start the thread of processor `n`. It makes the vCPU after processor `n - 1` has made its
+/// vCPU, then runs the vCPU each time that the guest starts it, until the session ends.
+fn processor(m: Arc<Machine>, n: usize) {
+    std::thread::spawn(move || {
+        let r = run_processor(&m, n);
+        let mut cpus = m.cpus.lock().unwrap();
+        cpus[n] = Slot {
+            cpu: Cpu::Off,
+            id: None,
+            gone: true,
+        };
+        drop(cpus);
+        m.cpu_change.notify_all();
+        match r {
+            Ok(Some(stop)) => m.finish(Ok(stop)),
+            Ok(None) => {}
+            Err(e) => m.finish(Err(format!("cpu{n}: {e}"))),
+        }
+    });
+}
+
+fn run_processor(m: &Arc<Machine>, n: usize) -> Result<Option<Stop>, String> {
+    let mut cpus = m.cpus.lock().unwrap();
+    while n > 0 && cpus[n - 1].id.is_none() && !cpus[n - 1].gone {
+        cpus = m.cpu_change.wait(cpus).unwrap();
+    }
+    drop(cpus);
+    let mut cpu = Vcpu::new(n as u64)?;
+    if trace() {
+        let mut typer = 0;
+        // SAFETY: writes one u64.
+        let r = unsafe { ffi::hv_gic_get_redistributor_reg(cpu.id, 0x8, &raw mut typer) };
+        let (mut base, mut size) = (0, 0);
+        // SAFETY: each call writes one value.
+        unsafe {
+            ffi::hv_gic_get_redistributor_base(cpu.id, &raw mut base);
+            ffi::hv_gic_get_redistributor_size(&raw mut size);
+        }
+        eprintln!(
+            "9h: cpu{n} vcpu {} GICR_TYPER {typer:#x} ({}) base {base:#x} size {size:#x}",
+            cpu.id,
+            ffi::error_name(r)
+        );
+    }
+    m.cpus.lock().unwrap()[n].id = Some(cpu.id);
+    m.cpu_change.notify_all();
+    loop {
+        let mut cpus = m.cpus.lock().unwrap();
+        let (entry, context) = loop {
+            if m.stopping.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
+            if let Cpu::Starting { entry, context } = cpus[n].cpu {
+                break (entry, context);
+            }
+            cpus = m.cpu_change.wait(cpus).unwrap();
+        };
+        cpus[n].cpu = Cpu::On;
+        drop(cpus);
+        cpu.boot(entry, context)?;
+        if let Some(stop) = cpu.run_loop(m)? {
+            return Ok(Some(stop));
+        }
+        // CPU_OFF, or another processor ended the session.
+        let mut cpus = m.cpus.lock().unwrap();
+        cpus[n].cpu = Cpu::Off;
+        if cpus.iter().all(|c| c.cpu == Cpu::Off) {
+            return Ok(Some(Stop::Off));
+        }
     }
 }
 
@@ -196,6 +325,70 @@ impl Machine {
         t
     }
 
+    /// End the session with `r`, unless it has ended already, and stop each vCPU.
+    fn finish(&self, r: Result<Stop, String>) {
+        self.stopping.store(true, Ordering::SeqCst);
+        let mut end = self.end.0.lock().unwrap();
+        if end.is_none() {
+            *end = Some(r);
+        }
+        drop(end);
+        self.end.1.notify_all();
+        self.cpu_change.notify_all();
+        self.exit_all();
+        self.kick();
+    }
+
+    /// Make each running vCPU leave `hv_vcpu_run`.
+    fn exit_all(&self) {
+        let ids: Vec<ffi::hv_vcpu_t> = self
+            .cpus
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| c.cpu == Cpu::On)
+            .filter_map(|c| c.id)
+            .collect();
+        if !ids.is_empty() {
+            // SAFETY: the IDs are of vCPUs that exist; a vCPU that has just gone gives an error
+            // code, which is of no importance here.
+            unsafe { ffi::hv_vcpus_exit(ids.as_ptr(), ids.len() as u32) };
+        }
+    }
+
+    /// The answer to `CPU_ON` for the processor with the affinity `target`. The processor number
+    /// is Aff0, as in the MPIDR that `mpinit` of the tree computes.
+    fn cpu_on(&self, target: u64, entry: u64, context: u64) -> u64 {
+        let n = (target & 0xff) as usize;
+        let mut cpus = self.cpus.lock().unwrap();
+        if target & !0xff != 0 || n >= cpus.len() {
+            return psci::INVALID_PARAMETERS;
+        }
+        match cpus[n].cpu {
+            Cpu::On => psci::ALREADY_ON,
+            Cpu::Starting { .. } => psci::ON_PENDING,
+            Cpu::Off => {
+                cpus[n].cpu = Cpu::Starting { entry, context };
+                drop(cpus);
+                self.cpu_change.notify_all();
+                psci::SUCCESS
+            }
+        }
+    }
+
+    /// The answer to `AFFINITY_INFO` for the processor with the affinity `target`.
+    fn affinity_info(&self, target: u64) -> u64 {
+        let n = (target & 0xff) as usize;
+        let cpus = self.cpus.lock().unwrap();
+        match cpus.get(n).map(|c| c.cpu) {
+            _ if target & !0xff != 0 => psci::INVALID_PARAMETERS,
+            None => psci::INVALID_PARAMETERS,
+            Some(Cpu::On) => 0,
+            Some(Cpu::Off) => 1,
+            Some(Cpu::Starting { .. }) => 2,
+        }
+    }
+
     /// Wake a vCPU that waits in `WFI`.
     pub fn kick(&self) {
         *self.wake.0.lock().unwrap() = true;
@@ -234,6 +427,22 @@ impl Vcpu {
         };
         cpu.set_sys(ffi::HV_SYS_REG_MPIDR_EL1, mpidr)?;
         Ok(cpu)
+    }
+
+    /// Set the registers for the first instruction: `entry` in PC and `x0` in X0, at EL1.
+    fn boot(&self, entry: u64, x0: u64) -> Result<(), String> {
+        self.set_reg(ffi::HV_REG_PC, entry)?;
+        self.set_reg(ffi::HV_REG_X0, x0)?;
+        // EL1 with SP_EL1, and the D, A, I and F exceptions masked, as a boot loader leaves it.
+        self.set_reg(ffi::HV_REG_CPSR, 0x3c5)?;
+        // The framework emulates the PMU only when PMUVer of ID_AA64DFR0_EL1 is not zero, and it
+        // is zero by default. Without this, the PMCR_EL0 store of the clockinit of the tree takes
+        // an Undefined exception in the guest, and the monitor does not see it.
+        let dfr0 = self.sys(ffi::HV_SYS_REG_ID_AA64DFR0_EL1);
+        if dfr0 & 0xf00 == 0 {
+            self.set_sys(ffi::HV_SYS_REG_ID_AA64DFR0_EL1, dfr0 | 1 << 8)?;
+        }
+        Ok(())
     }
 
     fn reg(&self, r: u32) -> u64 {
@@ -277,8 +486,8 @@ impl Vcpu {
         if trace() {
             let pc = self.reg(ffi::HV_REG_PC);
             eprintln!(
-                "9h: exit {} esr {:#x} pa {:#x} pc {pc:#x}",
-                e.reason, e.exception.syndrome, e.exception.physical_address
+                "9h: vcpu {} exit {} esr {:#x} pa {:#x} pc {pc:#x}",
+                self.id, e.reason, e.exception.syndrome, e.exception.physical_address
             );
         }
         Ok(match e.reason {
@@ -375,8 +584,13 @@ impl Vcpu {
         );
     }
 
-    fn run_loop(&mut self, m: &Machine) -> Result<Stop, String> {
+    /// Run the vCPU until the session ends, which gives `Some`, or until the vCPU calls `CPU_OFF`
+    /// or another vCPU ends the session, which give `None`.
+    fn run_loop(&mut self, m: &Arc<Machine>) -> Result<Option<Stop>, String> {
         loop {
+            if m.stopping.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
             self.timer_rearm();
             match self.step()? {
                 Exit::MmioRead {
@@ -403,12 +617,22 @@ impl Vcpu {
                     m.with_bus(|b| b.write(pa, size, value))?;
                     self.advance()?;
                 }
-                Exit::Hypercall(x) => match psci::call(&x) {
+                Exit::Hypercall(x) => match psci::call(&x).inspect(|a| {
+                    if trace() {
+                        eprintln!("9h: vcpu {} psci {:#x?}: {a:?}", self.id, &x[..4]);
+                    }
+                }) {
                     Some(Action::Return(v)) => self.set_reg(ffi::HV_REG_X0, v)?,
-                    Some(Action::Off | Action::CpuOff) => return Ok(Stop::Off),
-                    Some(Action::Reset) => return Ok(Stop::Reset),
-                    Some(Action::CpuOn { .. }) => {
-                        self.set_reg(ffi::HV_REG_X0, psci::NOT_SUPPORTED)?;
+                    Some(Action::Off) => return Ok(Some(Stop::Off)),
+                    Some(Action::Reset) => return Ok(Some(Stop::Reset)),
+                    Some(Action::CpuOff) => return Ok(None),
+                    Some(Action::CpuOn {
+                        target,
+                        entry,
+                        context,
+                    }) => self.set_reg(ffi::HV_REG_X0, m.cpu_on(target, entry, context))?,
+                    Some(Action::AffinityInfo { target }) => {
+                        self.set_reg(ffi::HV_REG_X0, m.affinity_info(target))?;
                     }
                     None => self.set_reg(ffi::HV_REG_X0, psci::NOT_SUPPORTED)?,
                 },

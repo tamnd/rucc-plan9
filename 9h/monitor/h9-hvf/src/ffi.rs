@@ -81,6 +81,8 @@ unsafe extern "C" {
     pub fn hv_gic_get_distributor_base_alignment(align: *mut usize) -> hv_return_t;
     pub fn hv_gic_get_redistributor_base_alignment(align: *mut usize) -> hv_return_t;
     pub fn hv_gic_get_redistributor_region_size(size: *mut usize) -> hv_return_t;
+    pub fn hv_gic_get_redistributor_size(size: *mut usize) -> hv_return_t;
+    pub fn hv_gic_get_redistributor_base(vcpu: hv_vcpu_t, base: *mut hv_ipa_t) -> hv_return_t;
     pub fn hv_gic_get_redistributor_reg(vcpu: hv_vcpu_t, reg: u32, value: *mut u64) -> hv_return_t;
     pub fn hv_gic_get_distributor_reg(reg: u16, value: *mut u64) -> hv_return_t;
     pub fn hv_gic_get_icc_reg(vcpu: hv_vcpu_t, reg: u16, value: *mut u64) -> hv_return_t;
