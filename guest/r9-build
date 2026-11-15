@@ -35,7 +35,7 @@
 # builds 99h. Because the bind has -c, each file that mk makes goes to $r9/9h/$o and not to the
 # tree. A bind -a with no -c gives a union where a create fails. The kernels go to
 # /tmp/r9/9h/$o. An objtype other than that of the guest needs /$o/bin/paqfs, which the target
-# cross makes.
+# cross makes. The targets 9h.arm64 and 9h.amd64 build one kernel only.
 #
 # With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
 # machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
@@ -95,8 +95,11 @@ for(t in $targets){
 					exit $s
 			}
 		}
-	case 9h
-		for(o in arm64 amd64){
+	case 9h 9h.arm64 9h.amd64
+		rows=(arm64 amd64)
+		if(~ $t 9h.*)
+			rows=`{echo $t | sed 's/^9h\.//'}
+		for(o in $rows){
 			k=$o
 			if(~ $o amd64)
 				k=pc64

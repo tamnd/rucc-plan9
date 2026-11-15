@@ -247,7 +247,7 @@ usage:
       build or the test fails. --targets gives the mk targets in place of install, such as
       'clean install'. Each target is a separate mk, in the order given. The targets cross,
       boot and 9h are not mk targets: see guest/r9-build. 9h builds the kernels of 9h, and
-      they go to DIR/collected/9h.
+      they go to DIR/collected/9h. 9h.arm64 and 9h.amd64 build one of them.
   r9 mix [NAME] [--file UNIT=R|G,...] [--mix FILE] [--default R|G] [r9 build options]
       Build with some units from rucc and the others from kencc (plan 05.7, 12.8). A unit is a
       source file of the guest, such as /sys/src/libc/port/strcmp.c, or a directory, which

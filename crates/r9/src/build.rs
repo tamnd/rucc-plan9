@@ -111,7 +111,7 @@ pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
         format!(
             "cd {w} && tar cf $r9collect {}{}",
             COLLECTED.join(" "),
-            if targets.split_whitespace().any(|t| t == "9h") {
+            if targets.split_whitespace().any(|t| t == "9h" || t.starts_with("9h.")) {
                 " 9h"
             } else {
                 ""
@@ -507,6 +507,8 @@ mod tests {
     fn the_target_9h_collects_the_kernels() {
         let c = commands("/sys/src", "cross 9h", &Slot::G);
         assert!(c.last().unwrap().ends_with("rucc.err 9h"));
+        let c = commands("/sys/src", "9h.amd64", &Slot::G);
+        assert!(c.last().unwrap().ends_with("rucc.err 9h"));
         let c = commands("/sys/src", "install", &Slot::G);
         assert!(!c.last().unwrap().ends_with(" 9h"));
     }
@@ -528,9 +530,12 @@ mod tests {
     fn r9_build_has_the_target_9h() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let script = std::fs::read_to_string(root.join("guest/r9-build")).unwrap();
-        assert!(script.contains("\tcase 9h\n"));
+        assert!(script.contains("\tcase 9h 9h.arm64 9h.amd64\n"));
         assert!(script.contains("bind -ac $r9/9h/$o ."));
-        assert!(script.contains(&format!("for(o in {})", H9_ROWS.join(" "))));
+        assert!(script.contains(&format!("rows=({})", H9_ROWS.join(" "))));
+        for row in H9_ROWS {
+            assert!(script.contains(&format!(" 9h.{row}")), "{row}");
+        }
     }
 
     #[test]
