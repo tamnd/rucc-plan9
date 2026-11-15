@@ -244,8 +244,68 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
         .stderr(stderr)
         .spawn()
         .map_err(|e| format!("cannot run {}: {e}", qc[0]))?;
-    let mut stdin = child.stdin.take().ok_or("no stdin for QEMU")?;
-    let mut stdout = child.stdout.take().ok_or("no stdout for QEMU")?;
+    let monitor_path = monitor(req);
+    let mut resumed_at = Instant::now();
+    let driven = drive(
+        &mut child,
+        &mut log,
+        &req.bootargs,
+        req.commands.clone(),
+        req.timeout,
+        || {
+            if resumed_at.elapsed() > RESUME_EVERY {
+                resume(&monitor_path);
+                resumed_at = Instant::now();
+            }
+        },
+    )?;
+    let _ = std::fs::remove_file(monitor(req));
+    clean_up(req)?;
+    let outcome = driven.outcome();
+    write_steps(&req.work.join("steps.json"), &outcome)?;
+    Ok(outcome)
+}
+
+/// What [`drive`] saw on the console.
+pub(crate) struct Driven {
+    /// The session at the end.
+    pub session: Session,
+    /// Whether the limit ended the boot.
+    pub timed_out: bool,
+    /// The time the boot took.
+    pub seconds: f64,
+}
+
+impl Driven {
+    /// The outcome. The boot passed when each command succeeded and the guest halted in time.
+    pub(crate) fn outcome(&self) -> Outcome {
+        let s = &self.session;
+        Outcome {
+            steps: s.steps.clone(),
+            phase: s.phase,
+            panic: s.panic.clone(),
+            ready: s.ready,
+            timed_out: self.timed_out,
+            seconds: self.seconds,
+            passed: s.passed() && s.phase == Phase::Halted && !self.timed_out,
+        }
+    }
+}
+
+/// Drive the console of `child`, a virtual machine whose console is on its standard input and
+/// output: answer the boot prompts, run `commands` at the shell prompt, halt the guest, and stop
+/// the child. The console goes to `log`. `tick` runs about each 200 ms, for the work of the
+/// caller.
+pub(crate) fn drive(
+    child: &mut Child,
+    log: &mut impl Write,
+    bootargs: &str,
+    commands: Vec<String>,
+    timeout: Duration,
+    mut tick: impl FnMut(),
+) -> Result<Driven, String> {
+    let mut stdin = child.stdin.take().ok_or("no stdin for the machine")?;
+    let mut stdout = child.stdout.take().ok_or("no stdout for the machine")?;
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
     let reader = std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
@@ -257,20 +317,16 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
     });
 
     let start = Instant::now();
-    let mut session = Session::new(&req.bootargs, req.commands.clone());
+    let mut session = Session::new(bootargs, commands);
     let mut lines = Lines::default();
     let mut timed_out = false;
     let mut halted_at: Option<Instant> = None;
-    let mut resumed_at = Instant::now();
-    loop {
-        if start.elapsed() > req.timeout {
+    let typed = loop {
+        if start.elapsed() > timeout {
             timed_out = true;
-            break;
+            break Ok(());
         }
-        if resumed_at.elapsed() > RESUME_EVERY {
-            resume(&monitor(req));
-            resumed_at = Instant::now();
-        }
+        tick();
         match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(bytes) => {
                 let _ = log.write_all(&bytes);
@@ -279,40 +335,35 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break Ok(()),
         }
         match session.phase {
-            Phase::Panicked => break,
+            Phase::Panicked => break Ok(()),
             Phase::Halted => {
                 // fshalt leaves the machine running; give the console a moment, then stop it.
                 let at = *halted_at.get_or_insert_with(Instant::now);
                 if at.elapsed() > Duration::from_secs(2) {
-                    break;
+                    break Ok(());
                 }
             }
             _ => {}
         }
         if let Action::Type(text) = session.prompt(&lines.partial()) {
             lines.answered();
-            type_text(&text, &mut stdin, &rx, &mut log, &mut lines, &mut session)?;
+            if let Err(e) = type_text(&text, &mut stdin, &rx, log, &mut lines, &mut session) {
+                break Err(e);
+            }
         }
-    }
-    stop(&mut child);
-    let _ = std::fs::remove_file(monitor(req));
+    };
+    drop(stdin);
+    stop(child);
     let _ = reader.join();
-    clean_up(req)?;
-    let passed = session.passed() && session.phase == Phase::Halted && !timed_out;
-    let outcome = Outcome {
-        steps: session.steps.clone(),
-        phase: session.phase,
-        panic: session.panic.clone(),
-        ready: session.ready,
+    typed?;
+    Ok(Driven {
+        session,
         timed_out,
         seconds: start.elapsed().as_secs_f64(),
-        passed,
-    };
-    write_steps(&req.work.join("steps.json"), &outcome)?;
-    Ok(outcome)
+    })
 }
 
 /// The time between two commands `cont` on the monitor.
@@ -341,7 +392,7 @@ fn resume(path: &Path) {
 /// The amd64 guest powers off after `fshalt` and QEMU exits by itself, but the arm64 guest does
 /// not. Thus QEMU gets SIGTERM, which makes it close its disks and exit, and SIGKILL only when it
 /// did not exit in 10 seconds.
-fn stop(child: &mut Child) {
+pub(crate) fn stop(child: &mut Child) {
     if matches!(child.try_wait(), Ok(Some(_))) {
         return;
     }
@@ -378,7 +429,7 @@ fn type_text(
         stdin
             .write_all(chunk)
             .and_then(|()| stdin.flush())
-            .map_err(|e| format!("cannot type into QEMU: {e}"))?;
+            .map_err(|e| format!("cannot type on the console: {e}"))?;
         typed += chunk.len();
         let limit = Instant::now() + Duration::from_secs(2);
         while echoed < typed && Instant::now() < limit {
@@ -400,22 +451,7 @@ fn type_text(
 /// the archive fills is an error.
 fn clean_up(req: &Request) -> Result<(), String> {
     if req.collect_mib.is_some() {
-        let disk = crate::disk::collect_disk(&req.work);
-        let archive = crate::tar::list(&disk)?;
-        crate::disk::unpack(&disk, &req.work.join("collected"))?;
-        let kept = req.work.join("collected.tar");
-        if archive.files.is_empty() {
-            let _ = std::fs::remove_file(&disk);
-        } else {
-            std::fs::rename(&disk, &kept)
-                .and_then(|()| {
-                    std::fs::OpenOptions::new()
-                        .write(true)
-                        .open(&kept)?
-                        .set_len(archive.end)
-                })
-                .map_err(|e| format!("{}: {e}", kept.display()))?;
-        }
+        collect(&req.work)?;
     }
     if !req.keep {
         let _ = std::fs::remove_file(overlay(req));
@@ -424,23 +460,64 @@ fn clean_up(req: &Request) -> Result<(), String> {
     Ok(())
 }
 
+/// Unpack the collect disk in `work` into `work/collected`, and keep its archive as
+/// `collected.tar`, cut to its length.
+pub(crate) fn collect(work: &Path) -> Result<(), String> {
+    let disk = crate::disk::collect_disk(work);
+    let archive = crate::tar::list(&disk)?;
+    crate::disk::unpack(&disk, &work.join("collected"))?;
+    let kept = work.join("collected.tar");
+    if archive.files.is_empty() {
+        let _ = std::fs::remove_file(&disk);
+    } else {
+        std::fs::rename(&disk, &kept)
+            .and_then(|()| {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&kept)?
+                    .set_len(archive.end)
+            })
+            .map_err(|e| format!("{}: {e}", kept.display()))?;
+    }
+    Ok(())
+}
+
 /// The request with the disks of `input` and `collect_mib` made and added to `disks`.
 fn with_tar_disks(req: &Request) -> Result<Request, String> {
     let mut req = req.clone();
-    if let Some(input) = &req.input {
-        let disk = crate::disk::in_disk(&req.work);
-        crate::disk::pack(input, &disk)?;
-        req.disks.push(disk);
-    }
-    if let Some(mib) = req.collect_mib {
-        let disk = crate::disk::collect_disk(&req.work);
-        crate::disk::blank(&disk, mib)?;
-        req.disks.push(disk);
-    }
-    let mut setup = disk_names(&req);
-    setup.append(&mut req.commands);
-    req.commands = setup;
+    add_tar_disks(
+        &req.work,
+        req.input.as_deref(),
+        req.collect_mib,
+        &mut req.disks,
+        &mut req.commands,
+    )?;
     Ok(req)
+}
+
+/// Make the disk of `input` and the collect disk of `collect_mib` in `work`, add them to
+/// `disks`, and put the commands that name the disks before `commands`.
+pub(crate) fn add_tar_disks(
+    work: &Path,
+    input: Option<&Path>,
+    collect_mib: Option<u64>,
+    disks: &mut Vec<PathBuf>,
+    commands: &mut Vec<String>,
+) -> Result<(), String> {
+    if let Some(input) = input {
+        let disk = crate::disk::in_disk(work);
+        crate::disk::pack(input, &disk)?;
+        disks.push(disk);
+    }
+    if let Some(mib) = collect_mib {
+        let disk = crate::disk::collect_disk(work);
+        crate::disk::blank(&disk, mib)?;
+        disks.push(disk);
+    }
+    let mut setup = name_disks(disks.len(), input.is_some(), collect_mib.is_some());
+    setup.append(commands);
+    *commands = setup;
+    Ok(())
 }
 
 /// The commands that name the raw disks in the guest. A controller letter depends on the
@@ -450,28 +527,35 @@ fn with_tar_disks(req: &Request) -> Result<Request, String> {
 /// collect disk.
 #[must_use]
 pub fn disk_names(req: &Request) -> Vec<String> {
-    if req.disks.is_empty() {
+    name_disks(
+        req.disks.len(),
+        req.input.is_some(),
+        req.collect_mib.is_some(),
+    )
+}
+
+/// The commands of [`disk_names`] for `n` raw disks, of which the last is the collect disk when
+/// `collect` is true, and the one before it the input disk when `input` is true.
+fn name_disks(n: usize, input: bool, collect: bool) -> Vec<String> {
+    if n == 0 {
         return Vec::new();
     }
     // The status of a for loop is the status of its last test, so the count check ends the
     // same command.
     let mut c = vec![format!(
         "r9disks=(); for(d in /dev/sd*) if(test -f $d/data && ! test -f $d/fs && ! test -f $d/plan9) r9disks=($r9disks $d/data); test $#r9disks -eq {}",
-        req.disks.len()
+        n
     )];
-    if req.input.is_some() {
-        c.push(format!(
-            "r9in=$r9disks({})",
-            req.disks.len() - usize::from(req.collect_mib.is_some())
-        ));
+    if input {
+        c.push(format!("r9in=$r9disks({})", n - usize::from(collect)));
     }
-    if req.collect_mib.is_some() {
+    if collect {
         c.push("r9collect=$r9disks($#r9disks)".to_string());
     }
     c
 }
 
-fn write_steps(path: &Path, o: &Outcome) -> Result<(), String> {
+pub(crate) fn write_steps(path: &Path, o: &Outcome) -> Result<(), String> {
     let steps: Vec<serde_json::Value> = o
         .steps
         .iter()

@@ -391,14 +391,29 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
     }
 }
 
-/// `r9 9h verify`.
+/// `r9 9h verify`, `r9 9h boot` and `r9 9h smoke`.
 fn run_9h(args: &Args) -> Result<ExitCode, String> {
-    match args.target.as_deref() {
-        Some("verify") => {}
-        Some(w) => return Err(format!("9h {w}: the 9h commands are: verify")),
-        None => return Err("give a 9h command: verify".into()),
-    }
+    let smoke = match args.target.as_deref() {
+        Some("verify") => false,
+        Some(w @ ("boot" | "smoke")) => w == "smoke",
+        Some(w) => {
+            return Err(format!(
+                "9h {w}: the 9h commands are: verify, boot and smoke"
+            ));
+        }
+        None => return Err("give a 9h command: verify, boot or smoke".into()),
+    };
     let repo = Repo::find()?;
+    if args.target.as_deref() != Some("verify") {
+        let req = r9::h9boot::request_from(&repo, args, smoke)?;
+        let outcome = r9::h9boot::run(&req)?;
+        print!("{}", r9::boot::summary(&outcome, &req.work));
+        return Ok(if outcome.passed {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
+    }
     let tree = std::path::Path::new(
         args.get("tree")
             .ok_or("give --tree, the pinned tree on the host")?,

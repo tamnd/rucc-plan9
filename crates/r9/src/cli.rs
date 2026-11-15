@@ -51,8 +51,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
         "help" | "version" | "check" => Accepts::NOTHING,
         "9h" => Accepts {
             positional: true,
-            values: &["tree", "records", "row"],
-            switches: &[],
+            values: &[
+                "tree", "records", "row", "kernel", "root", "disk", "hostfs", "cpus", "mem",
+                "bootargs", "run", "in", "collect", "timeout", "out", "monitor",
+            ],
+            switches: &["keep", "strict"],
         },
         "sets" => Accepts {
             positional: false,
@@ -299,6 +302,21 @@ usage:
       the compile.jsonl of the build. Each source in /sys/src/9 must then be a file of the tree
       with the hash of the pin, a file of 9h/OBJTYPE with its hash, or a $CONF.c that the build
       made. Each C file of 9h/OBJTYPE must be in the records. OBJTYPE is arm64 by default.
+  r9 9h boot --kernel FILE --root IMAGE [--disk FILE] [--hostfs DIR] [--cpus N] [--mem MIB]
+          [--bootargs TEXT] [--run FILE] [--in DIR|TAR] [--collect MIB] [--timeout SECS]
+          [--out DIR] [--monitor PATH] [--keep] [--strict]
+      Boot the 9h kernel FILE in the 9h monitor (plan 10.8), with a copy of IMAGE as sdH0, and
+      run each command of FILE (smoke/boot.rc by default) at the shell prompt, as r9 boot does.
+      IMAGE is raw or qcow2, and is never written. --disk adds a disk and --hostfs serves DIR on
+      /mnt/term, and the guest can only read the two. The bootargs answer is
+      local!/dev/sdH0/fs by default. --in and --collect are as for r9 boot. The monitor is the
+      release build in 9h/monitor, or 9h on the path. The limit is 3600 seconds by default. The
+      work goes to DIR (work/9h/boot by default), and the copy of IMAGE is removed after the boot
+      unless --keep is given. --strict makes an access to an address with no device stop the
+      session, so that the boot fails.
+  r9 9h smoke --kernel FILE --root IMAGE [the options of r9 9h boot]
+      Run the smoke suite of plan 09.5 on the 9h kernel: r9 9h boot with smoke/suite.rc and the
+      guest directory as the input. The work goes to work/9h/smoke by default.
   r9 census FILE [--side R|G]
       Count what reached the compiler slot in one build, from the compile.jsonl that r9-cc
       wrote: the calls by origin and by compiler, the calls that failed, the calls from pcc,
