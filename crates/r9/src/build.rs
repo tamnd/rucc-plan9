@@ -174,6 +174,11 @@ pub struct Summary {
     pub kencc_calls: usize,
     /// The calls for the machine of the guest that went to the assembler of the tree.
     pub ref_as_calls: usize,
+    /// The words of `R9_BRINGUP` in the build, empty for none. A G build has none.
+    pub bringup: String,
+    /// Whether the build is graded (plan 02.8): an R build with no bring-up whose census has
+    /// no problem.
+    pub graded: bool,
     /// The files that the build wrote.
     pub changed_files: usize,
     /// The status of the test: empty for a pass, `timeout`, or the exit status. With no test,
@@ -228,6 +233,15 @@ pub fn run(
         Vec::new()
     };
     let c = census::take(&records);
+    let bringup = match slot {
+        Slot::R { bringup, .. } => bringup.clone(),
+        Slot::G => String::new(),
+    };
+    let side = match slot {
+        Slot::G => census::Side::G,
+        Slot::R { .. } => census::Side::R,
+    };
+    let graded = c.graded(side, Some(&bringup));
     let t0: u64 = read(&collected, "t0").trim().parse().unwrap_or(0);
     let t1: u64 = read(&collected, "t1").trim().parse().unwrap_or(0);
     let status = read(&collected, "status").trim().to_string();
@@ -247,6 +261,8 @@ pub fn run(
         rucc_calls: count(&records, "rucc"),
         kencc_calls: count(&records, "ref-c"),
         ref_as_calls: count(&records, "ref-as"),
+        bringup,
+        graded,
         changed_files: read(&collected, "changed").lines().count(),
         test_status: guest_test.map(|_| {
             let text = read(&collected, "test.status");
@@ -265,11 +281,7 @@ pub fn run(
     )
     .map_err(|e| format!("{}: {e}", path.display()))?;
     let mut report = boot::summary(&outcome, &req.work);
-    let side = match slot {
-        Slot::G => census::Side::G,
-        Slot::R { .. } => census::Side::R,
-    };
-    report.push_str(&c.report(side));
+    report.push_str(&c.report(side, Some(&summary.bringup)));
     if let Some(t) = &summary.test_status {
         let _ = writeln!(
             report,
