@@ -580,6 +580,48 @@ pub(crate) fn write_steps(path: &Path, o: &Outcome) -> Result<(), String> {
     std::fs::write(path, text + "\n").map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Read the `steps.json` that `write_steps` wrote. The time has one decimal only.
+pub(crate) fn read_steps(path: &Path) -> Result<Outcome, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let bad = |what: &str| format!("{}: no {what}", path.display());
+    let phase = match v["phase"].as_str().ok_or_else(|| bad("phase"))? {
+        "booting" => Phase::Booting,
+        "running" => Phase::Running,
+        "halting" => Phase::Halting,
+        "halted" => Phase::Halted,
+        "panicked" => Phase::Panicked,
+        p => return Err(format!("{}: the phase {p}", path.display())),
+    };
+    let steps = v["steps"]
+        .as_array()
+        .ok_or_else(|| bad("steps"))?
+        .iter()
+        .map(|s| Step {
+            command: s["command"].as_str().unwrap_or_default().to_owned(),
+            status: s["status"].as_str().map(str::to_owned),
+            output: s["output"]
+                .as_array()
+                .map(|o| {
+                    o.iter()
+                        .filter_map(|l| l.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+        .collect();
+    Ok(Outcome {
+        steps,
+        phase,
+        panic: v["panic"].as_str().map(str::to_owned),
+        ready: v["ready"].as_bool().ok_or_else(|| bad("ready"))?,
+        timed_out: v["timed_out"].as_bool().ok_or_else(|| bad("timed_out"))?,
+        seconds: v["seconds"].as_f64().ok_or_else(|| bad("seconds"))?,
+        passed: v["passed"].as_bool().ok_or_else(|| bad("passed"))?,
+    })
+}
+
 /// The report `r9 boot` prints.
 #[must_use]
 pub fn summary(o: &Outcome, work: &Path) -> String {
@@ -726,6 +768,35 @@ pub fn request_from(repo: &crate::repo::Repo, args: &crate::cli::Args) -> Result
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn read_steps_gives_back_what_write_steps_wrote() {
+        let o = Outcome {
+            steps: vec![
+                Step {
+                    command: "mk install".into(),
+                    status: Some(String::new()),
+                    output: vec!["a".into(), "b".into()],
+                },
+                Step {
+                    command: "fshalt".into(),
+                    status: None,
+                    output: Vec::new(),
+                },
+            ],
+            phase: Phase::Halted,
+            panic: None,
+            ready: true,
+            timed_out: false,
+            seconds: 15943.4,
+            passed: true,
+        };
+        let path = std::env::temp_dir().join(format!("r9-steps-{}.json", std::process::id()));
+        write_steps(&path, &o).unwrap();
+        let back = read_steps(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(back, o);
+    }
     use super::*;
 
     fn row(qemu: &str, disk: &str) -> Row {
