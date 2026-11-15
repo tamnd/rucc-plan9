@@ -20,7 +20,8 @@
 # objtype=$o mk install in /sys/src, the cross build of the tree (plan 09.1). An objtype that
 # already has /$o/bin/paqfs is not built again, so a kept image can go on after a stop.
 # After each objtype, objtype=$o mk clean removes its object files. hjfs then uses those blocks
-# again for the next objtype, and the overlay of the image on the host stays small.
+# again for the next objtype, and the overlay of the image on the host stays small. The target
+# cross.$o, for example cross.arm64, does the same for the objtype $o only.
 #
 # The target boot is not a target of mk either. mk kernels runs mk install in each directory in
 # ARCH of /sys/src/boot, but most of those mkfiles have no install rule, so mk kernels stops at
@@ -35,7 +36,7 @@
 # builds 99h. Because the bind has -c, each file that mk makes goes to $r9/9h/$o and not to the
 # tree. A bind -a with no -c gives a union where a create fails. The kernels go to
 # /tmp/r9/9h/$o. An objtype other than that of the guest needs /$o/bin/paqfs, which the target
-# cross makes. The targets 9h.arm64 and 9h.amd64 build one kernel only.
+# cross or cross.$o makes. The targets 9h.arm64 and 9h.amd64 build one kernel only.
 #
 # With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
 # machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
@@ -63,9 +64,13 @@ bind -b /tmp/r9/shim /bin
 cd $dir || exit cd
 for(t in $targets){
 	switch($t){
-	case cross
-		kernels=`{sed -n '/^ARCH=/,/^$/p' /sys/src/9/mkfile | grep -v '^ARCH|#|^$' | tr -d '\\	 '}
-		os=`{{for(k in $kernels) grep '^objtype=' /sys/src/9/$k/mkfile} | sed 's/objtype=//' | sort -u}
+	case cross cross.*
+		if(~ $t cross.*)
+			os=`{echo $t | sed 's/^cross\.//'}
+		if not {
+			kernels=`{sed -n '/^ARCH=/,/^$/p' /sys/src/9/mkfile | grep -v '^ARCH|#|^$' | tr -d '\\	 '}
+			os=`{{for(k in $kernels) grep '^objtype=' /sys/src/9/$k/mkfile} | sed 's/objtype=//' | sort -u}
+		}
 		for(o in $os){
 			if(! ~ $o $objtype && ! test -x /$o/bin/paqfs){
 				echo r9-build: cross $o
@@ -108,7 +113,7 @@ for(t in $targets){
 				exit 9h
 			}
 			if(! ~ $o $objtype && ! test -x /$o/bin/paqfs){
-				echo r9-build: 9h/$o needs /$o/bin/paqfs, which the target cross makes
+				echo r9-build: 9h/$o needs /$o/bin/paqfs, which the target cross.$o makes
 				exit 9h
 			}
 			echo r9-build: 9h/$o

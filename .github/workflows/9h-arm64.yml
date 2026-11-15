@@ -1,0 +1,74 @@
+# The 9h kernel for arm64 (plan 10.4 and 10.8), built on the amd64 runners. The hosted runners
+# have KVM for amd64 only, so the job does not boot the kernel. r9 9h boot on the M4 boots it on
+# HVF from the artifact.
+#
+# The job makes the g-base image of the pinned tree, as g-base.yml does. r9 build --side G with
+# the targets cross.arm64 and 9h.arm64 then builds the arm64 user space and the 9h kernel in the
+# amd64 guest. The boot file system of the kernel has arm64 programs, so the kernel needs the
+# cross build first. The console log, the build log and the kernel go to an artifact.
+
+name: 9h arm64
+
+on:
+  pull_request:
+    paths:
+      - 9h/arm64/**
+      - guest/r9-build
+      - crates/r9/src/build.rs
+      - .github/workflows/9h-arm64.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  R9_CACHE: /mnt/r9
+
+jobs:
+  build:
+    name: 9h build arm64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: Swatinem/rust-cache@v2.9.2
+      - name: let the runner user open /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -qy --no-install-recommends qemu-utils qemu-system-x86
+          sudo mkdir -p /mnt/r9 && sudo chown "$USER" /mnt/r9
+      - name: cargo build
+        run: cargo build --release --locked -p r9
+      - uses: actions/cache@v6.1.0
+        with:
+          path: /mnt/r9/images
+          key: r9-images-amd64-${{ hashFiles('pins.toml') }}
+          restore-keys: r9-images-amd64-
+      - name: r9 fetch
+        run: target/release/r9 fetch --row amd64
+      - name: r9 image build
+        run: target/release/r9 image build --row amd64 --accel kvm --out "$RUNNER_TEMP/image"
+      - name: r9 build, the targets cross.arm64 and 9h.arm64
+        run: target/release/r9 build --side G --row amd64 --accel kvm --targets 'cross.arm64 9h.arm64' --out "$RUNNER_TEMP/k"
+      - name: gather the results
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/out/k"
+          cp "$RUNNER_TEMP/k"/*.toml "$RUNNER_TEMP/k"/console.log "$RUNNER_TEMP/out/k/" || true
+          cp "$RUNNER_TEMP/k/collected/mk.log" "$RUNNER_TEMP/out/k/" || true
+          cp -r "$RUNNER_TEMP/k/collected/9h" "$RUNNER_TEMP/out/k/" || true
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: 9h-arm64
+          path: ${{ runner.temp }}/out
+          retention-days: 30
