@@ -51,6 +51,16 @@ enum Cpu {
     On,
 }
 
+/// What a vCPU does after a hypercall.
+enum Next {
+    /// Go on.
+    Run,
+    /// End the session.
+    End(Stop),
+    /// Stop this vCPU (`CPU_OFF`).
+    CpuOff,
+}
+
 /// One processor: its state, and the ID of its vCPU while the vCPU exists.
 #[derive(Debug, Clone, Copy)]
 struct Slot {
@@ -584,6 +594,29 @@ impl Vcpu {
         );
     }
 
+    /// Answer a hypercall: PSCI here, and the other calls on the bus.
+    fn hypercall(&self, m: &Arc<Machine>, x: &[u64; 6]) -> Result<Next, String> {
+        let a = psci::call(x);
+        if trace() && a.is_some() {
+            eprintln!("9h: vcpu {} psci {:#x?}: {a:?}", self.id, &x[..4]);
+        }
+        let v = match a {
+            Some(Action::Return(v)) => v,
+            Some(Action::Off) => return Ok(Next::End(Stop::Off)),
+            Some(Action::Reset) => return Ok(Next::End(Stop::Reset)),
+            Some(Action::CpuOff) => return Ok(Next::CpuOff),
+            Some(Action::CpuOn {
+                target,
+                entry,
+                context,
+            }) => m.cpu_on(target, entry, context),
+            Some(Action::AffinityInfo { target }) => m.affinity_info(target),
+            None => m.with_bus(|b| b.call(x, &m.ram)),
+        };
+        self.set_reg(ffi::HV_REG_X0, v)?;
+        Ok(Next::Run)
+    }
+
     /// Run the vCPU until the session ends, which gives `Some`, or until the vCPU calls `CPU_OFF`
     /// or another vCPU ends the session, which give `None`.
     fn run_loop(&mut self, m: &Arc<Machine>) -> Result<Option<Stop>, String> {
@@ -617,24 +650,10 @@ impl Vcpu {
                     m.with_bus(|b| b.write(pa, size, value))?;
                     self.advance()?;
                 }
-                Exit::Hypercall(x) => match psci::call(&x).inspect(|a| {
-                    if trace() {
-                        eprintln!("9h: vcpu {} psci {:#x?}: {a:?}", self.id, &x[..4]);
-                    }
-                }) {
-                    Some(Action::Return(v)) => self.set_reg(ffi::HV_REG_X0, v)?,
-                    Some(Action::Off) => return Ok(Some(Stop::Off)),
-                    Some(Action::Reset) => return Ok(Some(Stop::Reset)),
-                    Some(Action::CpuOff) => return Ok(None),
-                    Some(Action::CpuOn {
-                        target,
-                        entry,
-                        context,
-                    }) => self.set_reg(ffi::HV_REG_X0, m.cpu_on(target, entry, context))?,
-                    Some(Action::AffinityInfo { target }) => {
-                        self.set_reg(ffi::HV_REG_X0, m.affinity_info(target))?;
-                    }
-                    None => self.set_reg(ffi::HV_REG_X0, psci::NOT_SUPPORTED)?,
+                Exit::Hypercall(x) => match self.hypercall(m, &x)? {
+                    Next::Run => {}
+                    Next::End(stop) => return Ok(Some(stop)),
+                    Next::CpuOff => return Ok(None),
                 },
                 Exit::SysReg { read, rt, iss } => {
                     if !self.sysregs.contains(&iss) {
