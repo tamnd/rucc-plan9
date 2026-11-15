@@ -1,0 +1,13 @@
+[package]
+name = "h9-vm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+libc.workspace = true
+
+[lints]
+workspace = true
