@@ -2,16 +2,32 @@
 # r9-build: the build command of a guest (plan 05.3). It changes the namespace and never a file
 # of the tree. A copy of r9-cc for each compiler goes in /tmp/r9/shim, which is bound before
 # /bin. So mk and pcc reach the shim when they run 6c or /bin/6c, and r9-cc runs the real
-# compiler from /$objtype/bin. An install to /$objtype/bin writes the real file, and the calls
+# compiler from /$cputype/bin. An install to /$cputype/bin writes the real file, and the calls
 # after it use the new compiler, as in a build with no shim.
 #
-# Do not bind r9-cc over /$objtype/bin/6c. A bind over a file applies everywhere that file is
+# Do not bind r9-cc over /$cputype/bin/6c. A bind over a file applies everywhere that file is
 # reached, so the install of cmd/6c would write the new 6c over r9-cc.
 #
 # usage: r9-build [dir [target ...]]
 # The default is mk install in /sys/src. Each target is a separate mk, in the order given, and
 # the first one that fails stops the build. Thus clean install builds each file again. The
 # records go to /tmp/r9/compile.jsonl.
+#
+# The target cross is not a target of mk. mk kernels builds a kernel for each directory in ARCH
+# of /sys/src/9/mkfile, and each kernel mkfile sets its own objtype. The boot file system of a
+# kernel has programs of its objtype, such as /$objtype/bin/paqfs, and a guest has only the
+# programs of its own objtype. For each other objtype of the kernels, cross runs
+# objtype=$o mk install in /sys/src, the cross build of the tree (plan 09.1). An objtype that
+# already has /$o/bin/paqfs is not built again, so a kept image can go on after a stop.
+# After each objtype, objtype=$o mk clean removes its object files. hjfs then uses those blocks
+# again for the next objtype, and the overlay of the image on the host stays small.
+#
+# The target boot is not a target of mk either. mk kernels runs mk install in each directory in
+# ARCH of /sys/src/boot, but most of those mkfiles have no install rule, so mk kernels stops at
+# boot/bcm on each 9front tree. For each directory, boot runs mk install when the mkfile has an
+# install rule, and mk all when it has none. A directory whose mkfile gets its files with hget
+# is not built, because a build does not use the network. As in mk kernels, mk clean runs before
+# and after. Thus mk kernels is the targets clean install clean in /sys/src/9, then boot.
 #
 # With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
 # machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
@@ -38,9 +54,44 @@ for(c in 6c 7c 8c 5c vc 6a 7a 8a 5a va)
 bind -b /tmp/r9/shim /bin
 cd $dir || exit cd
 for(t in $targets){
-	mk $t
-	s=$status
-	if(! ~ $s '')
-		exit $s
+	switch($t){
+	case cross
+		kernels=`{sed -n '/^ARCH=/,/^$/p' /sys/src/9/mkfile | grep -v '^ARCH|#|^$' | tr -d '\\	 '}
+		os=`{{for(k in $kernels) grep '^objtype=' /sys/src/9/$k/mkfile} | sed 's/objtype=//' | sort -u}
+		for(o in $os){
+			if(! ~ $o $objtype && ! test -x /$o/bin/paqfs){
+				echo r9-build: cross $o
+				@{cd /sys/src && objtype=$o mk install}
+				s=$status
+				if(! ~ $s '')
+					exit $s
+				@{cd /sys/src && objtype=$o mk clean} > /dev/null
+			}
+		}
+	case boot
+		b=/sys/src/boot
+		dirs=`{sed -n '/^ARCH=/,/^$/p' $b/mkfile | grep -v '^ARCH|#|^$' | tr -d '\\	 '}
+		for(i in $dirs){
+			m=()
+			if(grep -s '^install[^:]*:' $b/$i/mkfile)
+				m=install
+			if not if(! grep -s hget $b/$i/mkfile)
+				m=all
+			if(~ $#m 0)
+				echo r9-build: boot/$i gets its files with hget, not built
+			if not {
+				echo r9-build: boot/$i mk $m
+				@{cd $b/$i && mk clean && mk $m && mk clean}
+				s=$status
+				if(! ~ $s '')
+					exit $s
+			}
+		}
+	case *
+		mk $t
+		s=$status
+		if(! ~ $s '')
+			exit $s
+	}
 }
 exit ''
