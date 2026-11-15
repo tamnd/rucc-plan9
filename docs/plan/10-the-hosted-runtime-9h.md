@@ -31,8 +31,8 @@ What it gains:
 | File | Purpose |
 |---|---|
 | `9h` | the kernel configuration (the `qemu` and `pc64` files are the models) |
-| `h9.h`, `h9.s` | the hypercall interface (10.5): numbers, structures, and the `HVC #0` / `OUT` stub |
-| `h9cons.c` | console output and input |
+| `h9.h`, `h9.c` (arm64), `h9.s` (amd64) | the hypercall interface (10.5): numbers, structures, and the call. On arm64, `h9call` in `h9.c` uses `hvccall` of the tree's `l.s`, so arm64 needs no `h9.s`. `h9.c` also has empty `pciintrenable` and `pciintrdisable`, which `gic.c` calls, because the configuration has no PCI driver |
+| `uarth9.c` | console output and input, as a uart of port's `devuart`. `mkdevc` finds a uart driver by the prefix `uart`, and `kbdfs` reads the console as `/dev/eia0`, as on the `qemu` kernel |
 | `h9screen.c` | `screen.c` for `devdraw`: framebuffer, `flushmemscreen`, cursor, resize |
 | `h9mouse.c` | absolute mouse through port's `absmousetrack` |
 | `h9kbd.c` | `#b/kbd`: key-down and key-up rune events, the input `kbdfs` prefers when it exists (11.4) |
@@ -131,6 +131,17 @@ Intel Macs (HVF on x86) could run the same machine with `hv_vm_create` and the x
 | `#Z/hostfs` | a 9P2000 byte channel in two rings | data | the monitor's 9P server over a host directory |
 | `#Z/ctl` | `ctl` | host request | window title, quit, scale (11) |
 | clock | none | none | the generic timer or the TSC, and an RTC value in the device tree or ACPI |
+
+**The numbers.** The first calls are those of the console. `9h/arm64/h9.h` and `h9-dev/src/h9.rs` have the same numbers:
+
+| Number | Name | Arguments | Result |
+|---|---|---|---|
+| `0xC6000000` | `H9version` | none | the revision of the interface, 1 |
+| `0xC6000001` | `H9consputc` | the byte | 0 |
+| `0xC6000002` | `H9consputs` | the physical address and the count, at most 64 KiB | the count written, or -2 for an address that is not in RAM |
+| `0xC6000003` | `H9consgetc` | none | the next input byte, or -1 |
+
+A number that no device has gives -1, and the monitor logs it once. The console input interrupt is SPI 16 (INTID 48). It is a level interrupt, and it stays high while an input byte waits.
 
 **The host's files.** The monitor serves a host directory as 9P2000 on the `#Z/hostfs` channel. The boot script mounts it on `/mnt/term`, as `drawterm` does. Host names are mapped as `drawterm` maps them:
 - names that differ only by case on a case-insensitive host are exposed as they are, and refused on create;

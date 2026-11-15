@@ -4,25 +4,28 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use h9_dev::Bus;
+use h9_dev::h9;
+use h9_dev::h9cons::H9Cons;
 use h9_dev::pl011::Pl011;
 use h9_dev::pl031::Pl031;
 use h9_vm::Ram;
 use h9_vm::fdt::Fdt;
 
 const USAGE: &str = "usage:
-  9h run --kernel FILE [--mem MIB] [--cpus N] [--bootargs TEXT] [--ini FILE] [--strict]
-         [--timeout SECS]
+  9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
+         [--ini FILE] [--strict] [--timeout SECS]
       Run an arm64 kernel of the tree on the hypervisor of the host. FILE is a 7l a.out or the
       U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
       machine: RAM at 0x40000000 (--mem MiB, 1024 by default), the device tree at the start of
-      the RAM, and the GICv3 of the hypervisor. --cpus gives the number of processors, 1 to 16,
-      and 1 by default. The guest starts processors 1 and up with PSCI CPU_ON. --bootargs goes
-      in /chosen/bootargs of the device tree, where the kernel reads it in place of the
-      plan9.ini. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. Until the
-      9h kernel exists, the monitor has a PL011 console on the terminal and a PL031 clock, so the
-      qemu kernel of the tree can run. An access to an address with no device reads as all ones,
-      and --strict makes it stop the session. --timeout ends the session after SECS seconds with
-      exit status 2.";
+      the RAM, and the GICv3 of the hypervisor. --machine 9h, the default, is the machine of
+      the 9h kernel: its console is a hypercall. --machine virt has a PL011 console in place of
+      the hypercall console, so that the qemu kernel of the tree can run. Both have a PL031
+      clock. --cpus gives the number of processors, 1 to 16, and 1 by default. The guest starts
+      processors 1 and up with PSCI CPU_ON. --bootargs goes in /chosen/bootargs of the device
+      tree, where the kernel reads it in place of the plan9.ini. --ini FILE is the plan9.ini,
+      which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
+      as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
+      seconds with exit status 2.";
 
 const RAM_BASE: u64 = 0x4000_0000;
 const DTB: u64 = RAM_BASE;
@@ -35,9 +38,18 @@ const RTC: u64 = 0x0901_0000;
 /// but the kernel of the tree has MAXMACH 16 (`mem.h` of arm64).
 const MAXCPU: u32 = 16;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Machine {
+    /// The machine of the 9h kernel.
+    H9,
+    /// The bring-up machine for the `qemu` kernel of the tree, with a PL011.
+    Virt,
+}
+
 #[derive(Debug)]
 struct Options {
     kernel: String,
+    machine: Machine,
     mem: u64,
     cpus: u32,
     bootargs: String,
@@ -49,6 +61,7 @@ struct Options {
 fn parse(args: &[String]) -> Result<Options, String> {
     let mut o = Options {
         kernel: String::new(),
+        machine: Machine::H9,
         mem: 1024,
         cpus: 1,
         bootargs: String::new(),
@@ -70,6 +83,13 @@ fn parse(args: &[String]) -> Result<Options, String> {
         };
         match k {
             "--kernel" => o.kernel = val()?,
+            "--machine" => {
+                o.machine = match val()?.as_str() {
+                    "9h" => Machine::H9,
+                    "virt" => Machine::Virt,
+                    m => return Err(format!("--machine {m}: the machines are 9h and virt")),
+                };
+            }
             "--mem" => o.mem = val()?.parse().map_err(|_| "--mem needs a number of MiB")?,
             "--cpus" => o.cpus = val()?.parse().map_err(|_| "--cpus needs a number")?,
             "--bootargs" => o.bootargs = val()?,
@@ -143,11 +163,13 @@ fn devtree(o: &Options) -> Vec<u8> {
     t.string("compatible", "arm,armv8-timer");
     t.cells("interrupts", &[1, 13, 4, 1, 14, 4, 1, 11, 4, 1, 10, 4]);
     t.end();
-    t.begin(&format!("pl011@{UART:x}"));
-    t.string("compatible", "arm,pl011");
-    t.cells64("reg", &[UART, 0x1000]);
-    t.cells("interrupts", &[0, UART_SPI - 32, 4]);
-    t.end();
+    if o.machine == Machine::Virt {
+        t.begin(&format!("pl011@{UART:x}"));
+        t.string("compatible", "arm,pl011");
+        t.cells64("reg", &[UART, 0x1000]);
+        t.cells("interrupts", &[0, UART_SPI - 32, 4]);
+        t.end();
+    }
     t.begin(&format!("pl031@{RTC:x}"));
     t.string("compatible", "arm,pl031");
     t.cells64("reg", &[RTC, 0x1000]);
@@ -193,11 +215,17 @@ fn run(o: &Options) -> Result<ExitCode, String> {
     }
     let mut bus = Bus::new();
     bus.strict = o.strict;
-    bus.add(
-        UART,
-        0x1000,
-        Box::new(Pl011::new(UART_SPI, Box::new(std::io::stdout()))),
-    );
+    match o.machine {
+        Machine::Virt => bus.add(
+            UART,
+            0x1000,
+            Box::new(Pl011::new(UART_SPI, Box::new(std::io::stdout()))),
+        ),
+        Machine::H9 => bus.add_hyper(Box::new(H9Cons::new(
+            h9::CONS_SPI,
+            Box::new(std::io::stdout()),
+        ))),
+    }
     bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     backend::run(ram, bus, o.cpus as usize, image.entry, DTB)
 }
@@ -206,6 +234,7 @@ fn run(o: &Options) -> Result<ExitCode, String> {
 mod backend {
     use super::UART;
     use h9_dev::Bus;
+    use h9_dev::h9cons::H9Cons;
     use h9_dev::pl011::Pl011;
     use h9_hvf::{Stop, Vm};
     use h9_vm::Ram;
@@ -229,6 +258,8 @@ mod backend {
                 m.with_bus(|bus| {
                     if let Some(u) = bus.device::<Pl011>(UART) {
                         b[..n].iter().for_each(|c| u.push(*c));
+                    } else if let Some(c) = bus.hyper_device::<H9Cons>() {
+                        b[..n].iter().for_each(|x| c.push(*x));
                     }
                 });
             }
@@ -325,6 +356,10 @@ mod tests {
         let t4 = devtree(&o4);
         assert!(t4.windows(6).any(|w| w == b"cpu@3\0"));
         assert!(has(b"console=0\0"));
+        assert!(!has(b"pl011@9000000\0"), "the 9h machine has no PL011");
+        let virt = parse(&args("--kernel k --machine virt")).unwrap();
+        assert!(devtree(&virt).windows(14).any(|w| w == b"pl011@9000000\0"));
+        assert!(parse(&args("--kernel k --machine pc")).is_err());
         let o = parse(&args("--kernel k")).unwrap();
         assert!(
             !devtree(&o).windows(9).any(|w| w == b"bootargs\0"),

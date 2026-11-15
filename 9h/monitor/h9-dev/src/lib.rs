@@ -7,11 +7,15 @@
 //! no device has reads as all ones and is logged, as an empty slot on a real bus (plan 10.4).
 //! With `strict`, such an access stops the session instead (plan 10.10).
 
+pub mod h9;
+pub mod h9cons;
 pub mod pl011;
 pub mod pl031;
 pub mod psci;
 
 use std::collections::BTreeMap;
+
+use h9_vm::Ram;
 
 /// A device that the guest reads and writes as memory.
 pub trait Device: Send + std::any::Any {
@@ -23,6 +27,12 @@ pub trait Device: Send + std::any::Any {
     fn write(&mut self, off: u64, size: u8, value: u64);
     /// The shared peripheral interrupt of the device and its level now, if it has one.
     fn irq(&self) -> Option<(u32, bool)> {
+        None
+    }
+    /// A hypercall with the registers X0 to X5. The result goes in X0. None when the number is
+    /// not one of this device.
+    fn call(&mut self, x: &[u64; 6], ram: &Ram) -> Option<u64> {
+        let _ = (x, ram);
         None
     }
 }
@@ -37,9 +47,12 @@ struct Slot {
 #[derive(Default)]
 pub struct Bus {
     slots: Vec<Slot>,
+    /// The devices that have hypercalls and no addresses.
+    hyper: Vec<Box<dyn Device>>,
     /// Stop at an access that no device has, instead of reading all ones.
     pub strict: bool,
     unknown: BTreeMap<u64, u64>,
+    unknown_calls: Vec<u64>,
 }
 
 impl Bus {
@@ -59,6 +72,44 @@ impl Bus {
             dev.name()
         );
         self.slots.push(Slot { base, len, dev });
+    }
+
+    /// Add a device that the guest uses only through hypercalls.
+    pub fn add_hyper(&mut self, dev: Box<dyn Device>) {
+        self.hyper.push(dev);
+    }
+
+    /// The first device of type `T` that has only hypercalls.
+    pub fn hyper_device<T: Device + 'static>(&mut self) -> Option<&mut T> {
+        self.hyper.iter_mut().find_map(|d| {
+            let d: &mut dyn std::any::Any = d.as_mut();
+            d.downcast_mut::<T>()
+        })
+    }
+
+    /// A hypercall that is not PSCI. The answer is in X0: the result of the device whose call it
+    /// is, or `NOT_SUPPORTED` when no device has the number.
+    pub fn call(&mut self, x: &[u64; 6], ram: &Ram) -> u64 {
+        if x[0] as u32 == h9::VERSION {
+            return h9::REVISION;
+        }
+        let devs = self
+            .hyper
+            .iter_mut()
+            .chain(self.slots.iter_mut().map(|s| &mut s.dev));
+        for d in devs {
+            if let Some(v) = d.call(x, ram) {
+                return v;
+            }
+        }
+        if !self.unknown_calls.contains(&x[0]) {
+            self.unknown_calls.push(x[0]);
+            eprintln!(
+                "9h: the guest made the hypercall {:#x}, which no device has",
+                x[0]
+            );
+        }
+        h9::NOT_SUPPORTED
     }
 
     fn find(&mut self, pa: u64) -> Option<&mut Slot> {
@@ -114,7 +165,12 @@ impl Bus {
     /// The interrupt lines of the devices and their levels.
     #[must_use]
     pub fn irqs(&self) -> Vec<(u32, bool)> {
-        self.slots.iter().filter_map(|s| s.dev.irq()).collect()
+        self.slots
+            .iter()
+            .map(|s| &s.dev)
+            .chain(&self.hyper)
+            .filter_map(|d| d.irq())
+            .collect()
     }
 
     /// The addresses with no device that the guest used, and how many times.
