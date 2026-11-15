@@ -2,7 +2,8 @@
 
 use h9_vm::{Ram, multiboot};
 use kvm_bindings::{
-    KVM_MAX_CPUID_ENTRIES, KVM_PIT_SPEAKER_DUMMY, kvm_pit_config, kvm_regs, kvm_segment,
+    KVM_MAX_CPUID_ENTRIES, KVM_PIT_SPEAKER_DUMMY, Msrs, kvm_msr_entry, kvm_pit_config, kvm_regs,
+    kvm_segment,
 };
 use kvm_ioctls::{Kvm, VcpuFd, VmFd};
 
@@ -18,6 +19,13 @@ pub const RESET_PORT: u16 = 0xcf9;
 pub const RESET_CPU: u8 = 1 << 2;
 /// The three pages that KVM needs for the TSS of a real-mode guest on Intel, below the BIOS.
 const TSS: usize = 0xfffb_d000;
+/// The MSR of the default memory type of the MTRRs.
+const MTRR_DEF_TYPE: u32 = 0x2ff;
+/// The MTRRs on (bit 11), and the default type write-back (6). A BIOS sets the MTRRs, but the
+/// machine has no BIOS, and at reset the MTRRs are off, which makes all memory uncacheable. The
+/// kernel then removes all RAM from its memory map in `mtrrexclude` of `pc/memory.c`, because RAM
+/// must be write-back, and `rampage` panics.
+pub const MTRR_DEF_WRITEBACK: u64 = 1 << 11 | 6;
 
 /// Make the devices of KVM before the RAM is mapped: the TSS pages, the interrupt controllers and
 /// the timer.
@@ -57,6 +65,18 @@ pub fn vcpus(kvm: &Kvm, vm: &VmFd, ncpu: usize) -> Result<Vec<VcpuFd>, String> {
             }
         }
         cpu.set_cpuid2(&id).map_err(kvm_error("KVM_SET_CPUID2"))?;
+        let msrs = Msrs::from_entries(&[kvm_msr_entry {
+            index: MTRR_DEF_TYPE,
+            data: MTRR_DEF_WRITEBACK,
+            ..Default::default()
+        }])
+        .map_err(|e| format!("the MSRs of vCPU {n}: {e:?}"))?;
+        let set = cpu.set_msrs(&msrs).map_err(kvm_error("KVM_SET_MSRS"))?;
+        if set != 1 {
+            return Err(format!(
+                "KVM_SET_MSRS: vCPU {n} did not take the MTRR default type"
+            ));
+        }
         vcpus.push(cpu);
     }
     Ok(vcpus)

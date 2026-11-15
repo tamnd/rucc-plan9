@@ -1,4 +1,4 @@
-//! The console of the 9h kernel (`uarth9.c`, plan 10.5). Output is a hypercall. The bytes that the
+//! The console of the 9h kernel (`uarth9.c` and `uarti8250h9.c`, plan 10.5). Output is a hypercall. The bytes that the
 //! host types wait here, and the interrupt of the device is high while one waits.
 
 use std::collections::VecDeque;

@@ -4,7 +4,9 @@
  * /dev/eia0. Output is a hypercall. Input comes with ISA
  * interrupt 5, which stays high while bytes wait. The file
  * is that of 9h/arm64, but i8250console of pc64 main.c
- * makes it the console.
+ * makes it the console. The name has i8250 in it, because
+ * mkdevc writes an empty i8250console when no physuart
+ * name has i8250 in it.
  * The structure is that of uartqemu.c.
  */
 #include "u.h"
@@ -16,13 +18,13 @@
 #include "io.h"
 #include "h9.h"
 
-extern PhysUart h9physuart;
+extern PhysUart i8250h9physuart;
 
 static Uart h9uart = {
 	.name	= "uart0",
 	.freq	= 1,
 	.baud	= 115200,
-	.phys	= &h9physuart,
+	.phys	= &i8250h9physuart,
 };
 
 static Uart*
@@ -137,7 +139,7 @@ i8250console(void)
 	uartctl(consuart, "l8 pn s1");
 }
 
-PhysUart h9physuart = {
+PhysUart i8250h9physuart = {
 	.name		= "h9",
 	.pnp		= pnp,
 	.enable		= enable,

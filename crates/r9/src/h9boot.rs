@@ -49,6 +49,9 @@ pub struct Request {
     pub strict: bool,
 }
 
+/// The bootargs of the kernel: the console is the uart of 9h, which is `/dev/eia0`.
+pub const CONSOLE: &str = "console=0";
+
 /// The answer to the `bootargs` prompt when none is given: the file system of the root disk.
 pub const BOOTARGS: &str = "local!/dev/sdH0/fs";
 
@@ -88,7 +91,9 @@ fn copy_root(root: &Path, copy: &Path) -> Result<(), String> {
 }
 
 /// The command of the monitor. `disks` are the raw tar disks, after the root disk and `disk`.
-/// The snarf buffer is in the monitor, so a boot does not change the host clipboard.
+/// The snarf buffer is in the monitor, so a boot does not change the host clipboard. The kernel
+/// gets `console=0` as its bootargs, because `bootrc` starts `kbdfs` on `/dev/eia$console`, and
+/// with no `console` the console has no input.
 #[must_use]
 pub fn command(req: &Request, disks: &[PathBuf]) -> Vec<String> {
     let mut c = vec![
@@ -103,6 +108,8 @@ pub fn command(req: &Request, disks: &[PathBuf]) -> Vec<String> {
         "--snarf".into(),
         "memory".into(),
         "--headless".into(),
+        "--bootargs".into(),
+        CONSOLE.into(),
         "--disk".into(),
         root_copy(&req.work).display().to_string(),
     ];
@@ -297,7 +304,7 @@ mod tests {
         assert_eq!(
             c,
             "/b/9h run --kernel /k/99h.u --cpus 2 --mem 2048 --snarf memory --headless \
-             --disk /w/root.img --strict --disk /i/src.img,ro --disk /w/in.tar --hostfs /home/glenda,ro"
+             --bootargs console=0 --disk /w/root.img --strict --disk /i/src.img,ro --disk /w/in.tar --hostfs /home/glenda,ro"
         );
     }
 

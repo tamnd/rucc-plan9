@@ -46,7 +46,7 @@ mod pc;
 #[cfg(target_arch = "x86_64")]
 use pc as arch;
 #[cfg(target_arch = "x86_64")]
-pub use pc::{HYPERCALL_PORT, RESET_PORT};
+pub use pc::{HYPERCALL_PORT, MTRR_DEF_WRITEBACK, RESET_PORT};
 
 #[cfg(target_arch = "aarch64")]
 mod virt;
