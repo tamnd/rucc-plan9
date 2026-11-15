@@ -297,11 +297,12 @@ usage:
       as the g-base image, and write its summary to baselines/.
   r9 9h verify --tree DIR [--records FILE] [--row OBJTYPE]
       Check that the 9h kernel uses the pinned tree with no change (plan 10.2). DIR is the root
-      of the pinned tree on the host. No file in 9h/OBJTYPE may have the name of a file in port
-      or in the arch directory, and no device of the tree may use #Z. With --records, FILE is
-      the compile.jsonl of the build. Each source in /sys/src/9 must then be a file of the tree
-      with the hash of the pin, a file of 9h/OBJTYPE with its hash, or a $CONF.c that the build
-      made. Each C file of 9h/OBJTYPE must be in the records. OBJTYPE is arm64 by default.
+      of the pinned tree on the host. No file in 9h/OBJTYPE may have the name of a file in port,
+      in the arch directory, or in pc for amd64, and no device of the tree may use #Z. With
+      --records, FILE is the compile.jsonl of the build. Each source in /sys/src/9 must then be
+      a file of the tree with the hash of the pin, a file of 9h/OBJTYPE with its hash, or a file
+      that the build made, as $CONF.c is. Each C file of 9h/OBJTYPE must be in the records.
+      OBJTYPE is arm64 by default.
   r9 9h boot --kernel FILE --root IMAGE [--disk FILE] [--hostfs DIR] [--cpus N] [--mem MIB]
           [--bootargs TEXT] [--run FILE] [--in DIR|TAR] [--collect MIB] [--timeout SECS]
           [--out DIR] [--monitor PATH] [--keep] [--strict]

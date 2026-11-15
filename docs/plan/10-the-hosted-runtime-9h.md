@@ -31,8 +31,8 @@ What it gains:
 | File | Purpose |
 |---|---|
 | `9h` | the kernel configuration (the `qemu` and `pc64` files are the models) |
-| `h9.h`, `h9.c` (arm64), `h9.s` (amd64) | the hypercall interface (10.5): numbers, structures, and the call. On arm64, `h9call` in `h9.c` uses `hvccall` of the tree's `l.s`, so arm64 needs no `h9.s`. `h9.c` also has empty `pciintrenable` and `pciintrdisable`, which `gic.c` calls, because the configuration has no PCI driver |
-| `uarth9.c` | console output and input, as a uart of port's `devuart`. `mkdevc` finds a uart driver by the prefix `uart`, and `kbdfs` reads the console as `/dev/eia0`, as on the `qemu` kernel |
+| `h9.h`, `h9.c`, `h9l.s` (amd64) | the hypercall interface (10.5): numbers, structures, and the call. On arm64, `h9call` in `h9.c` uses `hvccall` of the tree's `l.s`, so arm64 needs no assembler file. `h9.c` also has empty `pciintrenable` and `pciintrdisable`, which `gic.c` calls, because the configuration has no PCI driver. On amd64, `h9call` is in `h9l.s`, because `h9.s` and `h9.c` would make the same object. The amd64 `h9.c` has the three functions of the screen files that pc64 `main.c` and `pc/bootargs.c` call: `bootscreeninit`, `rgbmask2chan` and `vesabootscreenconf` |
+| `uarth9.c` | console output and input, as a uart of port's `devuart`. `mkdevc` finds a uart driver by the prefix `uart`, and `kbdfs` reads the console as `/dev/eia0`, as on the `qemu` kernel. On arm64, `uartconsinit` makes it the console. On amd64, pc64 `main.c` calls `i8250console`, so the amd64 file has that name for the same function, and the configuration has no `uarti8250` |
 | `h9screen.c` | `screen.c` for `devdraw`: framebuffer, `flushmemscreen`, cursor, resize |
 | `h9mouse.c` | absolute mouse through port's `absmousetrack` |
 | `h9kbd.c` | `#b/kbd`: key-down and key-up rune events, the input `kbdfs` prefers when it exists (11.4) |
@@ -47,12 +47,14 @@ The files are about 2,000 lines on each architecture. They use only interfaces p
 ```rc
 cd /sys/src/9/arm64 && bind -a /usr/glenda/r9/9h/arm64 . && mk 'CONF=9h'
 ```
-The union makes the new files visible beside the tree's arm64 files. The tree's own mkfile builds the kernel: `CONF=9h` selects the configuration, `../port/mkdevc` generates `9h.c`, and the same `OBJ` list builds `l.s`, `mmu.c`, `trap.c`, `fpu.c`, `clock.c`, `gic.c`, `main.c` and the rest unchanged. On amd64, the same happens in `/sys/src/9/pc64`, with pc64's `l.s`, `mmu.c`, `trap.c`, `apic.c`, `archacpi.c` and `i8253.c`. The configuration leaves out every PCI, VGA, USB and i8042 driver. The new files come in as `link` and `misc` entries.
+The union makes the new files visible beside the tree's arm64 files. The tree's own mkfile builds the kernel: `CONF=9h` selects the configuration, `../port/mkdevc` generates `9h.c`, and the same `OBJ` list builds `l.s`, `mmu.c`, `trap.c`, `fpu.c`, `clock.c`, `gic.c`, `main.c` and the rest unchanged. On amd64, the same happens in `/sys/src/9/pc64`, with pc64's `l.s`, `mmu.c`, `trap.c`, `apic.c`, `archacpi.c` and `i8253.c`, and the files of `pc/` that the pc64 mkfile compiles by name. The configuration leaves out every PCI device driver, and the VGA, USB, audio and keyboard devices. It keeps `pcipc.c`, which finds no PCI bus, and `devkbd.c`, because `archgeneric.c` calls its `i8042reset`. The new files come in as `link` and `misc` entries.
 
 **Unmodified.** `r9 9h verify` reads the R build's `compile.jsonl` for the `9h` kernel and checks three things:
 - every unit's source path is in the tree or in `rucc-plan9/9h/`;
 - every tree source has the pin's hash;
-- nothing in `9h/` has the name of a tree file in `port/` or the arch directory, so a union cannot shadow one.
+- nothing in `9h/` has the name of a tree file in `port/`, the arch directory, or `pc/` for amd64, so a union cannot shadow one.
+
+The build also reads files that it makes: `$CONF.c`, `errstr.h`, the `.i` files, and on amd64 the headers that the pc64 mkfile copies from `pc/`. A copied header must have the hash of the pin's file in `pc/`.
 
 The `9h` kernel is built by R and by G, and both run on the same monitor. So the GUI results have the same 2x2 as boot (12.7): R/H means R's binaries on R's `9h` kernel.
 

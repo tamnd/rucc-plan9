@@ -2,13 +2,16 @@
 //!
 //! The kernel is built in the tree's arch directory, with the files of `9h/<arch>` bound after it.
 //! The check has two parts. The first part reads only the trees:
-//! - no file in `9h/<arch>` has the name of a file in `port/` or in the arch directory, so the
-//!   union cannot hide a tree file;
+//! - no file in `9h/<arch>` has the name of a file in `port/`, in the arch directory, or in `pc/`
+//!   for amd64, whose mkfile compiles the files of `pc/` by name, so the union cannot hide a tree
+//!   file;
 //! - no device of the tree uses the character `Z`, which `#Z` of the 9h kernel needs.
 //!
 //! The second part reads the `compile.jsonl` of the build, when it is given. Each source that
 //! the compiler read in `/sys/src/9` must be a file of the tree with the pin's hash, a file of
-//! `9h/<arch>` with its hash, or a file that the build makes (`$CONF.c`).
+//! `9h/<arch>` with its hash, or a file that the build makes (`$CONF.c`, `errstr.h`, the `.i`
+//! files). For amd64, a header that the mkfile copies from `pc/` must have the hash of the pin's
+//! file in `pc/`.
 
 use crate::census::Record;
 use sha2::{Digest, Sha256};
@@ -26,6 +29,29 @@ pub fn archdir(objtype: &str) -> &str {
         "amd64" => "pc64",
         o => o,
     }
+}
+
+/// The tree directories whose files the kernel of `objtype` compiles by name.
+#[must_use]
+pub fn treedirs(objtype: &str) -> Vec<&str> {
+    match archdir(objtype) {
+        "pc64" => vec!["port", "pc64", "pc"],
+        arch => vec!["port", arch],
+    }
+}
+
+/// The files that the mkfiles make in the arch directory, other than those named for a config.
+const MADE: [&str; 6] = ["cfs.h", "fs.h", "conf.h", "errstr.h", "init.h", "reboot.h"];
+
+/// A file that the build makes in the arch directory: a file of `MADE`, a `.i` file, or a file
+/// named for a config, as `9h.c`, `9h.rootc.c` and `boot9h.c` are.
+fn made(name: &str, confs: &BTreeSet<String>) -> bool {
+    let stem = name.split('.').next().unwrap_or("");
+    MADE.contains(&name)
+        || Path::new(name).extension().is_some_and(|e| e == "i")
+        || (stem != name
+            && (confs.contains(stem)
+                || stem.strip_prefix("boot").is_some_and(|c| confs.contains(c))))
 }
 
 /// The result of the check.
@@ -143,31 +169,23 @@ pub fn devchars(dir: &Path) -> BTreeMap<char, String> {
 pub fn check_trees(tree: &Path, h9: &Path, objtype: &str) -> Verdict {
     let mut v = Verdict::default();
     let k = tree.join("sys/src/9");
-    let arch = archdir(objtype);
     let ours = names(&h9.join(objtype));
     if ours.is_empty() {
         v.problems
             .push(format!("{} has no files", h9.join(objtype).display()));
     }
-    let port = names(&k.join("port"));
-    let theirs = names(&k.join(arch));
-    if port.is_empty() || theirs.is_empty() {
-        v.problems.push(format!(
-            "{} does not have port and {arch}, so it is not the root of a tree",
-            tree.display()
-        ));
-    }
-    for n in &ours {
-        if port.contains(n) {
-            v.problems
-                .push(format!("9h/{objtype}/{n} has the name of port/{n}"));
+    for d in treedirs(objtype) {
+        let theirs = names(&k.join(d));
+        if theirs.is_empty() {
+            v.problems.push(format!(
+                "{} does not have {d}, so it is not the root of a tree",
+                tree.display()
+            ));
         }
-        if theirs.contains(n) {
+        for n in ours.intersection(&theirs) {
             v.problems
-                .push(format!("9h/{objtype}/{n} has the name of {arch}/{n}"));
+                .push(format!("9h/{objtype}/{n} has the name of {d}/{n}"));
         }
-    }
-    for d in ["port", arch] {
         if let Some(f) = devchars(&k.join(d)).get(&DEVCHAR) {
             v.problems.push(format!(
                 "{d}/{f} has a device with the character {DEVCHAR}, which the 9h kernel needs"
@@ -225,15 +243,15 @@ pub fn check_records(v: &mut Verdict, records: &[Record], tree: &Path, h9: &Path
                 }
                 continue;
             }
-            let conf = name.strip_suffix(".c").unwrap_or("");
-            if dir == archpath
-                && (confs.contains(conf)
-                    || conf.strip_prefix("boot").is_some_and(|c| confs.contains(c)))
-            {
+            if dir == archpath && made(name, &confs) {
                 v.generated += 1;
                 continue;
             }
-            let host: PathBuf = tree.join(path.trim_start_matches('/'));
+            let mut host: PathBuf = tree.join(path.trim_start_matches('/'));
+            if dir == archpath && arch == "pc64" && !host.exists() {
+                // A header of PCHEADERS, which the pc64 mkfile copies from pc.
+                host = tree.join("sys/src/9/pc").join(name);
+            }
             match sha256(&host) {
                 Some(h) if h == f.sha256 => v.tree += 1,
                 Some(_) => v
@@ -262,7 +280,7 @@ pub fn check_records(v: &mut Verdict, records: &[Record], tree: &Path, h9: &Path
 
 #[cfg(test)]
 mod tests {
-    use super::{check_records, check_trees, clean, devchars};
+    use super::{check_records, check_trees, clean, devchars, made};
     use crate::census::{File, Record};
     use std::path::{Path, PathBuf};
 
@@ -279,6 +297,10 @@ mod tests {
     }
 
     fn record(dir: &str, file: &str, text: &str) -> Record {
+        record_for("arm64", dir, file, text)
+    }
+
+    fn record_for(objtype: &str, dir: &str, file: &str, text: &str) -> Record {
         use sha2::Digest;
         use std::fmt::Write as _;
         let h = sha2::Sha256::digest(text.as_bytes())
@@ -289,7 +311,7 @@ mod tests {
             });
         Record {
             cc: "7c".into(),
-            objtype: "arm64".into(),
+            objtype: objtype.into(),
             dir: dir.into(),
             argv: vec![file.into()],
             inputs: vec![File {
@@ -388,5 +410,77 @@ mod tests {
         assert_eq!(v.problems.len(), 2, "{:?}", v.problems);
         let _ = std::fs::remove_dir_all(&tree);
         let _ = std::fs::remove_dir_all(&h9);
+    }
+
+    #[test]
+    fn the_made_files_are_known() {
+        let confs = ["9h".to_string(), "mkfile".to_string()].into();
+        for n in [
+            "9h.c",
+            "9h.rootc.c",
+            "9h.root.s",
+            "boot9h.c",
+            "errstr.h",
+            "apbootstrap.i",
+        ] {
+            assert!(made(n, &confs), "{n}");
+        }
+        for n in ["main.c", "9h", "mp.h", "x9h.c"] {
+            assert!(!made(n, &confs), "{n}");
+        }
+    }
+
+    #[test]
+    fn amd64_builds_in_pc64_with_the_files_of_pc() {
+        let tree = dir("tree64");
+        let h9 = dir("h964");
+        put(&tree, "sys/src/9/port/proc.c", "proc");
+        put(&tree, "sys/src/9/pc64/main.c", "main");
+        put(&tree, "sys/src/9/pc64/pc64", "conf");
+        put(&tree, "sys/src/9/pc/cga.c", "cga");
+        put(&tree, "sys/src/9/pc/io.h", "io");
+        put(&h9, "amd64/9h", "conf");
+        put(&h9, "amd64/h9.c", "h9");
+        let v = check_trees(&tree, &h9, "amd64");
+        assert!(v.problems.is_empty(), "{:?}", v.problems);
+
+        let pc64 = "/sys/src/9/pc64";
+        let good = [
+            record_for("amd64", pc64, "../pc/cga.c", "cga"),
+            record_for("amd64", pc64, "main.c", "main"),
+            record_for("amd64", pc64, "io.h", "io"),
+            record_for("amd64", pc64, "apbootstrap.i", "made"),
+            record_for("amd64", pc64, "9h.rootc.c", "made"),
+            record_for("amd64", pc64, "h9.c", "h9"),
+        ];
+        let mut v = check_trees(&tree, &h9, "amd64");
+        check_records(&mut v, &good, &tree, &h9, "amd64");
+        assert!(v.problems.is_empty(), "{:?}", v.problems);
+        assert_eq!((v.tree, v.h9.len(), v.generated), (3, 1, 2));
+
+        let bad = [
+            record_for("amd64", pc64, "io.h", "changed"),
+            record_for("amd64", pc64, "h9.c", "h9"),
+        ];
+        let mut v = check_trees(&tree, &h9, "amd64");
+        check_records(&mut v, &bad, &tree, &h9, "amd64");
+        assert_eq!(v.problems.len(), 1, "{:?}", v.problems);
+
+        put(&h9, "amd64/cga.c", "mine");
+        let v = check_trees(&tree, &h9, "amd64");
+        assert_eq!(v.problems, ["9h/amd64/cga.c has the name of pc/cga.c"]);
+        let _ = std::fs::remove_dir_all(&tree);
+        let _ = std::fs::remove_dir_all(&h9);
+    }
+
+    /// The drivers that do not change with the machine are the same file in both directories.
+    #[test]
+    fn the_shared_drivers_are_the_same() {
+        let h9 = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../9h");
+        for f in ["sdh9.c", "devhost.c"] {
+            let a = std::fs::read(h9.join("arm64").join(f)).unwrap();
+            let b = std::fs::read(h9.join("amd64").join(f)).unwrap();
+            assert!(a == b, "9h/arm64/{f} and 9h/amd64/{f} are not the same");
+        }
     }
 }
