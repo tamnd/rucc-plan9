@@ -4,6 +4,7 @@
 //! - `wait TEXT` waits until the console writes TEXT after the last match;
 //! - `send TEXT` types TEXT on the console;
 //! - `timeout SECS` sets the time that each later `wait` can take, 60 seconds at the start;
+//! - `pause SECS` waits SECS seconds, such as for a program that does not write to the console;
 //! - `quit` ends the session, and the script passes.
 //!
 //! TEXT is the rest of the line with the spaces at its two ends removed, or a string in double quotes with the escapes `\n`, `\r`, `\t`,
@@ -23,6 +24,8 @@ pub enum Step {
     Send(Vec<u8>),
     /// The time that each later `wait` can take.
     Timeout(Duration),
+    /// Wait for this time.
+    Pause(Duration),
     /// End the session.
     Quit,
 }
@@ -88,10 +91,16 @@ pub fn parse(src: &str) -> Result<Vec<(usize, Step)>, String> {
                     Step::Send(t)
                 }
             }
-            "timeout" => {
-                Step::Timeout(Duration::from_secs(arg.parse().map_err(|_| {
-                    format!("line {n}: timeout needs a number of seconds")
-                })?))
+            "timeout" | "pause" => {
+                let d = Duration::from_secs(
+                    arg.parse()
+                        .map_err(|_| format!("line {n}: {verb} needs a number of seconds"))?,
+                );
+                if verb == "timeout" {
+                    Step::Timeout(d)
+                } else {
+                    Step::Pause(d)
+                }
             }
             "quit" if arg.is_empty() => Step::Quit,
             _ => return Err(format!("line {n}: the step {line:?} is not known")),
@@ -174,6 +183,7 @@ pub fn run(
             }
             Step::Send(t) => send(t),
             Step::Timeout(d) => timeout = *d,
+            Step::Pause(d) => std::thread::sleep(*d),
             Step::Quit => break,
         }
     }
@@ -189,7 +199,7 @@ mod tests {
     #[test]
     fn a_script_is_read() {
         let s = parse(
-            "# boot\nwait init: starting /bin/rc\nsend \"echo hi\\n\"\ntimeout 5\nwait \"hi\\x0a\"\n\nquit\n",
+            "# boot\nwait init: starting /bin/rc\nsend \"echo hi\\n\"\ntimeout 5\nwait \"hi\\x0a\"\npause 2\nquit\n",
         )
         .unwrap();
         assert_eq!(
@@ -199,6 +209,7 @@ mod tests {
                 (3, Step::Send(b"echo hi\n".to_vec())),
                 (4, Step::Timeout(Duration::from_secs(5))),
                 (5, Step::Wait(b"hi\n".to_vec())),
+                (6, Step::Pause(Duration::from_secs(2))),
                 (7, Step::Quit),
             ]
         );
@@ -208,6 +219,7 @@ mod tests {
         assert!(parse("send \"a\" b").is_err());
         assert!(parse("wait").unwrap_err().contains("needs a text"));
         assert!(parse("timeout soon").is_err());
+        assert!(parse("pause").is_err());
         assert!(parse("snap open").unwrap_err().contains("not known"));
         assert!(parse("quit now").is_err());
     }

@@ -11,6 +11,7 @@ use h9_dev::h9cons::H9Cons;
 use h9_dev::h9ctl::H9Ctl;
 use h9_dev::h9disk::H9Disk;
 use h9_dev::h9fs::H9Fs;
+use h9_dev::h9screen::{self, H9Screen};
 use h9_dev::h9snarf::{Clipboard, H9Snarf, Host, Memory};
 use h9_dev::pcinone::{self, PciNone};
 use h9_dev::pl011::Pl011;
@@ -39,6 +40,7 @@ const USAGE: &str = "usage:
   9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
          [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--snarf host|memory]
          [--ini FILE] [--strict] [--timeout SECS] [--script FILE] [--headless]
+         [--screen WxH|none] [--snap FILE]
       Run a kernel of the tree on the hypervisor of the host: an arm64 kernel on HVF on macOS
       on arm64 or on KVM on Linux on arm64, and an amd64 kernel on KVM on Linux on x86-64.
       KVM on arm64 needs Linux 6.4 or later, for the SMCCC filter. On arm64, FILE is a 7l a.out
@@ -57,10 +59,11 @@ const USAGE: &str = "usage:
       #Z/ctl takes the requests quit and title TEXT. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
       as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
       seconds with exit status 2. --script FILE drives the console with the steps of FILE: wait
-      TEXT, send TEXT, timeout SECS and quit. The script owns the input, so the monitor does
+      TEXT, send TEXT, timeout SECS, pause SECS and quit. The script owns the input, so the monitor does
       not read its own. The exit status is 0 when the script passes and 3 when it fails.
       --headless opens no window. The monitor has no window yet, so each session is headless
-      now.
+      now. The 9h machine has a screen of --screen WxH, 1024x768 by default, in the RAM of the
+      guest. With --screen none, the machine has no screen, so the profile of the guest does not start rio. --snap FILE writes the screen as a PNG file at the end of the session.
       On amd64, FILE is a 6l kernel with a multiboot header (9pc64). The machine is a PC with
       RAM from address 0, the APICs, the 8259s and the 8254 of KVM, a CMOS clock, the PCI
       configuration ports with no device on the bus, and ACPI tables for --cpus processors.
@@ -112,6 +115,9 @@ struct Options {
     timeout: Option<u64>,
     script: Option<Vec<(usize, Step)>>,
     headless: bool,
+    /// The size of the screen, or None for no screen.
+    screen: Option<(u32, u32)>,
+    snap: Option<String>,
 }
 
 /// A value with `,ro` at the end is read-only.
@@ -138,6 +144,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
         timeout: None,
         script: None,
         headless: false,
+        screen: Some((1024, 768)),
+        snap: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -176,6 +184,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--strict" => o.strict = true,
             "--headless" => o.headless = true,
+            "--screen" => o.screen = screen_size(&val()?)?,
+            "--snap" => o.snap = Some(val()?),
             "--script" => {
                 let f = val()?;
                 let src = std::fs::read_to_string(&f).map_err(|e| format!("{f}: {e}"))?;
@@ -206,8 +216,12 @@ fn parse(args: &[String]) -> Result<Options, String> {
             h9_dev::h9disk::MAX_UNITS
         ));
     }
-    if o.machine == Machine::Virt && (!o.disks.is_empty() || o.hostfs.is_some()) {
-        return Err("--disk and --hostfs are for the 9h machine, not for virt".into());
+    if o.machine == Machine::Virt && (!o.disks.is_empty() || o.hostfs.is_some() || o.snap.is_some())
+    {
+        return Err("--disk, --hostfs and --snap are for the 9h machine, not for virt".into());
+    }
+    if o.screen.is_none() && o.snap.is_some() {
+        return Err("--snap needs a screen, not --screen none".into());
     }
     if let Some((d, _)) = &o.hostfs
         && !std::path::Path::new(d).is_dir()
@@ -215,6 +229,25 @@ fn parse(args: &[String]) -> Result<Options, String> {
         return Err(format!("--hostfs {d}: not a directory"));
     }
     Ok(o)
+}
+
+/// The size of `--screen WxH`, or None for `--screen none`.
+fn screen_size(v: &str) -> Result<Option<(u32, u32)>, String> {
+    if v == "none" {
+        return Ok(None);
+    }
+    let bad = || {
+        format!(
+            "--screen {v}: give WxH, each 16 to {}, or none",
+            h9screen::MAX
+        )
+    };
+    let (w, h) = v.split_once('x').ok_or_else(bad)?;
+    let (w, h): (u32, u32) = (w.parse().map_err(|_| bad())?, h.parse().map_err(|_| bad())?);
+    if !(16..=h9screen::MAX).contains(&w) || !(16..=h9screen::MAX).contains(&h) {
+        return Err(bad());
+    }
+    Ok(Some((w, h)))
 }
 
 /// The device tree of the machine. The kernel reads `/memory`, `/cpus/cpu*` and `/chosen`.
@@ -434,6 +467,9 @@ fn run(o: &Options) -> Result<ExitCode, String> {
             .is_terminal()
             .then(|| Box::new(std::io::stdout()) as Box<dyn std::io::Write + Send>);
         bus.add_hyper(Box::new(H9Ctl::new(term)));
+        // A screen of 0x0 tells the kernel that there is no screen.
+        let (w, h) = o.screen.unwrap_or((0, 0));
+        bus.add_hyper(Box::new(H9Screen::new(w, h)));
     }
     if PC {
         bus.add(PORTS + cmos::PORT, 2, Box::new(Cmos::new()));
@@ -447,7 +483,7 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     }
     let script = o.script.clone().zip(log);
-    backend::run(ram, bus, o.cpus as usize, entry, x0, script)
+    backend::run(ram, bus, o.cpus as usize, entry, x0, script, o.snap.clone())
 }
 
 /// The lines of the report of the addresses with no device that the guest used, one line for
@@ -498,6 +534,33 @@ fn type_in(bus: &mut Bus, b: &[u8]) {
     }
 }
 
+/// Write the screen to the PNG file `f` at the end of a session, and give the line for the log.
+#[cfg_attr(
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    )),
+    allow(dead_code)
+)]
+fn snap(bus: &mut Bus, f: &str) -> Result<String, String> {
+    let s = bus
+        .hyper_device::<H9Screen>()
+        .ok_or("the machine has no screen")?;
+    if !s.on() {
+        return Err("the kernel did not give a framebuffer".into());
+    }
+    std::fs::write(f, s.png()).map_err(|e| e.to_string())?;
+    let (w, h) = s.size();
+    Ok(format!(
+        "9h: the screen ({w}x{h}, {} colours, {} flushes) is in {f}",
+        s.colours(),
+        s.flushes
+    ))
+}
+
 /// A session script and the console output that it reads.
 type Script = (Vec<(usize, Step)>, Transcript);
 
@@ -514,13 +577,44 @@ mod backend {
     use super::{Script, script, type_in, unknown_report};
     use h9_dev::Bus;
     #[cfg(target_os = "macos")]
-    use h9_hvf::{Stop, Vm};
+    use h9_hvf::{Machine, Stop, Vm};
     #[cfg(target_os = "linux")]
-    use h9_kvm::{Stop, Vm};
+    use h9_kvm::{Machine, Stop, Vm};
     use h9_vm::Ram;
     use std::io::Read;
     use std::process::ExitCode;
+    use std::sync::atomic::{AtomicI32, Ordering};
     use std::sync::{Arc, Mutex};
+
+    /// The number of the first SIGTERM or SIGINT that came, or 0.
+    static SIGNAL: AtomicI32 = AtomicI32::new(0);
+
+    extern "C" fn caught(sig: libc::c_int) {
+        if SIGNAL.swap(sig, Ordering::SeqCst) != 0 {
+            // The second signal: the session did not end after the first, so stop now.
+            // SAFETY: _exit is async-signal-safe and takes no pointer.
+            unsafe { libc::_exit(128 + sig) };
+        }
+    }
+
+    /// End the session as the guest does with `SYSTEM_OFF` when the monitor gets SIGTERM or
+    /// SIGINT. Thus the monitor writes the screen and the report of unknown accesses before it
+    /// exits. `r9 9h boot` stops the monitor with SIGTERM after `fshalt`, because the arm64 kernel
+    /// does not turn the machine off. A second signal stops the monitor at once.
+    fn on_signal(m: Arc<Machine>) {
+        let handler = caught as extern "C" fn(libc::c_int) as libc::sighandler_t;
+        // SAFETY: `caught` only does atomic operations and `_exit`, which are async-signal-safe.
+        unsafe {
+            libc::signal(libc::SIGTERM, handler);
+            libc::signal(libc::SIGINT, handler);
+        }
+        std::thread::spawn(move || {
+            while SIGNAL.load(Ordering::SeqCst) == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            m.end(Stop::Off);
+        });
+    }
 
     pub fn run(
         ram: Arc<Ram>,
@@ -529,6 +623,7 @@ mod backend {
         entry: u64,
         x0: u64,
         script: Option<Script>,
+        snap: Option<String>,
     ) -> Result<ExitCode, String> {
         let vm = Vm::new(ram, bus, ncpu)?;
         let m = vm.machine();
@@ -550,9 +645,18 @@ mod backend {
                 }
             });
         }
+        on_signal(vm.machine());
         let stop = vm.run(entry, x0);
+        let signalled = SIGNAL.load(Ordering::SeqCst) != 0;
         for line in vm.machine().with_bus(|bus| unknown_report(bus)) {
             eprintln!("{line}");
+        }
+        if let Some(f) = snap {
+            let r = vm.machine().with_bus(|bus| super::snap(bus, &f));
+            match r {
+                Ok(line) => eprintln!("{line}"),
+                Err(e) => eprintln!("9h: --snap {f}: {e}"),
+            }
         }
         let stop = stop?;
         if scripted {
@@ -572,6 +676,7 @@ mod backend {
             });
         }
         match stop {
+            Stop::Off if signalled => eprintln!("9h: the session ended on a signal"),
             Stop::Off => eprintln!("9h: the guest turned the machine off"),
             Stop::Reset => eprintln!("9h: the guest asked for a reset"),
         }
@@ -599,6 +704,7 @@ mod backend {
         _: u64,
         _: u64,
         _: Option<super::Script>,
+        _: Option<String>,
     ) -> Result<ExitCode, String> {
         Err("this host has no back end: the monitor runs on macOS on arm64 (HVF) and on Linux on x86-64 and arm64 (KVM)".into())
     }
@@ -682,6 +788,27 @@ mod tests {
                 .unwrap_err()
                 .contains("--what")
         );
+    }
+
+    #[test]
+    fn the_screen_options_are_read() {
+        let o = parse(&args("--kernel k")).unwrap();
+        assert_eq!((o.screen, o.snap), (Some((1024, 768)), None));
+        let o = parse(&args("--kernel k --screen 1920x1080 --snap s.png")).unwrap();
+        assert_eq!(
+            (o.screen, o.snap.as_deref()),
+            (Some((1920, 1080)), Some("s.png"))
+        );
+        let o = parse(&args("--kernel k --screen none")).unwrap();
+        assert_eq!(o.screen, None);
+        assert!(parse(&args("--kernel k --screen none --snap s.png")).is_err());
+        for bad in ["1024", "8x768", "1024x0", "1024x9000", "axb"] {
+            assert!(
+                parse(&args(&format!("--kernel k --screen {bad}"))).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(parse(&args("--kernel k --machine virt --snap s.png")).is_err());
     }
 
     #[test]

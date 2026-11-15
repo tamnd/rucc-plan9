@@ -15,12 +15,15 @@ dev
 	ether	netif
 	bridge	log
 	ip	arp chandial ip ipv6 ipaux iproute netlog nullmedium pktmedium inferno
+	draw	swcursor
+	mouse
 	sd
 	uart
 	rtc
 	host
 
 link
+	h9screen
 	ethersink
 	ethermedium
 	loopbackmedium

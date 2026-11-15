@@ -288,12 +288,18 @@ hostwrite(Chan *c, void *a, long n, vlong off)
 	return 0;
 }
 
+static void
+hostinit(void)
+{
+	h9dumpinit();
+}
+
 Dev hostdevtab = {
 	'Z',
 	"host",
 
 	devreset,
-	devinit,
+	hostinit,
 	devshutdown,
 	hostattach,
 	hostwalk,
