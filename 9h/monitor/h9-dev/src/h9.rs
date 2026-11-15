@@ -22,6 +22,13 @@ pub const SD_READ: u32 = 0xc600_0011;
 pub const SD_WRITE: u32 = 0xc600_0012;
 /// `H9sdflush`: (unit) puts the writes of the unit on the host disk, and returns 0.
 pub const SD_FLUSH: u32 = 0xc600_0013;
+/// `H9fsreset`: () starts a new 9P session of `#Z/hostfs`, and returns 0.
+pub const FS_RESET: u32 = 0xc600_0020;
+/// `H9fswrite`: (pa, n) gives the n bytes at pa to the 9P server, and returns n.
+pub const FS_WRITE: u32 = 0xc600_0021;
+/// `H9fsread`: (pa, n) copies at most n bytes of the replies of the 9P server to pa, and returns
+/// the number it copied, 0 when no reply waits.
+pub const FS_READ: u32 = 0xc600_0022;
 
 /// The size of a sector of a disk unit.
 pub const SD_SECTOR: u64 = 512;

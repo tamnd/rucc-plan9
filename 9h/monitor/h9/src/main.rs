@@ -7,6 +7,7 @@ use h9_dev::Bus;
 use h9_dev::h9;
 use h9_dev::h9cons::H9Cons;
 use h9_dev::h9disk::H9Disk;
+use h9_dev::h9fs::H9Fs;
 use h9_dev::pl011::Pl011;
 use h9_dev::pl031::Pl031;
 use h9_vm::Ram;
@@ -14,7 +15,8 @@ use h9_vm::fdt::Fdt;
 
 const USAGE: &str = "usage:
   9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
-         [--disk FILE[,ro]]... [--ini FILE] [--strict] [--timeout SECS]
+         [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--ini FILE] [--strict]
+         [--timeout SECS]
       Run an arm64 kernel of the tree on the hypervisor of the host. FILE is a 7l a.out or the
       U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
       machine: RAM at 0x40000000 (--mem MiB, 1024 by default), the device tree at the start of
@@ -24,7 +26,9 @@ const USAGE: &str = "usage:
       clock. --cpus gives the number of processors, 1 to 16, and 1 by default. The guest starts
       processors 1 and up with PSCI CPU_ON. --bootargs goes in /chosen/bootargs of the device
       tree, where the kernel reads it in place of the plan9.ini. Each --disk is a disk of the 9h
-      machine, sdH0 to sdH3 in the kernel, and ,ro makes it read-only. --ini FILE is the plan9.ini,
+      machine, sdH0 to sdH3 in the kernel, and ,ro makes it read-only. --hostfs serves DIR as
+      9P2000 on #Z/hostfs of the 9h kernel, for /mnt/term. Each file has the owner NAME of
+      --user, glenda by default. --ini FILE is the plan9.ini,
       which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
       as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
       seconds with exit status 2.";
@@ -57,8 +61,18 @@ struct Options {
     bootargs: String,
     ini: Option<String>,
     disks: Vec<(String, bool)>,
+    hostfs: Option<(String, bool)>,
+    user: String,
     strict: bool,
     timeout: Option<u64>,
+}
+
+/// A value with `,ro` at the end is read-only.
+fn readonly(v: String) -> (String, bool) {
+    match v.strip_suffix(",ro") {
+        Some(f) => (f.to_string(), true),
+        None => (v, false),
+    }
 }
 
 fn parse(args: &[String]) -> Result<Options, String> {
@@ -70,6 +84,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
         bootargs: String::new(),
         ini: None,
         disks: Vec::new(),
+        hostfs: None,
+        user: "glenda".into(),
         strict: false,
         timeout: None,
     };
@@ -98,13 +114,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--cpus" => o.cpus = val()?.parse().map_err(|_| "--cpus needs a number")?,
             "--bootargs" => o.bootargs = val()?,
             "--ini" => o.ini = Some(val()?),
-            "--disk" => {
-                let v = val()?;
-                o.disks.push(match v.strip_suffix(",ro") {
-                    Some(f) => (f.to_string(), true),
-                    None => (v, false),
-                });
-            }
+            "--disk" => o.disks.push(readonly(val()?)),
+            "--hostfs" => o.hostfs = Some(readonly(val()?)),
+            "--user" => o.user = val()?,
             "--strict" => o.strict = true,
             "--timeout" => {
                 o.timeout = Some(
@@ -131,8 +143,13 @@ fn parse(args: &[String]) -> Result<Options, String> {
             h9_dev::h9disk::MAX_UNITS
         ));
     }
-    if o.machine == Machine::Virt && !o.disks.is_empty() {
-        return Err("--disk is for the 9h machine, and the virt machine has no disk".into());
+    if o.machine == Machine::Virt && (!o.disks.is_empty() || o.hostfs.is_some()) {
+        return Err("--disk and --hostfs are for the 9h machine, not for virt".into());
+    }
+    if let Some((d, _)) = &o.hostfs
+        && !std::path::Path::new(d).is_dir()
+    {
+        return Err(format!("--hostfs {d}: not a directory"));
     }
     Ok(o)
 }
@@ -258,6 +275,13 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         }
         bus.add_hyper(Box::new(d));
     }
+    if let Some((dir, ro)) = &o.hostfs {
+        bus.add_hyper(Box::new(H9Fs::new(h9_9p::Options {
+            root: dir.into(),
+            user: o.user.clone(),
+            readonly: *ro,
+        })));
+    }
     bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     backend::run(ram, bus, o.cpus as usize, image.entry, DTB)
 }
@@ -375,6 +399,10 @@ mod tests {
             vec![("a.img".to_string(), false), ("b.img".to_string(), true)]
         );
         assert!(parse(&args("--kernel k --machine virt --disk a.img")).is_err());
+        let o = parse(&args("--kernel k --hostfs /,ro --user tam")).unwrap();
+        assert_eq!(o.hostfs, Some(("/".to_string(), true)));
+        assert_eq!(o.user, "tam");
+        assert!(parse(&args("--kernel k --hostfs /nonexistent-dir")).is_err());
         assert!(
             parse(&args(
                 "--kernel k --disk a --disk b --disk c --disk d --disk e"

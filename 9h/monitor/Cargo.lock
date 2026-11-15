@@ -6,6 +6,7 @@ version = 4
 name = "h9"
 version = "0.1.0"
 dependencies = [
+ "h9-9p",
  "h9-dev",
  "h9-hvf",
  "h9-vm",
@@ -20,6 +21,7 @@ version = "0.1.0"
 name = "h9-dev"
 version = "0.1.0"
 dependencies = [
+ "h9-9p",
  "h9-vm",
 ]
 

@@ -15,8 +15,8 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::msg::{self, DMDIR, IOHDRSZ, NOFID, ORCLOSE, OTRUNC, QTDIR, Qid, R, Stat, T};
 
-/// The largest message that the server takes.
-const MAXMSIZE: u32 = 64 * 1024 + IOHDRSZ;
+/// The largest message that the server takes, and the largest `msize` it gives.
+pub const MAXMSIZE: u32 = 64 * 1024 + IOHDRSZ;
 
 /// What the server serves.
 #[derive(Debug, Clone)]
