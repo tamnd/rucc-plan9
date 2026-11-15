@@ -80,5 +80,14 @@ jobs:
         run: cargo fmt --all --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # The hosted Linux runners have KVM, and this rule lets the user of the job open /dev/kvm.
+      # The KVM guest test then runs, and H9_NEED_KVM makes it fail when /dev/kvm does not open.
+      - name: give the job /dev/kvm
+        if: runner.os == 'Linux'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          echo H9_NEED_KVM=1 >> "$GITHUB_ENV"
       - name: cargo test
         run: cargo test --workspace

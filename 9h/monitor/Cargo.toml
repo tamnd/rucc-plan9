@@ -2,7 +2,7 @@
 # repository that calls a hypervisor, and that needs unsafe code. The workspace of crates/ forbids
 # unsafe code.
 [workspace]
-members = ["h9-vm", "h9-dev", "h9-hvf", "h9-9p", "h9"]
+members = ["h9-vm", "h9-dev", "h9-hvf", "h9-kvm", "h9-9p", "h9"]
 resolver = "3"
 
 [workspace.package]
@@ -16,6 +16,7 @@ repository = "https://github.com/tamnd/rucc-plan9"
 h9-vm = { path = "h9-vm" }
 h9-dev = { path = "h9-dev" }
 h9-hvf = { path = "h9-hvf" }
+h9-kvm = { path = "h9-kvm" }
 h9-9p = { path = "h9-9p" }
 libc = "0.2"
 

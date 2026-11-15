@@ -221,6 +221,8 @@ If the cost is too high, the alternative is to copy the guest's `/sys/include` a
 
 **How to find out.** At P7, decide whether `9h` should start QEMU TCG with the same disk and present its screen through `h9-gui` as drawterm does. That would be a convenience mode, labelled as Q in every report.
 
+**Answer.** `9h` has no TCG fallback. On Linux, `h9-kvm` opens `/dev/kvm` before it makes the machine. When the device does not open, `9h` stops with an error that names the device, says that the kvm module must be loaded and that the user must be able to read and write the device, and says that the monitor has no emulator. A host with no KVM runs Q with `r9 boot` and QEMU TCG, which each report names as Q. A TCG mode in `9h` would put Q results under the name of H, and it would be a second path to keep working. The hosted Linux runners of CI have KVM, so the monitor job runs a multiboot guest on KVM for each change.
+
 **Deadline.** P7.
 
 ## 14. A virtual clock in `9h`

@@ -7,6 +7,7 @@
 //! no device has reads as all ones and is logged, as an empty slot on a real bus (plan 10.4).
 //! With `strict`, such an access stops the session instead (plan 10.10).
 
+pub mod cmos;
 pub mod h9;
 pub mod h9cons;
 pub mod h9ctl;
@@ -20,6 +21,10 @@ pub mod psci;
 use std::collections::BTreeMap;
 
 use h9_vm::Ram;
+
+/// The bus address of the I/O port 0 of the amd64 machine. The port P of the guest is at
+/// `PORTS + P` on the bus, above each physical address of the guest.
+pub const PORTS: u64 = 1 << 48;
 
 /// A device that the guest reads and writes as memory.
 pub trait Device: Send + std::any::Any {
