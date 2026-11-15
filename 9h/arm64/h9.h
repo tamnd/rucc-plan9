@@ -10,10 +10,17 @@ enum {
 	H9consputc	= 0xC6000001,	/* (c) writes the byte c to the console */
 	H9consputs	= 0xC6000002,	/* (pa, n) writes n bytes at pa, returns n */
 	H9consgetc	= 0xC6000003,	/* () returns the next input byte, or -1 */
+	H9sdinfo	= 0xC6000010,	/* (unit) returns the number of sectors, or -1 */
+	H9sdread	= 0xC6000011,	/* (unit, lba, n, pa) returns the sectors read */
+	H9sdwrite	= 0xC6000012,	/* (unit, lba, n, pa) returns the sectors written */
+	H9sdflush	= 0xC6000013,	/* (unit) returns 0 */
+
+	H9sdsecsize	= 512,		/* bytes in a sector */
+	H9sdmax	= 128,		/* the most sectors of one call */
 
 	H9revision	= 1,
 
 	IRQh9cons	= SPI+16,	/* level, high while console input waits */
 };
 
-extern uvlong	h9call(uvlong, uvlong, uvlong);
+extern uvlong	h9call(uvlong, uvlong, uvlong, uvlong, uvlong);

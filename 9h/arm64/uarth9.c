@@ -35,7 +35,7 @@ interrupt(Ureg*, void *arg)
 	Uart *uart = arg;
 	uvlong c;
 
-	while((c = h9call(H9consgetc, 0, 0)) != ~0ULL)
+	while((c = h9call(H9consgetc, 0, 0, 0, 0)) != ~0ULL)
 		uartrecv(uart, c & 0xFF);
 }
 
@@ -60,7 +60,7 @@ kick(Uart *uart)
 		if(uart->op >= uart->oe && uartstageoutput(uart) == 0)
 			break;
 		n = uart->oe - uart->op;
-		h9call(H9consputs, PADDR(uart->op), n);
+		h9call(H9consputs, PADDR(uart->op), n, 0, 0);
 		uart->op += n;
 	}
 }
@@ -114,7 +114,7 @@ donothing(Uart*, int)
 static void
 putc(Uart*, int c)
 {
-	h9call(H9consputc, c & 0xFF, 0);
+	h9call(H9consputc, c & 0xFF, 0, 0, 0);
 }
 
 static int
@@ -122,7 +122,7 @@ getc(Uart*)
 {
 	uvlong c;
 
-	while((c = h9call(H9consgetc, 0, 0)) == ~0ULL)
+	while((c = h9call(H9consgetc, 0, 0, 0, 0)) == ~0ULL)
 		;
 	return c & 0xFF;
 }

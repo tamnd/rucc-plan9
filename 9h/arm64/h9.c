@@ -13,7 +13,7 @@
 #include "h9.h"
 
 uvlong
-h9call(uvlong fn, uvlong a1, uvlong a2)
+h9call(uvlong fn, uvlong a1, uvlong a2, uvlong a3, uvlong a4)
 {
 	Ureg u;
 
@@ -21,6 +21,8 @@ h9call(uvlong fn, uvlong a1, uvlong a2)
 	u.r0 = fn;
 	u.r1 = a1;
 	u.r2 = a2;
+	u.r3 = a3;
+	u.r4 = a4;
 	hvccall(&u);
 	return u.r0;
 }

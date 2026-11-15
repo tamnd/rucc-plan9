@@ -37,11 +37,11 @@ What it gains:
 | `h9mouse.c` | absolute mouse through port's `absmousetrack` |
 | `h9kbd.c` | `#b/kbd`: key-down and key-up rune events, the input `kbdfs` prefers when it exists (11.4) |
 | `audioh9.c` | an `audio` card for port's `devaudio` |
-| `sdh9.c` | a disk for port's `devsd`, backed by a host file |
+| `sdh9.c` | a disk for port's `devsd`, backed by a host file. The units are `sdH0` to `sdH3` |
 | `etherh9.c` | an Ethernet for port's `devether` |
 | `devhost.c` | `#Z`: the snarf buffer, the host file system channel, and `ctl` (10.5) |
 
-The files are about 2,000 lines on each architecture. They use only interfaces port and the tree's arch code already export. Where one is derived from a tree file (`h9screen.c` from `bcm/screen.c`, `sdh9.c` from `sdvirtio10.c`), its header says so. `#Z` is unused at the pin, and `r9 9h verify` checks that it still is at each pin.
+The files are about 2,000 lines on each architecture. They use only interfaces port and the tree's arch code already export. Where one is derived from a tree file (`h9screen.c` from `bcm/screen.c`, `sdh9.c` from `sdram.c`), its header says so. `#Z` is unused at the pin, and `r9 9h verify` checks that it still is at each pin.
 
 **Building.** The kernel is built in the guest. `r9-build` does it after `mk kernels`, as one more step in the same namespace:
 ```rc
@@ -125,7 +125,7 @@ Intel Macs (HVF on x86) could run the same machine with `hv_vm_create` and the x
 | mouse | none | an event ring in a shared page | host pointer to `absmousetrack(x, y, buttons, msec)` |
 | keyboard | none | an event ring | host key events to `r`/`R` rune messages (11.4) |
 | audio | `audio.start(ring)`, `audio.volume` | buffer done | CoreAudio or PipeWire (11.6) |
-| disk | `sd.info`, `sd.rw(op, lba, n, pa)` | done | a host file opened with `O_DIRECT`/`F_NOCACHE`, in 64 KiB requests |
+| disk | `sd.info`, `sd.read`, `sd.write`, `sd.flush` | none | a host file, in requests of at most 64 KiB |
 | ether | `ether.tx(pa, n)`, a receive ring | receive | user-mode NAT (as QEMU's `-netdev user`), or `vmnet` on macOS and a tap device on Linux when configured |
 | `#Z/snarf` | `snarf.get(pa, n)`, `snarf.put(pa, n)` | host clipboard changed | the host clipboard, text only, UTF-8 |
 | `#Z/hostfs` | a 9P2000 byte channel in two rings | data | the monitor's 9P server over a host directory |
@@ -140,8 +140,16 @@ Intel Macs (HVF on x86) could run the same machine with `hv_vm_create` and the x
 | `0xC6000001` | `H9consputc` | the byte | 0 |
 | `0xC6000002` | `H9consputs` | the physical address and the count, at most 64 KiB | the count written, or -2 for an address that is not in RAM |
 | `0xC6000003` | `H9consgetc` | none | the next input byte, or -1 |
+| `0xC6000010` | `H9sdinfo` | the unit | the number of 512-byte sectors, or -1 when the unit does not exist |
+| `0xC6000011` | `H9sdread` | the unit, the first sector, the count, and the physical address | the count read, at most 128 |
+| `0xC6000012` | `H9sdwrite` | the unit, the first sector, the count, and the physical address | the count written, at most 128 |
+| `0xC6000013` | `H9sdflush` | the unit | 0 |
 
 A number that no device has gives -1, and the monitor logs it once. The console input interrupt is SPI 16 (INTID 48). It is a level interrupt, and it stays high while an input byte waits.
+
+A disk call that fails gives -2 for an address that is not in RAM, and -3 for a sector outside the disk, a write to a read-only unit, or an error of the host. The disk calls do the transfer before they return. This is different from the general rule above, for two reasons. A request is at most 64 KiB, which takes less than a millisecond from a host SSD. Also, the driver needs no interrupt and no wait, so it is as small as `sdram.c`. If a profile shows that the guest waits too long in these calls, a later revision can add a form that starts the transfer and raises a done interrupt. The monitor does not set `O_DIRECT` or `F_NOCACHE` yet, so the host caches the disk file. `H9sdflush` calls `fdatasync` on the file.
+
+The option `--disk FILE` adds a unit, and `--disk FILE,ro` adds a read-only unit. The first `--disk` is `sdH0`.
 
 **The host's files.** The monitor serves a host directory as 9P2000 on the `#Z/hostfs` channel. The boot script mounts it on `/mnt/term`, as `drawterm` does. Host names are mapped as `drawterm` maps them:
 - names that differ only by case on a case-insensitive host are exposed as they are, and refused on create;
