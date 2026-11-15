@@ -611,7 +611,13 @@ impl Vcpu {
                 context,
             }) => m.cpu_on(target, entry, context),
             Some(Action::AffinityInfo { target }) => m.affinity_info(target),
-            None => m.with_bus(|b| b.call(x, &m.ram)),
+            None => {
+                let (v, stop) = m.with_bus(|b| (b.call(x, &m.ram), b.stopping()));
+                if stop {
+                    return Ok(Next::End(Stop::Off));
+                }
+                v
+            }
         };
         self.set_reg(ffi::HV_REG_X0, v)?;
         Ok(Next::Run)
