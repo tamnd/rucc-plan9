@@ -1,7 +1,8 @@
 //! Small multiboot guests on KVM. The first checks the entry state, reads the CMOS through the
 //! ports, writes to the console with a hypercall, and turns the machine off. The second resets the
-//! machine through port 0xcf9, as `archreset` of the tree does. The tests need `/dev/kvm`. With no
-//! KVM they pass with a note, unless `H9_NEED_KVM=1` is set, as in CI.
+//! machine through port 0xcf9, as `archreset` of the tree does. The third reads the default type
+//! of the MTRRs, which must be on and write-back for the kernel. The tests need `/dev/kvm`. With
+//! no KVM they pass with a note, unless `H9_NEED_KVM=1` is set, as in CI.
 #![cfg(all(target_os = "linux", target_arch = "x86_64"))]
 
 use std::io::Write;
@@ -158,4 +159,34 @@ fn a_write_of_6_to_port_cf9_resets_the_machine() {
     let (stop, text) = run(&kernel(code));
     assert_eq!(stop, Stop::Reset);
     assert!(text.is_empty());
+}
+
+#[test]
+fn the_mtrrs_are_on_and_write_back() {
+    if !have_kvm() {
+        return;
+    }
+    #[rustfmt::skip]
+    let code: &[u8] = &[
+        0xb9, 0xff, 0x02, 0x00, 0x00,       // 20: mov ecx, 0x2ff
+        0x0f, 0x32,                         // 25: rdmsr
+        0x66, 0xba, 0x09, 0x05,             // 27: mov dx, 0x509
+        0x3d, 0x06, 0x08, 0x00, 0x00,       // 2b: cmp eax, 0x806
+        0x75, 0x09,                         // 30: jne bad
+        0xb8, 0x08, 0x00, 0x00, 0x84,       // 32: mov eax, SYSTEM_OFF
+        0xee,                               // 37: out dx, al
+        0xf4,                               // 38: hlt
+        0xeb, 0xfd,                         // 39: jmp 38
+        0xb8, 0x09, 0x00, 0x00, 0x84,       // 3b: bad: mov eax, SYSTEM_RESET
+        0xee,                               // 40: out dx, al
+        0xf4,                               // 41: hlt
+        0xeb, 0xfd,                         // 42: jmp 41
+    ];
+    let (stop, _) = run(&kernel(code));
+    assert_eq!(
+        stop,
+        Stop::Off,
+        "Reset means that the MTRR default type is not {:#x}",
+        h9_kvm::MTRR_DEF_WRITEBACK
+    );
 }
