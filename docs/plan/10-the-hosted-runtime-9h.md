@@ -101,7 +101,7 @@ The boot with more than one processor showed these facts:
 
 `9h run --kernel 9qemu.u --ini plan9.ini --cpus 4` starts this test. `H9_TRACE=1` logs each exit, and it logs the state of the timer and of the GIC each 500 ms.
 
-**KVM on Linux arm64.** This is the same machine, with KVM's in-kernel vGICv3 (`KVM_DEV_TYPE_ARM_VGIC_V3`) and timer, and `KVM_EXIT_HYPERCALL` for `HVC` with SMCCC filtering (`KVM_ARM_VM_SMCCC_FILTER`, Linux 6.4 and later). PSCI is KVM's own.
+**KVM on Linux arm64.** This is the same machine, with KVM's in-kernel vGICv3 (`KVM_DEV_TYPE_ARM_VGIC_V3`) and timer, and `KVM_EXIT_HYPERCALL` for `HVC` with SMCCC filtering (`KVM_ARM_VM_SMCCC_FILTER`, Linux 6.4 and later). PSCI is KVM's own. The filter sends the SMC64 calls `0xc6000000` to `0xc600ffff` to the monitor, and KVM does each other call itself. On arm64, `KVM_EXIT_HYPERCALL` does not hold the arguments, so the monitor reads X0 to X5 with `KVM_GET_ONE_REG` and writes the result to X0. KVM has moved the PC past the `HVC` already. Each vCPU but the first starts with `KVM_ARM_VCPU_POWER_OFF`, and KVM starts it at the `CPU_ON` of the kernel. The GIC is made after the vCPUs, with 256 interrupts, and its redistributors are at `0x080a0000` in the order of the vCPUs. A device interrupt goes to KVM as `KVM_IRQ_LINE` of type SPI with its INTID.
 
 ## 10.4 The amd64 machine (KVM)
 
