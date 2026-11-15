@@ -73,7 +73,7 @@ The monitor builds the machine the tree's `arm64` code already knows: QEMU's `vi
 3. It writes a device tree with `/memory`, `/chosen/bootargs` and the GIC.
 4. It starts vCPU 0 at the entry point in EL1 with the MMU off and `X0` pointing at the device tree.
 
-`l.s` handles EL1 entry (`svcmode` accepts EL1 and EL2), and `bootargs.c` reads `*maxmem` and the boot arguments from the device tree. Secondary processors start through PSCI `CPU_ON`, which `main.c`'s `mpinit` sends with `hvccall`. The monitor answers `CPU_ON` by creating a vCPU on a new host thread. `SYSTEM_OFF` and `SYSTEM_RESET` end or restart the session.
+`l.s` handles EL1 entry (`svcmode` accepts EL1 and EL2), and `bootargs.c` reads `*maxmem` and the boot arguments from the device tree. Secondary processors start through PSCI `CPU_ON`, which `main.c`'s `mpinit` sends with `hvccall`. At the start, the monitor makes one vCPU for each processor of `--cpus`, each on its own host thread, in the order of the processor numbers. vCPU 0 starts at the entry point, and the others wait. The monitor answers `CPU_ON` by starting the vCPU of the target processor at the address and with the context of the call, and `AFFINITY_INFO` with the state of that processor. `CPU_OFF` stops the vCPU of the caller, and the session ends when each vCPU is off. `SYSTEM_OFF` and `SYSTEM_RESET` end or restart the session.
 
 **Hypervisor.framework.**
 - The monitor creates one VM per session with `hv_vm_create`, and one vCPU per host thread with `hv_vcpu_create`. A vCPU can only be run by the thread that created it.
@@ -91,7 +91,13 @@ The first test of the monitor is the `qemu` kernel of the tree, `9qemu.u` from t
 - `bootargs.c` copies `/chosen/bootargs` over the `plan9.ini` at `CONFADDR` when the property exists, even when it is empty. The monitor puts the property in the device tree only when `--bootargs` is given. Without the `plan9.ini`, `$console` is not set, `kbdfs` does not open `/dev/eia0`, and the console gets no input.
 - The PCI scan of `pciqemu.c` reads the ECAM window at `0x3f000000`. There is no device there, so each read gives all ones, and the scan finds no PCI device. That is the result the kernel expects from an empty bus.
 
-`9h run --kernel 9qemu.u --ini plan9.ini` starts this test. `H9_TRACE=1` logs each exit, and it logs the state of the timer and of the GIC each 500 ms.
+The boot with more than one processor showed these facts:
+
+- The framework gives the redistributor frames in the order in which the vCPUs are made, at `0x080a0000` plus 128 KiB for each vCPU. `GICR_TYPER` has the vCPU number as the processor number, the MPIDR of the vCPU as the affinity, and the Last bit on the frame of the last vCPU only. `getrregs` in `gic.c` finds the frame of a processor by its processor number. Thus the monitor makes all the vCPUs at the start, in order, and does not make a vCPU when `CPU_ON` comes.
+- A 32-bit read of `GICR_TYPER` gives 0, and only a 64-bit read gives the value. The `gic.c` of the pinned tree reads the register as 64 bits, and the kernel boots on 4 processors. The `9qemu.u` of the arm64 image reads the low 32 bits, does not find its frame, and stops in `getrregs: no re-distributor for cpu 1`. A copy of that kernel with the two loads of `getrregs` changed to 64-bit loads boots on 1, 2 and 4 processors. Each processor takes about 800 timer interrupts in its first 8 seconds, as `/dev/sysstat` shows, and `reboot` stops each processor and ends the session.
+- The `9qemu.u` of the arm64 image calls `CPU_ON` with the 32-bit number `0x84000003`, and the pinned tree uses the 64-bit number `0xC4000003`. The monitor accepts the two numbers, as QEMU does.
+
+`9h run --kernel 9qemu.u --ini plan9.ini --cpus 4` starts this test. `H9_TRACE=1` logs each exit, and it logs the state of the timer and of the GIC each 500 ms.
 
 **KVM on Linux arm64.** This is the same machine, with KVM's in-kernel vGICv3 (`KVM_DEV_TYPE_ARM_VGIC_V3`) and timer, and `KVM_EXIT_HYPERCALL` for `HVC` with SMCCC filtering (`KVM_ARM_VM_SMCCC_FILTER`, Linux 6.4 and later). PSCI is KVM's own.
 

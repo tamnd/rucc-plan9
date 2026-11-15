@@ -197,7 +197,9 @@ If the cost is too high, the alternative is to copy the guest's `/sys/include` a
 
 **How to find out.** In P7's first week, boot G's `qemu` kernel under a minimal monitor with `hv_gic_create`, to the first timer interrupt on every processor.
 
-**Answer for one processor.** G's `qemu` kernel boots on one processor under the monitor with `hv_gic_create` (10.3.1). `gic.c` programs the framework GIC with no change. The timer interrupt and the SPI of the PL011 come to the guest, and the shell of `bootrc` runs. The framework delivers the timer PPI itself, so the monitor sees no `VTIMER_ACTIVATED` exit. The question stays open until `CPU_ON` starts the secondary processors and each one takes its first timer interrupt.
+**Answer for one processor.** G's `qemu` kernel boots on one processor under the monitor with `hv_gic_create` (10.3.1). `gic.c` programs the framework GIC with no change. The timer interrupt and the SPI of the PL011 come to the guest, and the shell of `bootrc` runs. The framework delivers the timer PPI itself, so the monitor sees no `VTIMER_ACTIVATED` exit.
+
+**Answer for more than one processor.** The framework GIC works with the `gic.c` of the pinned tree on 4 processors (10.3.1). `CPU_ON` starts each secondary processor, each one finds its redistributor frame, and each one takes its timer interrupts. The framework has one difference from QEMU: a 32-bit read of `GICR_TYPER` gives 0. The pinned tree reads the register as 64 bits, so it needs no change. The kernel of the arm64 image is older and reads 32 bits, so it runs on one processor only. The last check is the `9qemu` that rucc builds from the pinned tree in the graded arm64 run, on 4 processors. Until that check, the question stays open.
 
 **Deadline.** P7.
 

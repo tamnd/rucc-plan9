@@ -10,12 +10,15 @@ use h9_vm::Ram;
 use h9_vm::fdt::Fdt;
 
 const USAGE: &str = "usage:
-  9h run --kernel FILE [--mem MIB] [--bootargs TEXT] [--ini FILE] [--strict] [--timeout SECS]
+  9h run --kernel FILE [--mem MIB] [--cpus N] [--bootargs TEXT] [--ini FILE] [--strict]
+         [--timeout SECS]
       Run an arm64 kernel of the tree on the hypervisor of the host. FILE is a 7l a.out or the
       U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
       machine: RAM at 0x40000000 (--mem MiB, 1024 by default), the device tree at the start of
-      the RAM, and the GICv3 of the hypervisor. --bootargs goes in /chosen/bootargs of the device
-      tree, where the kernel reads it in place of the plan9.ini. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. Until the
+      the RAM, and the GICv3 of the hypervisor. --cpus gives the number of processors, 1 to 16,
+      and 1 by default. The guest starts processors 1 and up with PSCI CPU_ON. --bootargs goes
+      in /chosen/bootargs of the device tree, where the kernel reads it in place of the
+      plan9.ini. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. Until the
       9h kernel exists, the monitor has a PL011 console on the terminal and a PL031 clock, so the
       qemu kernel of the tree can run. An access to an address with no device reads as all ones,
       and --strict makes it stop the session. --timeout ends the session after SECS seconds with
@@ -28,11 +31,15 @@ const KZERO: u64 = 0xffff_ffff_8000_0000;
 const UART: u64 = 0x0900_0000;
 const UART_SPI: u32 = 33;
 const RTC: u64 = 0x0901_0000;
+/// The redistributor region of the device tree (0xf60000 bytes) has frames for 123 processors,
+/// but the kernel of the tree has MAXMACH 16 (`mem.h` of arm64).
+const MAXCPU: u32 = 16;
 
 #[derive(Debug)]
 struct Options {
     kernel: String,
     mem: u64,
+    cpus: u32,
     bootargs: String,
     ini: Option<String>,
     strict: bool,
@@ -43,6 +50,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     let mut o = Options {
         kernel: String::new(),
         mem: 1024,
+        cpus: 1,
         bootargs: String::new(),
         ini: None,
         strict: false,
@@ -63,6 +71,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         match k {
             "--kernel" => o.kernel = val()?,
             "--mem" => o.mem = val()?.parse().map_err(|_| "--mem needs a number of MiB")?,
+            "--cpus" => o.cpus = val()?.parse().map_err(|_| "--cpus needs a number")?,
             "--bootargs" => o.bootargs = val()?,
             "--ini" => o.ini = Some(val()?),
             "--strict" => o.strict = true,
@@ -81,6 +90,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     if !(64..=3072).contains(&o.mem) {
         return Err("--mem must be 64 to 3072 MiB".into());
+    }
+    if !(1..=MAXCPU).contains(&o.cpus) {
+        return Err(format!("--cpus must be 1 to {MAXCPU}"));
     }
     Ok(o)
 }
@@ -107,12 +119,14 @@ fn devtree(o: &Options) -> Vec<u8> {
     t.begin("cpus");
     t.cells("#address-cells", &[1]);
     t.cells("#size-cells", &[0]);
-    t.begin("cpu@0");
-    t.string("device_type", "cpu");
-    t.string("compatible", "arm,arm-v8");
-    t.cells("reg", &[0]);
-    t.string("enable-method", "psci");
-    t.end();
+    for n in 0..o.cpus {
+        t.begin(&format!("cpu@{n}"));
+        t.string("device_type", "cpu");
+        t.string("compatible", "arm,arm-v8");
+        t.cells("reg", &[n]);
+        t.string("enable-method", "psci");
+        t.end();
+    }
     t.end();
     t.begin("psci");
     t.string("compatible", "arm,psci-1.0");
@@ -185,7 +199,7 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         Box::new(Pl011::new(UART_SPI, Box::new(std::io::stdout()))),
     );
     bus.add(RTC, 0x1000, Box::new(Pl031::new()));
-    backend::run(ram, bus, image.entry, DTB)
+    backend::run(ram, bus, o.cpus as usize, image.entry, DTB)
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -199,8 +213,14 @@ mod backend {
     use std::process::ExitCode;
     use std::sync::Arc;
 
-    pub fn run(ram: Arc<Ram>, bus: Bus, entry: u64, x0: u64) -> Result<ExitCode, String> {
-        let vm = Vm::new(ram, bus)?;
+    pub fn run(
+        ram: Arc<Ram>,
+        bus: Bus,
+        ncpu: usize,
+        entry: u64,
+        x0: u64,
+    ) -> Result<ExitCode, String> {
+        let vm = Vm::new(ram, bus, ncpu)?;
         let m = vm.machine();
         std::thread::spawn(move || {
             let mut b = [0u8; 256];
@@ -228,7 +248,7 @@ mod backend {
     use std::process::ExitCode;
     use std::sync::Arc;
 
-    pub fn run(_: Arc<Ram>, _: Bus, _: u64, _: u64) -> Result<ExitCode, String> {
+    pub fn run(_: Arc<Ram>, _: Bus, _: usize, _: u64, _: u64) -> Result<ExitCode, String> {
         Err("this host has no back end yet: the monitor runs on macOS on arm64 only".into())
     }
 }
@@ -283,6 +303,9 @@ mod tests {
         );
         assert!(parse(&args("--mem 512")).unwrap_err().contains("--kernel"));
         assert!(parse(&args("--kernel k --mem 9999")).is_err());
+        assert_eq!(parse(&args("--kernel k --cpus 4")).unwrap().cpus, 4);
+        assert!(parse(&args("--kernel k --cpus 0")).is_err());
+        assert!(parse(&args("--kernel k --cpus 17")).is_err());
         assert!(
             parse(&args("--kernel k --what"))
                 .unwrap_err()
@@ -297,6 +320,10 @@ mod tests {
         let has = |s: &[u8]| t.windows(s.len()).any(|w| w == s);
         assert!(has(b"memory@40000000\0"));
         assert!(has(b"cpu@0\0"));
+        assert!(!has(b"cpu@1\0"));
+        let o4 = parse(&args("--kernel k --cpus 4")).unwrap();
+        let t4 = devtree(&o4);
+        assert!(t4.windows(6).any(|w| w == b"cpu@3\0"));
         assert!(has(b"console=0\0"));
         let o = parse(&args("--kernel k")).unwrap();
         assert!(
