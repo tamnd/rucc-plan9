@@ -216,8 +216,27 @@ fn stage(repo_root: &Path, work: &Path) -> Result<std::path::PathBuf, String> {
     Ok(dir)
 }
 
+/// Boot the guest for the build, or with `finish`, read what came of the earlier boot.
+fn guest(req: &mut Request, repo_root: &Path, finish: bool) -> Result<boot::Outcome, String> {
+    if finish {
+        eprintln!(
+            "r9 build: the host part of the build in {}",
+            req.work.display()
+        );
+        let _ = std::fs::remove_dir_all(req.work.join("generated"));
+        return boot::read_steps(&req.work.join("steps.json"));
+    }
+    req.input = Some(stage(repo_root, &req.work)?);
+    req.collect_mib = Some(COLLECT_MIB);
+    eprintln!("r9 build: {}", boot::qemu_command(req).join(" "));
+    boot::run(req)
+}
+
 /// Run `r9 build`. `req` is a boot request for the release; its commands, disks and limit are
-/// set here. Return the summary and the report to print.
+/// set here. With `finish`, do not boot: the guest part of an earlier build in the same output
+/// directory ended, and its `steps.json` and `collected/` are there. Return the summary and
+/// the report to print.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     release: &str,
     dir: &str,
@@ -226,6 +245,7 @@ pub fn run(
     repo_root: &Path,
     slot: &Slot,
     guest_test: Option<&Test>,
+    finish: bool,
 ) -> Result<(Summary, String), String> {
     req.commands = commands(dir, targets, slot);
     if let Some(t) = guest_test {
@@ -239,13 +259,10 @@ pub fn run(
         }
     }
     req.net |= matches!(slot, Slot::R { .. });
-    req.input = Some(stage(repo_root, &req.work)?);
-    req.collect_mib = Some(COLLECT_MIB);
-    eprintln!("r9 build: {}", boot::qemu_command(&req).join(" "));
-    let outcome = boot::run(&req)?;
     let collected = req.work.join("collected");
     let generated = req.work.join("generated");
     let gen_tar = collected.join("gen.tar");
+    let outcome = guest(&mut req, repo_root, finish)?;
     if gen_tar.is_file() {
         std::fs::create_dir_all(&generated).map_err(|e| format!("{}: {e}", generated.display()))?;
         crate::disk::unpack(&gen_tar, &generated)?;
@@ -394,6 +411,34 @@ pub fn command(
     if bisect {
         return crate::mix::bisect_command(&one, &req, mix.is_some());
     }
+    if args.has("finish") {
+        if bisect || mix.is_some() {
+            return Err("--finish does not go with a mix or --bisect".into());
+        }
+        if args.get("out").is_none() {
+            return Err("--finish needs --out, the directory of the earlier build".into());
+        }
+        let slot = if r {
+            Slot::R {
+                port: 0,
+                bringup: std::env::var("R9_BRINGUP").unwrap_or_else(|_| "cc:auto".into()),
+            }
+        } else {
+            Slot::G
+        };
+        let (summary, report) = run(
+            &one.release,
+            &one.dir,
+            &one.targets,
+            req,
+            &one.repo_root,
+            &slot,
+            one.test.as_ref(),
+            true,
+        )?;
+        let passed = summary.passed && summary.test_status.as_ref().is_none_or(String::is_empty);
+        return Ok((passed, report));
+    }
     let (summary, report) = one.run(req, r.then_some(mix))?;
     let passed = summary.passed && summary.test_status.as_ref().is_none_or(String::is_empty);
     Ok((passed, report))
@@ -467,6 +512,7 @@ impl Build {
             &self.repo_root,
             &slot,
             self.test.as_ref(),
+            false,
         )
     }
 }
@@ -532,6 +578,15 @@ mod tests {
         let script = std::fs::read_to_string(root.join("guest/r9-build")).unwrap();
         assert!(script.contains("\tcase cross cross.*\n"));
         assert!(script.contains("os=`{echo $t | sed 's/^cross\\.//'}"));
+    }
+
+    #[test]
+    fn the_records_are_append_only_and_for_exclusive_use() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let script = std::fs::read_to_string(root.join("guest/r9-build")).unwrap();
+        assert!(script.contains("\nchmod +al /tmp/r9/compile.jsonl\n"));
+        let cc = std::fs::read_to_string(root.join("guest/r9-cc/r9-cc.c")).unwrap();
+        assert!(cc.contains("DMAPPEND|DMEXCL|0666"));
     }
 
     #[test]

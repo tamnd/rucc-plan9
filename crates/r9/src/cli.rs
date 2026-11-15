@@ -110,7 +110,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
                 "test-timeout",
                 "targets",
             ],
-            switches: &["keep", "bisect"],
+            switches: &["keep", "bisect", "finish"],
         },
         "fixedpoint" => Accepts {
             positional: false,
@@ -232,7 +232,7 @@ usage:
       network card on the user network of QEMU, where the host is 10.0.2.2.
   r9 build [NAME] --side G|R [--row OBJTYPE] [--accel kvm|hvf|tcg] [--dir DIR] [--timeout SECS]
           [--firmware PATH] [--image FILE] [--out DIR] [--rucc PATH] [--keep] [--test CMD]
-          [--test-timeout SECS] [--targets 'T ...']
+          [--test-timeout SECS] [--targets 'T ...'] [--finish]
       Boot the g-base image of the row, or the image of the release NAME when there is no
       g-base image, and run mk install in DIR (/sys/src by default) with r9-cc in the compiler
       slot. --image boots FILE. Collect the compile records, the mk log, the files that the
@@ -247,7 +247,9 @@ usage:
       build or the test fails. --targets gives the mk targets in place of install, such as
       'clean install'. Each target is a separate mk, in the order given. The targets cross,
       boot and 9h are not mk targets: see guest/r9-build. 9h builds the kernels of 9h, and
-      they go to DIR/collected/9h. 9h.arm64 and 9h.amd64 build one of them.
+      they go to DIR/collected/9h. 9h.arm64 and 9h.amd64 build one of them. --finish does
+      not boot. It does the host part again for the build in --out, from its steps.json and
+      DIR/collected, for example after a repair of compile.jsonl. Give the same options.
   r9 mix [NAME] [--file UNIT=R|G,...] [--mix FILE] [--default R|G] [r9 build options]
       Build with some units from rucc and the others from kencc (plan 05.7, 12.8). A unit is a
       source file of the guest, such as /sys/src/libc/port/strcmp.c, or a directory, which

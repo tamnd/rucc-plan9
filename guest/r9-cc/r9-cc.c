@@ -7,7 +7,11 @@
  * cross build and in a kernel mkfile, $objtype is not $cputype, and /$objtype/bin has the
  * programs of the other machine. Then it appends one JSON record to /tmp/r9/compile.jsonl: the compiler,
  * objtype, the directory, the arguments, the SHA-256 of each input and output, the exit status
- * and the time. The file is append-only, so parallel calls from mk do not mix their records.
+ * and the time. The file is append-only and for exclusive use. The kernel splits a write of more
+ * than the iounit into several 9P writes, and with an append-only file alone, the record of
+ * another call can go between them. A long standard error, such as 200 KB of warnings, makes
+ * such a record. A call opens the file only when no other call has it open, so the records of
+ * parallel calls from mk do not mix.
  *
  * When $r9ccd names the host, such as tcp!10.0.2.2!5640, a call for the machine of the guest
  * goes to rucc through r9 ccd (plan 05.4). r9-cc dials the host two times. On the first
@@ -33,6 +37,8 @@ enum {
 	Maxfiles = 256,
 	Hexlen = 2*SHA2_256dlen+1,
 	Tries = 3,	/* calls to r9 ccd before a lost call goes to kencc */
+	Lockms = 10,	/* the wait before the next open of the records */
+	Locktries = 6000,	/* one minute of waits */
 };
 
 char *records = "/tmp/r9/compile.jsonl";
@@ -227,17 +233,38 @@ files(int argc, char **argv, int l, char **in, char **out, int *nin)
 	return nout;
 }
 
+/* Open the records for exclusive use. Another call can have them open, so try again. */
+int
+openrecords(void)
+{
+	int fd, i;
+	char err[ERRMAX];
+
+	for(i = 0; i < Locktries; i++){
+		if((fd = open(records, OWRITE)) >= 0)
+			return fd;
+		rerrstr(err, sizeof err);
+		if(strstr(err, "not exist") != nil || strstr(err, "not found") != nil){
+			/* The first call creates the file. Another call can create it first. */
+			if((fd = create(records, OWRITE|OEXCL, DMAPPEND|DMEXCL|0666)) >= 0)
+				return fd;
+			rerrstr(err, sizeof err);
+			if(strstr(err, "exist") != nil)
+				continue;
+		}
+		if(strstr(err, "lock") == nil && strstr(err, "in use") == nil)
+			return -1;
+		sleep(Lockms);
+	}
+	return -1;
+}
+
 void
 record(Buf *b)
 {
 	int fd;
 
-	fd = open(records, OWRITE);
-	if(fd < 0){
-		fd = create(records, OWRITE|OEXCL, DMAPPEND|0666);
-		if(fd < 0)
-			fd = open(records, OWRITE);
-	}
+	fd = openrecords();
 	if(fd < 0){
 		fprint(2, "r9-cc: cannot open %s: %r\n", records);
 		return;
