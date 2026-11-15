@@ -1,7 +1,9 @@
 /*
  * The 9h machine (rucc-plan9, plan 10.2): the functions that
  * pc64 main.c and pc/bootargs.c call in the screen files,
- * which the 9h kernel does not have. The machine has no
+ * which the 9h kernel does not have. mkdevc writes an empty
+ * bootscreeninit, because the configuration has no vga, so
+ * this file does not have it. The machine has no
  * display. The draw device of a 9h program is that of the
  * host, through /mnt/term.
  */
@@ -11,12 +13,6 @@
 #include "dat.h"
 #include "fns.h"
 #include "io.h"
-
-/* screen.c */
-void
-bootscreeninit(void)
-{
-}
 
 /* screen.c */
 char*

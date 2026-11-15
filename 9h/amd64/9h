@@ -48,7 +48,7 @@ misc
 	archmp	mp apic squidboy
 	mtrr
 	h9	h9l
-	uarth9
+	uarti8250h9
 	sdh9
 	dtracysys
 	dtracytimer
