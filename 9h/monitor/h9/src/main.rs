@@ -11,6 +11,7 @@ use h9_dev::h9ctl::H9Ctl;
 use h9_dev::h9disk::H9Disk;
 use h9_dev::h9fs::H9Fs;
 use h9_dev::h9snarf::{Clipboard, H9Snarf, Host, Memory};
+use h9_dev::pcinone::{self, PciNone};
 use h9_dev::pl011::Pl011;
 use h9_dev::pl031::Pl031;
 use h9_dev::{Bus, PORTS};
@@ -60,9 +61,10 @@ const USAGE: &str = "usage:
       --headless opens no window. The monitor has no window yet, so each session is headless
       now.
       On amd64, FILE is a 6l kernel with a multiboot header (9pc64). The machine is a PC with
-      RAM from address 0, the APICs, the 8259s and the 8254 of KVM, a CMOS clock, and ACPI
-      tables for --cpus processors. The kernel gets *nocga=1 and --bootargs as its multiboot command line and
-      the --ini file as its first module. Its console is the 9h hypercall console with IRQ 5.
+      RAM from address 0, the APICs, the 8259s and the 8254 of KVM, a CMOS clock, the PCI
+      configuration ports with no device on the bus, and ACPI tables for --cpus processors.
+      The kernel gets *nocga=1 and --bootargs as its multiboot command line and the --ini file
+      as its first module. Its console is the 9h hypercall console with IRQ 5.
       --machine virt is for arm64 only. The machine needs /dev/kvm.";
 
 const RAM_BASE: u64 = 0x4000_0000;
@@ -434,6 +436,11 @@ fn run(o: &Options) -> Result<ExitCode, String> {
     }
     if PC {
         bus.add(PORTS + cmos::PORT, 2, Box::new(Cmos::new()));
+        bus.add(
+            PORTS + pcinone::PORT,
+            pcinone::LEN,
+            Box::new(PciNone::new()),
+        );
     } else {
         bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     }
