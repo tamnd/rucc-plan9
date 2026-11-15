@@ -14,9 +14,13 @@ enum {
 	H9sdread	= 0xC6000011,	/* (unit, lba, n, pa) returns the sectors read */
 	H9sdwrite	= 0xC6000012,	/* (unit, lba, n, pa) returns the sectors written */
 	H9sdflush	= 0xC6000013,	/* (unit) returns 0 */
+	H9fsreset	= 0xC6000020,	/* () starts a new 9P session of #Z/hostfs */
+	H9fswrite	= 0xC6000021,	/* (pa, n) gives n bytes of 9P to the host, returns n */
+	H9fsread	= 0xC6000022,	/* (pa, n) gets at most n bytes of 9P replies, returns the count */
 
 	H9sdsecsize	= 512,		/* bytes in a sector */
 	H9sdmax	= 128,		/* the most sectors of one call */
+	H9fsmax	= 65536+24,	/* the largest 9P message of the host */
 
 	H9revision	= 1,
 

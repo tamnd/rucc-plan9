@@ -39,7 +39,7 @@ What it gains:
 | `audioh9.c` | an `audio` card for port's `devaudio` |
 | `sdh9.c` | a disk for port's `devsd`, backed by a host file. The units are `sdH0` to `sdH3` |
 | `etherh9.c` | an Ethernet for port's `devether` |
-| `devhost.c` | `#Z`: the snarf buffer, the host file system channel, and `ctl` (10.5) |
+| `devhost.c` | `#Z`: the snarf buffer, the host file system channel `hostfs`, and `ctl` (10.5). `hostfs` is done |
 
 The files are about 2,000 lines on each architecture. They use only interfaces port and the tree's arch code already export. Where one is derived from a tree file (`h9screen.c` from `bcm/screen.c`, `sdh9.c` from `sdram.c`), its header says so. `#Z` is unused at the pin, and `r9 9h verify` checks that it still is at each pin.
 
@@ -128,7 +128,7 @@ Intel Macs (HVF on x86) could run the same machine with `hv_vm_create` and the x
 | disk | `sd.info`, `sd.read`, `sd.write`, `sd.flush` | none | a host file, in requests of at most 64 KiB |
 | ether | `ether.tx(pa, n)`, a receive ring | receive | user-mode NAT (as QEMU's `-netdev user`), or `vmnet` on macOS and a tap device on Linux when configured |
 | `#Z/snarf` | `snarf.get(pa, n)`, `snarf.put(pa, n)` | host clipboard changed | the host clipboard, text only, UTF-8 |
-| `#Z/hostfs` | a 9P2000 byte channel in two rings | data | the monitor's 9P server over a host directory |
+| `#Z/hostfs` | `fs.reset`, `fs.write`, `fs.read` | none | the monitor's 9P server over a host directory (`h9-9p`) |
 | `#Z/ctl` | `ctl` | host request | window title, quit, scale (11) |
 | clock | none | none | the generic timer or the TSC, and an RTC value in the device tree or ACPI |
 
@@ -144,10 +144,15 @@ Intel Macs (HVF on x86) could run the same machine with `hv_vm_create` and the x
 | `0xC6000011` | `H9sdread` | the unit, the first sector, the count, and the physical address | the count read, at most 128 |
 | `0xC6000012` | `H9sdwrite` | the unit, the first sector, the count, and the physical address | the count written, at most 128 |
 | `0xC6000013` | `H9sdflush` | the unit | 0 |
+| `0xC6000020` | `H9fsreset` | none | 0, or -1 when the monitor serves no host directory |
+| `0xC6000021` | `H9fswrite` | the physical address and the count | the count, or -3 for a message size that is not correct |
+| `0xC6000022` | `H9fsread` | the physical address and the count | the count of reply bytes copied, 0 when none waits |
 
 A number that no device has gives -1, and the monitor logs it once. The console input interrupt is SPI 16 (INTID 48). It is a level interrupt, and it stays high while an input byte waits.
 
 A disk call that fails gives -2 for an address that is not in RAM, and -3 for a sector outside the disk, a write to a read-only unit, or an error of the host. The disk calls do the transfer before they return. This is different from the general rule above, for two reasons. A request is at most 64 KiB, which takes less than a millisecond from a host SSD. Also, the driver needs no interrupt and no wait, so it is as small as `sdram.c`. If a profile shows that the guest waits too long in these calls, a later revision can add a form that starts the transfer and raises a done interrupt. The monitor does not set `O_DIRECT` or `F_NOCACHE` yet, so the host caches the disk file. `H9sdflush` calls `fdatasync` on the file.
+
+The server of `#Z/hostfs` answers each whole 9P message in the `H9fswrite` call that gives its last byte. Thus a reply waits by the time `devmnt` reads for it, and `devhost.c` needs no interrupt. A read that finds no reply sleeps until the next write. `devhost.c` opens `hostfs` for one user at a time, and each open starts a new session with `H9fsreset`. The option `--hostfs DIR` serves DIR, and `--hostfs DIR,ro` serves it read-only. `--user NAME` gives the owner of the files, `glenda` by default.
 
 The option `--disk FILE` adds a unit, and `--disk FILE,ro` adds a read-only unit. The first `--disk` is `sdH0`.
 

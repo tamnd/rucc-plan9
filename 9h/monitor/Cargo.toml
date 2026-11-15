@@ -16,6 +16,7 @@ repository = "https://github.com/tamnd/rucc-plan9"
 h9-vm = { path = "h9-vm" }
 h9-dev = { path = "h9-dev" }
 h9-hvf = { path = "h9-hvf" }
+h9-9p = { path = "h9-9p" }
 libc = "0.2"
 
 [workspace.lints.rust]

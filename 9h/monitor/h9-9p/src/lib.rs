@@ -8,4 +8,4 @@
 pub mod msg;
 mod server;
 
-pub use server::{Options, Server};
+pub use server::{MAXMSIZE, Options, Server};

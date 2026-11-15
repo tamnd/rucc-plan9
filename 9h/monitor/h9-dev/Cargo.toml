@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 h9-vm.workspace = true
+h9-9p.workspace = true
 
 [lints]
 workspace = true
