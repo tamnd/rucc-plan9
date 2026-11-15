@@ -22,6 +22,13 @@
 # After each objtype, objtype=$o mk clean removes its object files. hjfs then uses those blocks
 # again for the next objtype, and the overlay of the image on the host stays small.
 #
+# The target boot is not a target of mk either. mk kernels runs mk install in each directory in
+# ARCH of /sys/src/boot, but most of those mkfiles have no install rule, so mk kernels stops at
+# boot/bcm on each 9front tree. For each directory, boot runs mk install when the mkfile has an
+# install rule, and mk all when it has none. A directory whose mkfile gets its files with hget
+# is not built, because a build does not use the network. As in mk kernels, mk clean runs before
+# and after. Thus mk kernels is the targets clean install clean in /sys/src/9, then boot.
+#
 # With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
 # machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
 # rucc fails runs the real compiler, and what rucc said goes to /tmp/r9/rucc.err.
@@ -47,7 +54,8 @@ for(c in 6c 7c 8c 5c vc 6a 7a 8a 5a va)
 bind -b /tmp/r9/shim /bin
 cd $dir || exit cd
 for(t in $targets){
-	if(~ $t cross){
+	switch($t){
+	case cross
 		kernels=`{sed -n '/^ARCH=/,/^$/p' /sys/src/9/mkfile | grep -v '^ARCH|#|^$' | tr -d '\\	 '}
 		os=`{{for(k in $kernels) grep '^objtype=' /sys/src/9/$k/mkfile} | sed 's/objtype=//' | sort -u}
 		for(o in $os){
@@ -60,8 +68,26 @@ for(t in $targets){
 				@{cd /sys/src && objtype=$o mk clean} > /dev/null
 			}
 		}
-	}
-	if not {
+	case boot
+		b=/sys/src/boot
+		dirs=`{sed -n '/^ARCH=/,/^$/p' $b/mkfile | grep -v '^ARCH|#|^$' | tr -d '\\	 '}
+		for(i in $dirs){
+			m=()
+			if(grep -s '^install[^:]*:' $b/$i/mkfile)
+				m=install
+			if not if(! grep -s hget $b/$i/mkfile)
+				m=all
+			if(~ $#m 0)
+				echo r9-build: boot/$i gets its files with hget, not built
+			if not {
+				echo r9-build: boot/$i mk $m
+				@{cd $b/$i && mk clean && mk $m && mk clean}
+				s=$status
+				if(! ~ $s '')
+					exit $s
+			}
+		}
+	case *
 		mk $t
 		s=$status
 		if(! ~ $s '')

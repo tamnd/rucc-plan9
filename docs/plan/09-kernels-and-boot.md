@@ -25,6 +25,8 @@
 
 **Libraries and programs.** A kernel for `objtype=arm` links `/arm/lib/libc.a` and the rest, and its boot file system has programs of its `objtype`, such as `/arm/bin/paqfs`, `/arm/bin/auth/factotum` and the programs of `bootfs.proto`. `mk install` in an amd64 guest builds only `/amd64/lib` and `/amd64/bin`, and the first R run of `mk kernels` stopped at `/arm64/bin/paqfs`. Thus `r9-build` has the target `cross`: for each kernel `objtype` that is not the `objtype` of the guest, it runs `objtype=$o mk install` in `/sys/src` before `mk kernels`. That is the tree's documented way to cross-build, so it counts as a build command of 02.1. The units of these builds are `other-arch` too, except `arm64`'s, which are R's from P4 on.
 
+**The boot directory.** In `/sys/src/boot`, only `bitsy`, `efi` and `pc` have an `install` rule. The other mkfiles have only `all` and `clean`, so `mk kernels` stops at `boot/bcm` on each 9front tree, on G as on R. The mkfiles of `bcm` and `reform` also get their files from the network with `hget`. Thus `r9-build` has the target `boot`. For each directory in `ARCH` of `/sys/src/boot`, it runs `mk install` when the mkfile has an `install` rule, and `mk all` when it has none. It does not build a directory whose mkfile uses `hget`, because a build does not use the network, and it reports that directory. A graded `mk kernels` is the targets `clean install clean` in `/sys/src/9`, then `boot`.
+
 ## 09.2 How a kernel is built
 
 `9/pc64/mkfile` is typical:
