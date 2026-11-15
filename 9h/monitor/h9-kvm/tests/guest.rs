@@ -1,6 +1,7 @@
-//! A small multiboot guest on KVM. It checks the entry state, reads the CMOS through the ports,
-//! writes to the console with a hypercall, and turns the machine off. The test needs `/dev/kvm`.
-//! With no KVM it passes with a note, unless `H9_NEED_KVM=1` is set, as in CI.
+//! Small multiboot guests on KVM. The first checks the entry state, reads the CMOS through the
+//! ports, writes to the console with a hypercall, and turns the machine off. The second resets the
+//! machine through port 0xcf9, as `archreset` of the tree does. The tests need `/dev/kvm`. With no
+//! KVM they pass with a note, unless `H9_NEED_KVM=1` is set, as in CI.
 #![cfg(all(target_os = "linux", target_arch = "x86_64"))]
 
 use std::io::Write;
@@ -27,9 +28,9 @@ impl Write for Out {
 
 const MESSAGE: &[u8] = b"hello, amd64";
 
-/// The kernel: a multiboot header at 0x100000 with the load addresses, the code at 0x100020,
-/// and the message at 0x100100.
-fn guest() -> Vec<u8> {
+/// A kernel: a multiboot header at 0x100000 with the load addresses, the code at 0x100020, and
+/// the message at 0x100100.
+fn kernel(code: &[u8]) -> Vec<u8> {
     let mut k = vec![0u8; 0x100 + MESSAGE.len()];
     let flags = 1u32 << 16;
     let header = [
@@ -45,6 +46,13 @@ fn guest() -> Vec<u8> {
     for (n, w) in header.iter().enumerate() {
         k[n * 4..n * 4 + 4].copy_from_slice(&w.to_le_bytes());
     }
+    k[0x20..0x20 + code.len()].copy_from_slice(code);
+    k[0x100..].copy_from_slice(MESSAGE);
+    k
+}
+
+/// The kernel of the first test.
+fn guest() -> Vec<u8> {
     #[rustfmt::skip]
     let code: &[u8] = &[
         0x3d, 0x02, 0xb0, 0xad, 0x2b,       // 20: cmp eax, 0x2badb002
@@ -71,27 +79,30 @@ fn guest() -> Vec<u8> {
         0xf4,                               // 60: hlt
         0xeb, 0xfd,                         // 61: jmp 60
     ];
-    k[0x20..0x20 + code.len()].copy_from_slice(code);
-    k[0x100..].copy_from_slice(MESSAGE);
-    k
+    kernel(code)
 }
 
-#[test]
-fn a_multiboot_guest_writes_and_turns_off() {
+/// True when the test can run. With no KVM, the test passes with a note, unless `H9_NEED_KVM=1`.
+fn have_kvm() -> bool {
     if std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/kvm")
-        .is_err()
+        .is_ok()
     {
-        assert!(
-            std::env::var("H9_NEED_KVM").as_deref() != Ok("1"),
-            "H9_NEED_KVM=1, and /dev/kvm does not open"
-        );
-        eprintln!("no /dev/kvm: the guest does not run");
-        return;
+        return true;
     }
-    let image = multiboot::load(&guest()).unwrap();
+    assert!(
+        std::env::var("H9_NEED_KVM").as_deref() != Ok("1"),
+        "H9_NEED_KVM=1, and /dev/kvm does not open"
+    );
+    eprintln!("no /dev/kvm: the guest does not run");
+    false
+}
+
+/// Run `k` on 2 vCPUs, with the console and the CMOS. The result is the stop and the output.
+fn run(k: &[u8]) -> (Stop, Vec<u8>) {
+    let image = multiboot::load(k).unwrap();
     let mem = 64u64 << 20;
     let ram = Arc::new(Ram::new(0, mem as usize).unwrap());
     for (pa, seg) in &image.segments {
@@ -111,10 +122,40 @@ fn a_multiboot_guest_writes_and_turns_off() {
     bus.add(PORTS + cmos::PORT, 2, Box::new(Cmos::new()));
     let vm = Vm::new(ram, bus, 2).unwrap();
     let stop = vm.run(image.entry, multiboot::INFO).unwrap();
+    let text = out.0.lock().unwrap().clone();
+    (stop, text)
+}
+
+#[test]
+fn a_multiboot_guest_writes_and_turns_off() {
+    if !have_kvm() {
+        return;
+    }
+    let (stop, text) = run(&guest());
     assert_eq!(
         stop,
         Stop::Off,
         "Reset means that a check of the guest failed"
     );
-    assert_eq!(out.0.lock().unwrap().as_slice(), MESSAGE);
+    assert_eq!(text, MESSAGE);
+}
+
+#[test]
+fn a_write_of_6_to_port_cf9_resets_the_machine() {
+    if !have_kvm() {
+        return;
+    }
+    #[rustfmt::skip]
+    let code: &[u8] = &[
+        0xb0, 0x02,                         // 20: mov al, 2
+        0x66, 0xba, 0xf9, 0x0c,             // 22: mov dx, 0xcf9
+        0xee,                               // 26: out dx, al
+        0xb0, 0x06,                         // 27: mov al, 6
+        0xee,                               // 29: out dx, al
+        0xf4,                               // 2a: hlt
+        0xeb, 0xfd,                         // 2b: jmp 2a
+    ];
+    let (stop, text) = run(&kernel(code));
+    assert_eq!(stop, Stop::Reset);
+    assert!(text.is_empty());
 }

@@ -112,6 +112,8 @@ The monitor builds a minimal PC that pc64's code accepts:
 
 Port I/O and MMIO exits to anything but the hypercall port are logged and return all ones, so a stray probe of hardware that is not there behaves as an empty slot. P7 runs the `9h` kernel with these logs to make sure the configuration has no such probes. The hypercall is a 32-bit `OUT` to I/O port `0x509`, which the monitor reserves. It exits as `KVM_EXIT_IO`, and the monitor reads the arguments with `KVM_GET_REGS`. `VMCALL` is not usable: KVM handles it in the host kernel and returns `-KVM_ENOSYS` for numbers it does not know, except one it forwards for confidential guests.
 
+**Reset and power off.** When the kernel exits or reboots, `archreset` of the tree writes 6 to port `0xcf9`, the reset control register of the PC. The monitor ends the session with a reset when it sees a write with bit 2 set. The FADT has no reset register and no PM1 blocks, so the kernel uses that port, and `ctl` of `#Z` with `quit` turns the machine off, as on arm64.
+
 Intel Macs (HVF on x86) could run the same machine with `hv_vm_create` and the x86 framework, but the framework has no in-kernel APIC there, so the monitor would emulate it. That is not planned (02.6).
 
 ## 10.5 Hypercalls and devices
