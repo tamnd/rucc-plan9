@@ -1,7 +1,10 @@
 //! The ACPI tables of the amd64 machine (plan 10.4). `archacpi.c` of the tree finds the RSDP in
 //! the BIOS area, and reads the processors and the I/O APIC from the MADT. The tables are the
-//! least that it accepts: an RSDP, an RSDT and an XSDT, a FADT, a DSDT with no AML, and the MADT.
-//! The machine has no HPET table, so the kernel uses the PIT and the TSC.
+//! least that it accepts: an RSDP, an RSDT and an XSDT, a FADT, a DSDT, and the MADT. The machine
+//! has no HPET table, so the kernel uses the PIT and the TSC.
+//!
+//! `aux/acpi` of the tree turns the machine off. The FADT gives the port of the `PM1a` control
+//! register, and the DSDT has only the package `_S5` with its sleep type.
 //!
 //! The MADT has no interrupt source override, so ISA interrupt N is input N of the I/O APIC, as
 //! in the default routing of KVM.
@@ -14,6 +17,10 @@ pub const LAPIC: u64 = 0xfee0_0000;
 pub const IOAPIC: u64 = 0xfec0_0000;
 /// The most processors. The MADT has an entry of 8 bytes for each.
 pub const MAX_CPUS: u32 = 64;
+/// The port of the `PM1a` control register.
+pub const PM1A_CNT: u16 = 0x604;
+/// The sleep type of the state S5.
+pub const SLP_TYP_S5: u8 = 5;
 
 /// The offsets of the tables from `RSDP`.
 const RSDT: usize = 0x40;
@@ -24,6 +31,12 @@ const MADT: usize = 0x200;
 
 const HEADER: usize = 36;
 const OEM: &[u8; 6] = b"R9 9H ";
+
+/// The AML of the DSDT: `Name (_S5, Package (2) { 5, 5 })`, with `NameOp`, the name, `PackageOp`,
+/// the package length, the number of elements, and each element with `BytePrefix`.
+const S5_AML: [u8; 12] = [
+    0x08, b'_', b'S', b'5', b'_', 0x12, 0x06, 0x02, 0x0a, SLP_TYP_S5, 0x0a, SLP_TYP_S5,
+];
 
 fn put(b: &mut [u8], at: usize, v: &[u8]) {
     b[at..at + v.len()].copy_from_slice(v);
@@ -80,15 +93,20 @@ pub fn tables(ncpu: u32) -> Result<Vec<u8>, String> {
     seal(&mut b, RSDT, HEADER + 4 * entries.len(), 9);
     seal(&mut b, XSDT, HEADER + 8 * entries.len(), 9);
 
-    // FADT of ACPI 1.0, 116 bytes: only the DSDT. The kernel reads it at offset 40, and the
-    // X_DSDT at offset 140 only in a longer table.
+    // FADT of ACPI 1.0, 116 bytes: the DSDT, and the PM1a control register with its length. The
+    // kernel reads the DSDT at offset 40, and the X_DSDT at offset 140 only in a longer table.
+    // aux/acpi reads PM1a_CNT_BLK at offset 64. PM1b_CNT_BLK at offset 68 is 0.
     header(&mut b, FADT, *b"FACP", 116, 1);
     put(&mut b, FADT + 40, &(base + DSDT as u32).to_le_bytes());
+    put(&mut b, FADT + 64, &u32::from(PM1A_CNT).to_le_bytes());
+    b[FADT + 89] = 2;
     seal(&mut b, FADT, 116, 9);
 
-    // DSDT with no AML.
-    header(&mut b, DSDT, *b"DSDT", HEADER, 2);
-    seal(&mut b, DSDT, HEADER, 9);
+    // DSDT with only _S5.
+    let dsdt_len = HEADER + S5_AML.len();
+    header(&mut b, DSDT, *b"DSDT", dsdt_len, 2);
+    put(&mut b, DSDT + HEADER, &S5_AML);
+    seal(&mut b, DSDT, dsdt_len, 9);
 
     // MADT: the local APIC address, PCAT_COMPAT for the 8259s, a local APIC for each processor
     // with its number as the APIC ID, and the I/O APIC with ID 0 and GSI base 0.
@@ -150,7 +168,15 @@ mod tests {
             if &t[..4] == b"FACP" {
                 let dsdt = table(&b, u64::from(le32(t, 40)));
                 assert_eq!(&dsdt[..4], b"DSDT");
-                assert_eq!(dsdt.len(), 36);
+                assert_eq!(&dsdt[36..41], b"\x08_S5_");
+                assert_eq!(dsdt[41], 0x12);
+                assert_eq!(dsdt[42] as usize, dsdt.len() - 42);
+                assert_eq!(dsdt[43], 2);
+                assert_eq!(dsdt[44..], [0x0a, 5, 0x0a, 5]);
+                assert!(dsdt.len() <= MADT - DSDT);
+                assert_eq!(le32(t, 64), u32::from(PM1A_CNT));
+                assert_eq!(le32(t, 68), 0);
+                assert_eq!(t[89], 2);
             }
             if &t[..4] == b"APIC" {
                 assert_eq!(u64::from(le32(t, 36)), LAPIC);

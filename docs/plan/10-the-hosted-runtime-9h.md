@@ -108,7 +108,8 @@ The boot with more than one processor showed these facts:
 The monitor builds a minimal PC that pc64's code accepts:
 - RAM from 0, with the usual hole at `0xa0000`–`0x100000`;
 - KVM's in-kernel interrupt controllers (`KVM_CREATE_IRQCHIP`: local APIC, I/O APIC and PIC) and PIT (`KVM_CREATE_PIT2`);
-- ACPI tables written by the monitor: RSDP, XSDT, MADT and FADT, with no AML beyond an empty DSDT. `archacpi.c` reads them to find the processors and the I/O APIC;
+- ACPI tables written by the monitor: RSDP, XSDT, MADT and FADT, and a DSDT with only the package `_S5`. `archacpi.c` reads them to find the processors and the I/O APIC;
+- the PM1a control register of ACPI at port `0x604`, which the FADT gives. `fshalt` runs `aux/acpi`, which writes the sleep type of `_S5` and `SLP_EN` to the register. Then the machine turns off, and the session ends. The FADT has no PM1b control register;
 - the CMOS clock at ports `0x70` and `0x71`;
 - the PCI configuration ports `0xcf8` to `0xcff` of mechanism 1, with no device on the bus. `pcicfginit` of `pc/pcipc.c` reads them at each boot. It finds mechanism 1, reads all ones as the vendor ID of each slot, and finds no device. With no device at the ports, it would try mechanism 2 and then the PCI BIOS.
 

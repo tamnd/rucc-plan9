@@ -7,6 +7,7 @@
 //! no device has reads as all ones and is logged, as an empty slot on a real bus (plan 10.4).
 //! With `strict`, such an access stops the session instead (plan 10.10).
 
+pub mod acpipm;
 pub mod cmos;
 pub mod h9;
 pub mod h9cons;

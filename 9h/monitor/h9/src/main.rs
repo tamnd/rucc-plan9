@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use h9_dev::acpipm::{self, AcpiPm};
 use h9_dev::cmos::{self, Cmos};
 use h9_dev::h9;
 use h9_dev::h9cons::H9Cons;
@@ -441,6 +442,7 @@ fn run(o: &Options) -> Result<ExitCode, String> {
             pcinone::LEN,
             Box::new(PciNone::new()),
         );
+        bus.add(PORTS + acpipm::PORT, acpipm::LEN, Box::new(AcpiPm::new()));
     } else {
         bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     }
