@@ -4,13 +4,14 @@ This is the monitor of `9h`, the hosted runtime of plan 10. It runs a 9front ker
 
 | Crate | What |
 |---|---|
-| `h9-vm` | the guest RAM, the kernel loader (a.out and U-Boot images), the device tree builder and the exits |
-| `h9-dev` | the bus, the PSCI calls, the 9h hypercall devices (console and disk) and the bring-up devices (PL011 and PL031) |
+| `h9-vm` | the guest RAM, the kernel loaders (a.out, U-Boot images and multiboot), the device tree builder, the ACPI tables and the exits |
+| `h9-dev` | the bus, the PSCI calls, the 9h hypercall devices (console and disk), the bring-up devices (PL011 and PL031) and the CMOS clock of the PC |
 | `h9-hvf` | the Hypervisor.framework back end, for macOS on arm64 |
+| `h9-kvm` | the KVM back end, for Linux on x86-64. It runs a multiboot amd64 kernel on a PC with the APICs and the timer of KVM |
 | `h9-9p` | the 9P2000 server over a host directory, for `/mnt/term` of the guest. `h9-dev` connects it to `#Z/hostfs` with three hypercalls |
 | `h9` | the `9h` command |
 
-The KVM back end, the hypercall devices and the `9h` kernel come in later steps of P7.
+The `9h` kernel for amd64 comes in a later step of P7. On Linux, `9h` needs `/dev/kvm`, and it has no emulator for a host with no KVM (open question 13).
 
 ## Build
 

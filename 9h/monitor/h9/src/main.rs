@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use h9_dev::Bus;
+use h9_dev::cmos::{self, Cmos};
 use h9_dev::h9;
 use h9_dev::h9cons::H9Cons;
 use h9_dev::h9ctl::H9Ctl;
@@ -13,12 +13,17 @@ use h9_dev::h9fs::H9Fs;
 use h9_dev::h9snarf::{Clipboard, H9Snarf, Host, Memory};
 use h9_dev::pl011::Pl011;
 use h9_dev::pl031::Pl031;
+use h9_dev::{Bus, PORTS};
 use h9_vm::Ram;
 use h9_vm::fdt::Fdt;
+use h9_vm::{acpi, multiboot};
 
-// Only the back end of HVF runs a script, until the one of KVM exists.
+// Only a host with a back end runs a script.
 #[cfg_attr(
-    not(all(target_os = "macos", target_arch = "aarch64")),
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )),
     allow(dead_code)
 )]
 mod script;
@@ -29,8 +34,9 @@ const USAGE: &str = "usage:
   9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
          [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--snarf host|memory]
          [--ini FILE] [--strict] [--timeout SECS] [--script FILE] [--headless]
-      Run an arm64 kernel of the tree on the hypervisor of the host. FILE is a 7l a.out or the
-      U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
+      Run a kernel of the tree on the hypervisor of the host: an arm64 kernel on HVF on macOS
+      on arm64, and an amd64 kernel on KVM on Linux on x86-64. On arm64, FILE is a 7l a.out
+      or the U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
       machine: RAM at 0x40000000 (--mem MiB, 1024 by default), the device tree at the start of
       the RAM, and the GICv3 of the hypervisor. --machine 9h, the default, is the machine of
       the 9h kernel: its console is a hypercall. --machine virt has a PL011 console in place of
@@ -48,7 +54,12 @@ const USAGE: &str = "usage:
       TEXT, send TEXT, timeout SECS and quit. The script owns the input, so the monitor does
       not read its own. The exit status is 0 when the script passes and 3 when it fails.
       --headless opens no window. The monitor has no window yet, so each session is headless
-      now.";
+      now.
+      On amd64, FILE is a 6l kernel with a multiboot header (9pc64). The machine is a PC with
+      RAM from address 0, the APICs, the 8259s and the 8254 of KVM, a CMOS clock, and ACPI
+      tables for --cpus processors. The kernel gets --bootargs as its multiboot command line and
+      the --ini file as its first module. Its console is the 9h hypercall console with IRQ 5.
+      --machine virt is for arm64 only. The machine needs /dev/kvm.";
 
 const RAM_BASE: u64 = 0x4000_0000;
 const DTB: u64 = RAM_BASE;
@@ -260,10 +271,14 @@ fn devtree(o: &Options) -> Vec<u8> {
     t.finish()
 }
 
-fn run(o: &Options) -> Result<ExitCode, String> {
-    let bytes = std::fs::read(&o.kernel).map_err(|e| format!("{}: {e}", o.kernel))?;
+/// The host runs the amd64 machine, not the arm64 one.
+const PC: bool = cfg!(target_arch = "x86_64");
+
+/// The RAM of the arm64 machine, with the kernel at its addresses, the device tree and the
+/// plan9.ini, and the entry and the X0 of vCPU 0.
+fn load_arm64(o: &Options, bytes: &[u8]) -> Result<(Arc<Ram>, u64, u64), String> {
     let image =
-        h9_vm::kernel::load(&bytes, KZERO, 0x1_0000).map_err(|e| format!("{}: {e}", o.kernel))?;
+        h9_vm::kernel::load(bytes, KZERO, 0x1_0000).map_err(|e| format!("{}: {e}", o.kernel))?;
     let ram = Arc::new(Ram::new(RAM_BASE, (o.mem << 20) as usize)?);
     for (pa, seg) in &image.segments {
         if !ram.write(*pa, seg) {
@@ -295,6 +310,53 @@ fn run(o: &Options) -> Result<ExitCode, String> {
             return Err(format!("{ini}: the plan9.ini does not fit in the RAM"));
         }
     }
+    Ok((ram, image.entry, DTB))
+}
+
+/// The RAM of the amd64 machine, with the kernel at its addresses, the multiboot information
+/// block and the ACPI tables, and the entry and the EBX of vCPU 0.
+fn load_pc(o: &Options, bytes: &[u8]) -> Result<(Arc<Ram>, u64, u64), String> {
+    let image = multiboot::load(bytes).map_err(|e| format!("{}: {e}", o.kernel))?;
+    let mem = o.mem << 20;
+    if image.end > mem {
+        return Err(format!("{}: the kernel does not fit in the RAM", o.kernel));
+    }
+    let ram = Arc::new(Ram::new(0, mem as usize)?);
+    for (pa, seg) in &image.segments {
+        if !ram.write(*pa, seg) {
+            return Err(format!(
+                "{}: a segment at {pa:#x} is not in the RAM",
+                o.kernel
+            ));
+        }
+    }
+    let ini = match &o.ini {
+        Some(f) => Some(std::fs::read(f).map_err(|e| format!("{f}: {e}"))?),
+        None => None,
+    };
+    let info = multiboot::info(&multiboot::Info {
+        mem,
+        cmdline: &o.bootargs,
+        ini: ini.as_deref(),
+    })?;
+    if !ram.write(multiboot::INFO, &info) || !ram.write(acpi::RSDP, &acpi::tables(o.cpus)?) {
+        return Err("the boot information does not fit in the RAM".into());
+    }
+    Ok((ram, image.entry, multiboot::INFO))
+}
+
+fn run(o: &Options) -> Result<ExitCode, String> {
+    if PC && o.machine == Machine::Virt {
+        return Err(
+            "--machine virt is the arm64 bring-up machine, and this host runs amd64".into(),
+        );
+    }
+    let bytes = std::fs::read(&o.kernel).map_err(|e| format!("{}: {e}", o.kernel))?;
+    let (ram, entry, x0) = if PC {
+        load_pc(o, &bytes)?
+    } else {
+        load_arm64(o, &bytes)?
+    };
     let mut bus = Bus::new();
     bus.strict = o.strict;
     let log = o.script.as_ref().map(|_| Transcript::default());
@@ -309,7 +371,10 @@ fn run(o: &Options) -> Result<ExitCode, String> {
     };
     match o.machine {
         Machine::Virt => bus.add(UART, 0x1000, Box::new(Pl011::new(UART_SPI, console()))),
-        Machine::H9 => bus.add_hyper(Box::new(H9Cons::new(h9::CONS_SPI, console()))),
+        Machine::H9 => {
+            let irq = if PC { h9::CONS_IRQ } else { h9::CONS_SPI };
+            bus.add_hyper(Box::new(H9Cons::new(irq, console())));
+        }
     }
     if !o.disks.is_empty() {
         let mut d = H9Disk::new();
@@ -347,14 +412,21 @@ fn run(o: &Options) -> Result<ExitCode, String> {
             .then(|| Box::new(std::io::stdout()) as Box<dyn std::io::Write + Send>);
         bus.add_hyper(Box::new(H9Ctl::new(term)));
     }
-    bus.add(RTC, 0x1000, Box::new(Pl031::new()));
+    if PC {
+        bus.add(PORTS + cmos::PORT, 2, Box::new(Cmos::new()));
+    } else {
+        bus.add(RTC, 0x1000, Box::new(Pl031::new()));
+    }
     let script = o.script.clone().zip(log);
-    backend::run(ram, bus, o.cpus as usize, image.entry, DTB, script)
+    backend::run(ram, bus, o.cpus as usize, entry, x0, script)
 }
 
 /// Type the bytes on the console of the machine.
 #[cfg_attr(
-    not(all(target_os = "macos", target_arch = "aarch64")),
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )),
     allow(dead_code)
 )]
 fn type_in(bus: &mut Bus, b: &[u8]) {
@@ -372,11 +444,19 @@ fn type_in(bus: &mut Bus, b: &[u8]) {
 /// A session script and the console output that it reads.
 type Script = (Vec<(usize, Step)>, Transcript);
 
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+/// The back end of the host: HVF on macOS on arm64, KVM on Linux on x86-64. The two have the
+/// same interface.
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
 mod backend {
     use super::{Script, script, type_in};
     use h9_dev::Bus;
+    #[cfg(target_os = "macos")]
     use h9_hvf::{Stop, Vm};
+    #[cfg(target_os = "linux")]
+    use h9_kvm::{Stop, Vm};
     use h9_vm::Ram;
     use std::io::Read;
     use std::process::ExitCode;
@@ -435,7 +515,10 @@ mod backend {
     }
 }
 
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+#[cfg(not(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+)))]
 mod backend {
     use h9_dev::Bus;
     use h9_vm::Ram;
@@ -450,7 +533,7 @@ mod backend {
         _: u64,
         _: Option<super::Script>,
     ) -> Result<ExitCode, String> {
-        Err("this host has no back end yet: the monitor runs on macOS on arm64 only".into())
+        Err("this host has no back end: the monitor runs on macOS on arm64 (HVF) and on Linux on x86-64 (KVM)".into())
     }
 }
 

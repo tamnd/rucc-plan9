@@ -62,3 +62,6 @@ pub const IO_ERROR: u64 = u64::MAX - 2;
 
 /// The interrupt of the console input, `IRQh9cons`: SPI 16, which is INTID 48.
 pub const CONS_SPI: u32 = 48;
+/// The interrupt of the console input on the amd64 machine: ISA IRQ 5, which no device of the
+/// machine uses.
+pub const CONS_IRQ: u32 = 5;
