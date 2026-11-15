@@ -19,6 +19,8 @@
 # programs of its own objtype. For each other objtype of the kernels, cross runs
 # objtype=$o mk install in /sys/src, the cross build of the tree (plan 09.1). An objtype that
 # already has /$o/bin/paqfs is not built again, so a kept image can go on after a stop.
+# After each objtype, objtype=$o mk clean removes its object files. hjfs then uses those blocks
+# again for the next objtype, and the overlay of the image on the host stays small.
 #
 # With $r9ccd set to the address of r9 ccd, such as tcp!10.0.2.2!5640, each compile for the
 # machine of the guest goes to rucc on the host. With cc:auto in $r9bringup, a compile that
@@ -55,6 +57,7 @@ for(t in $targets){
 				s=$status
 				if(! ~ $s '')
 					exit $s
+				@{cd /sys/src && objtype=$o mk clean} > /dev/null
 			}
 		}
 	}
