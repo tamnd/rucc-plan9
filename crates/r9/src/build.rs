@@ -85,7 +85,7 @@ pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
         format!(
             "rm -rf /tmp/r9in {w} && mkdir -p /tmp/r9in /usr/glenda/r9/bin {w} && touch {w}/rucc.err && chmod +a {w}/rucc.err && cd /tmp/r9in && tar xf $r9in{net}"
         ),
-        "cp /tmp/r9in/r9-build /usr/glenda/r9/bin/ && cd /tmp/r9in/r9-cc && mk install".into(),
+        "cp /tmp/r9in/r9-build /usr/glenda/r9/bin/ && rm -rf /usr/glenda/r9/9h && mkdir -p /usr/glenda/r9/9h && dircp /tmp/r9in/9h /usr/glenda/r9/9h && cd /tmp/r9in/r9-cc && mk install".into(),
         // A loop in the background prints a progress line to the console every minute: the
         // time, the lines of the log, its last line and the memory in use. The console log on
         // the host keeps it when the guest stops before its file server writes the log out. The
@@ -107,7 +107,16 @@ pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
         ),
         // yacc -D writes y.debug, which yaccpar includes.
         format!("tar cf {w}/gen.tar {w}/t0 `{{grep '\\.[chy]$|/y\\.debug$' {w}/changed}}"),
-        format!("cd {w} && tar cf $r9collect {}", COLLECTED.join(" ")),
+        // The target 9h of r9-build puts the kernels of 9h in /tmp/r9/9h.
+        format!(
+            "cd {w} && tar cf $r9collect {}{}",
+            COLLECTED.join(" "),
+            if targets.split_whitespace().any(|t| t == "9h") {
+                " 9h"
+            } else {
+                ""
+            }
+        ),
     ]
 }
 
@@ -192,6 +201,21 @@ fn read(dir: &Path, name: &str) -> String {
     std::fs::read_to_string(dir.join(name)).unwrap_or_default()
 }
 
+/// The kernel directories of 9h that go to the guest, under `9h/` of the input.
+pub const H9_ROWS: &[&str] = &["arm64", "amd64"];
+
+/// Put the files of `guest/` and the kernel files of 9h together in one directory for the tar
+/// disk. The guest copies `9h/` to `/usr/glenda/r9/9h`, where the target 9h of r9-build gets it.
+fn stage(repo_root: &Path, work: &Path) -> Result<std::path::PathBuf, String> {
+    let dir = work.join("in");
+    let _ = std::fs::remove_dir_all(&dir);
+    crate::diffrun::copy_tree(&repo_root.join("guest"), &dir)?;
+    for row in H9_ROWS {
+        crate::diffrun::copy_tree(&repo_root.join("9h").join(row), &dir.join("9h").join(row))?;
+    }
+    Ok(dir)
+}
+
 /// Run `r9 build`. `req` is a boot request for the release; its commands, disks and limit are
 /// set here. Return the summary and the report to print.
 pub fn run(
@@ -215,7 +239,7 @@ pub fn run(
         }
     }
     req.net |= matches!(slot, Slot::R { .. });
-    req.input = Some(repo_root.join("guest"));
+    req.input = Some(stage(repo_root, &req.work)?);
     req.collect_mib = Some(COLLECT_MIB);
     eprintln!("r9 build: {}", boot::qemu_command(&req).join(" "));
     let outcome = boot::run(&req)?;
@@ -476,6 +500,37 @@ mod tests {
                 .ends_with("changed.sha256 members.sha256 gen.tar rucc.err")
         );
         assert!(c.iter().all(|l| !l.contains('\n')));
+        assert!(c[1].contains("dircp /tmp/r9in/9h /usr/glenda/r9/9h"));
+    }
+
+    #[test]
+    fn the_target_9h_collects_the_kernels() {
+        let c = commands("/sys/src", "cross 9h", &Slot::G);
+        assert!(c.last().unwrap().ends_with("rucc.err 9h"));
+        let c = commands("/sys/src", "install", &Slot::G);
+        assert!(!c.last().unwrap().ends_with(" 9h"));
+    }
+
+    #[test]
+    fn the_input_has_the_guest_files_and_the_kernel_files_of_9h() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let work = std::env::temp_dir().join(format!("r9-stage-{}", std::process::id()));
+        let dir = stage(&root, &work).unwrap();
+        assert!(dir.join("r9-build").is_file());
+        assert!(dir.join("r9-cc").is_dir());
+        for row in H9_ROWS {
+            assert!(dir.join("9h").join(row).join("9h").is_file(), "{row}");
+        }
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    #[test]
+    fn r9_build_has_the_target_9h() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let script = std::fs::read_to_string(root.join("guest/r9-build")).unwrap();
+        assert!(script.contains("\tcase 9h\n"));
+        assert!(script.contains("bind -ac $r9/9h/$o ."));
+        assert!(script.contains(&format!("for(o in {})", H9_ROWS.join(" "))));
     }
 
     #[test]

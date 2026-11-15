@@ -134,7 +134,7 @@ fn stage(repo: &crate::repo::Repo, work: &Path) -> Result<PathBuf, String> {
 }
 
 /// Copy the files under `from` to `to`.
-fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
     let entries = std::fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))?;
     for entry in entries {
