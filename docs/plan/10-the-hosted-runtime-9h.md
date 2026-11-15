@@ -39,7 +39,7 @@ What it gains:
 | `audioh9.c` | an `audio` card for port's `devaudio` |
 | `sdh9.c` | a disk for port's `devsd`, backed by a host file. The units are `sdH0` to `sdH3` |
 | `etherh9.c` | an Ethernet for port's `devether` |
-| `devhost.c` | `#Z`: the snarf buffer, the host file system channel `hostfs`, and `ctl` (10.5). `hostfs` is done |
+| `devhost.c` | `#Z`: the snarf buffer, the host file system channel `hostfs`, and `ctl` (10.5). The three are done |
 
 The files are about 2,000 lines on each architecture. They use only interfaces port and the tree's arch code already export. Where one is derived from a tree file (`h9screen.c` from `bcm/screen.c`, `sdh9.c` from `sdram.c`), its header says so. `#Z` is unused at the pin, and `r9 9h verify` checks that it still is at each pin.
 
@@ -127,9 +127,9 @@ Intel Macs (HVF on x86) could run the same machine with `hv_vm_create` and the x
 | audio | `audio.start(ring)`, `audio.volume` | buffer done | CoreAudio or PipeWire (11.6) |
 | disk | `sd.info`, `sd.read`, `sd.write`, `sd.flush` | none | a host file, in requests of at most 64 KiB |
 | ether | `ether.tx(pa, n)`, a receive ring | receive | user-mode NAT (as QEMU's `-netdev user`), or `vmnet` on macOS and a tap device on Linux when configured |
-| `#Z/snarf` | `snarf.get(pa, n)`, `snarf.put(pa, n)` | host clipboard changed | the host clipboard, text only, UTF-8 |
+| `#Z/snarf` | `snarf.size`, `snarf.get(pa, n, off)`, `snarf.put(pa, n)` | none | the host clipboard, text only, UTF-8 |
 | `#Z/hostfs` | `fs.reset`, `fs.write`, `fs.read` | none | the monitor's 9P server over a host directory (`h9-9p`) |
-| `#Z/ctl` | `ctl` | host request | window title, quit, scale (11) |
+| `#Z/ctl` | `ctl(pa, n)` | none yet | window title and quit now, and scale with the screen (11) |
 | clock | none | none | the generic timer or the TSC, and an RTC value in the device tree or ACPI |
 
 **The numbers.** The first calls are those of the console. `9h/arm64/h9.h` and `h9-dev/src/h9.rs` have the same numbers:
@@ -147,12 +147,20 @@ Intel Macs (HVF on x86) could run the same machine with `hv_vm_create` and the x
 | `0xC6000020` | `H9fsreset` | none | 0, or -1 when the monitor serves no host directory |
 | `0xC6000021` | `H9fswrite` | the physical address and the count | the count, or -3 for a message size that is not correct |
 | `0xC6000022` | `H9fsread` | the physical address and the count | the count of reply bytes copied, 0 when none waits |
+| `0xC6000030` | `H9snarfsize` | none | the length of the host clipboard, at most 1 MiB, which the monitor keeps for `H9snarfget` |
+| `0xC6000031` | `H9snarfget` | the physical address, the count and the offset | the count copied from that offset |
+| `0xC6000032` | `H9snarfput` | the physical address and the count, at most 1 MiB | the count, or -3 when it is too large |
+| `0xC6000040` | `H9ctl` | the physical address and the count of a request, at most 256 bytes | the count, or -3 for a request that the monitor does not know |
 
 A number that no device has gives -1, and the monitor logs it once. The console input interrupt is SPI 16 (INTID 48). It is a level interrupt, and it stays high while an input byte waits.
 
 A disk call that fails gives -2 for an address that is not in RAM, and -3 for a sector outside the disk, a write to a read-only unit, or an error of the host. The disk calls do the transfer before they return. This is different from the general rule above, for two reasons. A request is at most 64 KiB, which takes less than a millisecond from a host SSD. Also, the driver needs no interrupt and no wait, so it is as small as `sdram.c`. If a profile shows that the guest waits too long in these calls, a later revision can add a form that starts the transfer and raises a done interrupt. The monitor does not set `O_DIRECT` or `F_NOCACHE` yet, so the host caches the disk file. `H9sdflush` calls `fdatasync` on the file.
 
 The server of `#Z/hostfs` answers each whole 9P message in the `H9fswrite` call that gives its last byte. Thus a reply waits by the time `devmnt` reads for it, and `devhost.c` needs no interrupt. A read that finds no reply sleeps until the next write. `devhost.c` opens `hostfs` for one user at a time, and each open starts a new session with `H9fsreset`. The option `--hostfs DIR` serves DIR, and `--hostfs DIR,ro` serves it read-only. `--user NAME` gives the owner of the files, `glenda` by default.
+
+`#Z/snarf` gets the host clipboard again at each read at offset 0, because `rio` keeps its snarf file open and seeks to 0 for each paste. The text written to a snarf file goes to the host clipboard when the file is closed. The monitor uses the clipboard programs of the host: `pbpaste` and `pbcopy` on macOS, and `wl-paste` and `wl-copy`, `xclip` or `xsel` on Linux. A program is simpler than the clipboard calls of AppKit or of the display server, and 10 ms for a paste is not a problem. With `--snarf memory`, or on a host with no such program, the snarf stays in the monitor. Thus the clipboard needs no interrupt: the plan had one for a change of the host clipboard, but `rio` reads again at each paste.
+
+`#Z/ctl` takes one request in each write. `quit` ends the session, as `SYSTEM_OFF` does. `title TEXT` sets the title of the host terminal, with the escape of xterm, when the console is a terminal. The monitor removes the control characters from TEXT first, because the guest gives it. With the screen (11), the title goes to the window, and `scale` is added.
 
 The option `--disk FILE` adds a unit, and `--disk FILE,ro` adds a read-only unit. The first `--disk` is `sdH0`.
 

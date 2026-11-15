@@ -9,8 +9,10 @@
 
 pub mod h9;
 pub mod h9cons;
+pub mod h9ctl;
 pub mod h9disk;
 pub mod h9fs;
+pub mod h9snarf;
 pub mod pl011;
 pub mod pl031;
 pub mod psci;
@@ -36,6 +38,10 @@ pub trait Device: Send + std::any::Any {
     fn call(&mut self, x: &[u64; 6], ram: &Ram) -> Option<u64> {
         let _ = (x, ram);
         None
+    }
+    /// True when the device asks to end the session, as `#Z/ctl` does for `quit`.
+    fn stop(&self) -> bool {
+        false
     }
 }
 
@@ -112,6 +118,15 @@ impl Bus {
             );
         }
         h9::NOT_SUPPORTED
+    }
+
+    /// True when a device asks to end the session.
+    #[must_use]
+    pub fn stopping(&self) -> bool {
+        self.hyper
+            .iter()
+            .chain(self.slots.iter().map(|s| &s.dev))
+            .any(|d| d.stop())
     }
 
     fn find(&mut self, pa: u64) -> Option<&mut Slot> {

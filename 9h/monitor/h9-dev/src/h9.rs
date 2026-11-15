@@ -30,6 +30,22 @@ pub const FS_WRITE: u32 = 0xc600_0021;
 /// the number it copied, 0 when no reply waits.
 pub const FS_READ: u32 = 0xc600_0022;
 
+/// `H9snarfsize`: () reads the host clipboard into the buffer of the monitor, and returns its
+/// length, at most `SNARF_MAX`.
+pub const SNARF_SIZE: u32 = 0xc600_0030;
+/// `H9snarfget`: (pa, n, off) copies at most n bytes of that buffer from off to pa, and returns the
+/// number it copied.
+pub const SNARF_GET: u32 = 0xc600_0031;
+/// `H9snarfput`: (pa, n) makes the n bytes at pa the host clipboard, and returns n.
+pub const SNARF_PUT: u32 = 0xc600_0032;
+/// `H9ctl`: (pa, n) gives the text request of n bytes at pa to the monitor, and returns n, or -3
+/// for a request that the monitor does not know.
+pub const CTL: u32 = 0xc600_0040;
+
+/// The largest snarf, 1 MiB.
+pub const SNARF_MAX: u64 = 1 << 20;
+/// The largest request of `H9ctl`.
+pub const CTL_MAX: u64 = 256;
 /// The size of a sector of a disk unit.
 pub const SD_SECTOR: u64 = 512;
 /// The most sectors of one `H9sdread` or `H9sdwrite`, 64 KiB.

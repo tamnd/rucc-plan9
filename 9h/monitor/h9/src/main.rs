@@ -1,13 +1,16 @@
 //! `9h`, the monitor that runs a 9front kernel on the hypervisor of the host (plan 10).
 
+use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use h9_dev::Bus;
 use h9_dev::h9;
 use h9_dev::h9cons::H9Cons;
+use h9_dev::h9ctl::H9Ctl;
 use h9_dev::h9disk::H9Disk;
 use h9_dev::h9fs::H9Fs;
+use h9_dev::h9snarf::{Clipboard, H9Snarf, Host, Memory};
 use h9_dev::pl011::Pl011;
 use h9_dev::pl031::Pl031;
 use h9_vm::Ram;
@@ -15,8 +18,8 @@ use h9_vm::fdt::Fdt;
 
 const USAGE: &str = "usage:
   9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
-         [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--ini FILE] [--strict]
-         [--timeout SECS]
+         [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--snarf host|memory]
+         [--ini FILE] [--strict] [--timeout SECS]
       Run an arm64 kernel of the tree on the hypervisor of the host. FILE is a 7l a.out or the
       U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
       machine: RAM at 0x40000000 (--mem MiB, 1024 by default), the device tree at the start of
@@ -28,8 +31,9 @@ const USAGE: &str = "usage:
       tree, where the kernel reads it in place of the plan9.ini. Each --disk is a disk of the 9h
       machine, sdH0 to sdH3 in the kernel, and ,ro makes it read-only. --hostfs serves DIR as
       9P2000 on #Z/hostfs of the 9h kernel, for /mnt/term. Each file has the owner NAME of
-      --user, glenda by default. --ini FILE is the plan9.ini,
-      which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
+      --user, glenda by default. #Z/snarf of the 9h kernel is the host
+      clipboard with --snarf host, the default, and a buffer of the monitor with --snarf memory.
+      #Z/ctl takes the requests quit and title TEXT. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
       as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
       seconds with exit status 2.";
 
@@ -52,6 +56,15 @@ enum Machine {
     Virt,
 }
 
+/// The clipboard of `#Z/snarf`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Snarf {
+    /// The clipboard of the host.
+    Host,
+    /// A buffer in the monitor.
+    Memory,
+}
+
 #[derive(Debug)]
 struct Options {
     kernel: String,
@@ -63,6 +76,7 @@ struct Options {
     disks: Vec<(String, bool)>,
     hostfs: Option<(String, bool)>,
     user: String,
+    snarf: Snarf,
     strict: bool,
     timeout: Option<u64>,
 }
@@ -86,6 +100,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         disks: Vec::new(),
         hostfs: None,
         user: "glenda".into(),
+        snarf: Snarf::Host,
         strict: false,
         timeout: None,
     };
@@ -117,6 +132,13 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--disk" => o.disks.push(readonly(val()?)),
             "--hostfs" => o.hostfs = Some(readonly(val()?)),
             "--user" => o.user = val()?,
+            "--snarf" => {
+                o.snarf = match val()?.as_str() {
+                    "host" => Snarf::Host,
+                    "memory" => Snarf::Memory,
+                    s => return Err(format!("--snarf {s}: the values are host and memory")),
+                };
+            }
             "--strict" => o.strict = true,
             "--timeout" => {
                 o.timeout = Some(
@@ -282,6 +304,23 @@ fn run(o: &Options) -> Result<ExitCode, String> {
             readonly: *ro,
         })));
     }
+    if o.machine == Machine::H9 {
+        let clip: Box<dyn Clipboard> = match (o.snarf, Host::find()) {
+            (Snarf::Host, Some(h)) => Box::new(h),
+            (Snarf::Host, None) => {
+                eprintln!(
+                    "9h: the host has no clipboard program, so the snarf stays in the monitor"
+                );
+                Box::new(Memory::default())
+            }
+            (Snarf::Memory, _) => Box::new(Memory::default()),
+        };
+        bus.add_hyper(Box::new(H9Snarf::new(clip)));
+        let term: Option<Box<dyn std::io::Write + Send>> = std::io::stdout()
+            .is_terminal()
+            .then(|| Box::new(std::io::stdout()) as Box<dyn std::io::Write + Send>);
+        bus.add_hyper(Box::new(H9Ctl::new(term)));
+    }
     bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     backend::run(ram, bus, o.cpus as usize, image.entry, DTB)
 }
@@ -401,7 +440,11 @@ mod tests {
         assert!(parse(&args("--kernel k --machine virt --disk a.img")).is_err());
         let o = parse(&args("--kernel k --hostfs /,ro --user tam")).unwrap();
         assert_eq!(o.hostfs, Some(("/".to_string(), true)));
+        assert_eq!(o.snarf, super::Snarf::Host);
         assert_eq!(o.user, "tam");
+        let o = parse(&args("--kernel k --snarf memory")).unwrap();
+        assert_eq!(o.snarf, super::Snarf::Memory);
+        assert!(parse(&args("--kernel k --snarf x11")).is_err());
         assert!(parse(&args("--kernel k --hostfs /nonexistent-dir")).is_err());
         assert!(
             parse(&args(
