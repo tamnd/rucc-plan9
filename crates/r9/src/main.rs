@@ -339,6 +339,7 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
             print!("{}", r9::warndiff::command(args)?);
             Ok(ExitCode::SUCCESS)
         }
+        "9h" => run_9h(args),
         "tree-diff" => tree_diff(args),
         "objdiff" => run_objdiff(args),
         "sdiff" => run_sdiff(args),
@@ -388,4 +389,31 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
         }
         other => Err(format!("unknown command {other}; see r9 help")),
     }
+}
+
+/// `r9 9h verify`.
+fn run_9h(args: &Args) -> Result<ExitCode, String> {
+    match args.target.as_deref() {
+        Some("verify") => {}
+        Some(w) => return Err(format!("9h {w}: the 9h commands are: verify")),
+        None => return Err("give a 9h command: verify".into()),
+    }
+    let repo = Repo::find()?;
+    let tree = std::path::Path::new(
+        args.get("tree")
+            .ok_or("give --tree, the pinned tree on the host")?,
+    );
+    let row = args.get("row").unwrap_or("arm64");
+    let h9 = repo.root.join("9h");
+    let mut v = r9::h9verify::check_trees(tree, &h9, row);
+    if let Some(path) = args.get("records") {
+        let records = r9::census::load(std::path::Path::new(path))?;
+        r9::h9verify::check_records(&mut v, &records, tree, &h9, row);
+    }
+    print!("{}", v.report(args.get("records").is_some()));
+    Ok(if v.problems.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
