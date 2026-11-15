@@ -215,6 +215,8 @@ That is about 14,000 lines. The monitor uses no QEMU code. It may use `kvm-ioctl
 
 **Test hooks.** `9h run --script=<file>` is the GUI test driver's entry (12.6). It injects input into the same rings the host window feeds, reads `/dev/wsys/N/window` back through `/mnt/term`, and runs headless with no window. Headless is what CI on gpc and server1 uses. On Linux it needs no display server at all, because the monitor's screen device does not need a window to exist.
 
+The first form of `--script` drives the console only, because the screen does not exist yet. Its steps are `wait TEXT`, `send TEXT`, `timeout SECS` and `quit`, and `r9 9h boot` and `r9 9h smoke` use them. The steps of the GUI (`window`, `mouse`, `keys`, `snap`, `quiet`) come with the screen, in the same parser. The exit status is 0 when the script passes, and 3 when it fails.
+
 ## 10.9 What `9h` does not do
 
 - **It does not run another architecture.** An arm64 host runs arm64 9front, and an amd64 host runs amd64. Running amd64 9front on the M4 would need an emulator, which is QEMU's job (17, question 5).
