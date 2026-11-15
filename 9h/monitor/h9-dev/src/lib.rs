@@ -7,6 +7,7 @@
 //! no device has reads as all ones and is logged, as an empty slot on a real bus (plan 10.4).
 //! With `strict`, such an access stops the session instead (plan 10.10).
 
+pub mod acpipm;
 pub mod cmos;
 pub mod h9;
 pub mod h9cons;
@@ -14,6 +15,7 @@ pub mod h9ctl;
 pub mod h9disk;
 pub mod h9fs;
 pub mod h9snarf;
+pub mod pcinone;
 pub mod pl011;
 pub mod pl031;
 pub mod psci;
@@ -152,9 +154,14 @@ impl Bus {
         if self.strict {
             return Err(format!("{what} at {pa:#x}, where there is no device"));
         }
-        // A probe, as the PCI scan, can touch many addresses of one empty block. Log the first
-        // access to each 16 MiB block only.
-        if *n == 1 && !self.unknown.range(pa & !0xff_ffff..pa).any(|_| true) {
+        // A probe of memory can touch many addresses of one empty block. Log the first access
+        // to each port, and the first access to each 16 MiB block of memory.
+        if *n == 1 && pa >= PORTS {
+            eprintln!(
+                "9h: {what} at port {:#x}, where there is no device",
+                pa - PORTS
+            );
+        } else if *n == 1 && !self.unknown.range(pa & !0xff_ffff..pa).any(|_| true) {
             eprintln!(
                 "9h: {what} at {pa:#x}, where there is no device (the log shows the first such access in each 16 MiB block)"
             );

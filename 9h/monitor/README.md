@@ -5,7 +5,7 @@ This is the monitor of `9h`, the hosted runtime of plan 10. It runs a 9front ker
 | Crate | What |
 |---|---|
 | `h9-vm` | the guest RAM, the kernel loaders (a.out, U-Boot images and multiboot), the device tree builder, the ACPI tables and the exits |
-| `h9-dev` | the bus, the PSCI calls, the 9h hypercall devices (console and disk), the bring-up devices (PL011 and PL031) and the CMOS clock of the PC |
+| `h9-dev` | the bus, the PSCI calls, the 9h hypercall devices (console and disk), the bring-up devices (PL011 and PL031), and the CMOS clock, the PCI configuration ports and the ACPI PM1a control register of the PC. The PCI bus has no device |
 | `h9-hvf` | the Hypervisor.framework back end, for macOS on arm64 |
 | `h9-kvm` | the KVM back end, for Linux on x86-64 and arm64. On x86-64 it runs a multiboot amd64 kernel on a PC with the APICs and the timer of KVM. On arm64 it runs the machine of `h9-hvf` with the GIC, the timer and the PSCI of KVM |
 | `h9-9p` | the 9P2000 server over a host directory, for `/mnt/term` of the guest. `h9-dev` connects it to `#Z/hostfs` with three hypercalls |

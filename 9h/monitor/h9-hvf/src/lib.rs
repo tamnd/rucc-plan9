@@ -659,8 +659,11 @@ impl Vcpu {
                     self.advance()?;
                 }
                 Exit::MmioWrite { pa, size, value } => {
-                    m.with_bus(|b| b.write(pa, size, value))?;
+                    let stop = m.with_bus(|b| b.write(pa, size, value).map(|()| b.stopping()))?;
                     self.advance()?;
+                    if stop {
+                        return Ok(Some(Stop::Off));
+                    }
                 }
                 Exit::Hypercall(x) => match self.hypercall(m, &x)? {
                     Next::Run => {}

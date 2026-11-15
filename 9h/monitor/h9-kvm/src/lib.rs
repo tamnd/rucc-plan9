@@ -256,10 +256,19 @@ fn run_vcpu(m: &Machine, cpu: &mut VcpuFd) -> Result<Option<Stop>, String> {
             #[cfg(target_arch = "x86_64")]
             Ok(VcpuExit::IoOut(port, data)) => {
                 let size = chunks(data.len());
+                let mut stop = false;
                 for c in data.chunks(size) {
-                    m.with_bus(|b| b.write(h9_dev::PORTS + u64::from(port), size as u8, value(c)))?;
+                    stop = m.with_bus(|b| {
+                        b.write(h9_dev::PORTS + u64::from(port), size as u8, value(c))
+                            .map(|()| b.stopping())
+                    })?;
                 }
-                Next::Run
+                // A device ends the session, as the PM1a control register of ACPI does.
+                if stop {
+                    Next::End(Stop::Off)
+                } else {
+                    Next::Run
+                }
             }
             #[cfg(target_arch = "x86_64")]
             Ok(VcpuExit::IoIn(port, data)) => {
@@ -280,8 +289,15 @@ fn run_vcpu(m: &Machine, cpu: &mut VcpuFd) -> Result<Option<Stop>, String> {
                 Next::Run
             }
             Ok(VcpuExit::MmioWrite(pa, data)) => {
-                m.with_bus(|b| b.write(pa, data.len() as u8, value(data)))?;
-                Next::Run
+                let stop = m.with_bus(|b| {
+                    b.write(pa, data.len() as u8, value(data))
+                        .map(|()| b.stopping())
+                })?;
+                if stop {
+                    Next::End(Stop::Off)
+                } else {
+                    Next::Run
+                }
             }
             // With the interrupt controllers in KVM, HLT waits in KVM, and a signal gives EINTR.
             Ok(VcpuExit::Hlt | VcpuExit::Intr) => Next::Run,

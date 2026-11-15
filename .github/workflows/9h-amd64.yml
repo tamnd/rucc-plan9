@@ -3,7 +3,9 @@
 # The job makes the g-base image of the pinned tree, as g-base.yml does. r9 build --side G with
 # the target 9h.amd64 then builds the 9h kernel in the guest with the compilers of the tree. The
 # job builds the 9h monitor, and r9 9h boot boots the kernel on the g-base image and runs
-# smoke/boot.rc on its console. The console log, the steps and the kernel go to an artifact.
+# smoke/boot.rc on its console. The monitor logs each port and address with no device that the
+# kernel used. A second boot with --strict stops the machine at the first such access. The console
+# logs, the steps, the logs of the monitor and the kernel go to an artifact.
 
 name: 9h amd64
 
@@ -70,14 +72,22 @@ jobs:
         run: |
           root=$(ls /mnt/r9/images/g-base-*.amd64.qcow2 | head -1)
           target/release/r9 9h boot --kernel "$RUNNER_TEMP/k/collected/9h/amd64/99h" --root "$root" --timeout 900 --out "$RUNNER_TEMP/boot"
+          grep '^9h: no device' "$RUNNER_TEMP/boot/9h.stderr" || true
+      - name: r9 9h boot --strict
+        run: |
+          root=$(ls /mnt/r9/images/g-base-*.amd64.qcow2 | head -1)
+          target/release/r9 9h boot --kernel "$RUNNER_TEMP/k/collected/9h/amd64/99h" --root "$root" --timeout 900 --strict --out "$RUNNER_TEMP/strict"
+          if grep '^9h: no device' "$RUNNER_TEMP/strict/9h.stderr"; then exit 1; fi
       - name: gather the results
         if: always()
         run: |
-          mkdir -p "$RUNNER_TEMP/out/k" "$RUNNER_TEMP/out/boot"
+          mkdir -p "$RUNNER_TEMP/out/k" "$RUNNER_TEMP/out/boot" "$RUNNER_TEMP/out/strict"
           cp "$RUNNER_TEMP/k"/*.toml "$RUNNER_TEMP/k"/console.log "$RUNNER_TEMP/out/k/" || true
           cp "$RUNNER_TEMP/k/collected/mk.log" "$RUNNER_TEMP/out/k/" || true
           cp -r "$RUNNER_TEMP/k/collected/9h" "$RUNNER_TEMP/out/k/" || true
-          cp "$RUNNER_TEMP/boot"/console.log "$RUNNER_TEMP/boot"/steps.json "$RUNNER_TEMP/boot"/9h.cmd "$RUNNER_TEMP/out/boot/" || true
+          for d in boot strict; do
+            cp "$RUNNER_TEMP/$d"/console.log "$RUNNER_TEMP/$d"/steps.json "$RUNNER_TEMP/$d"/9h.cmd "$RUNNER_TEMP/$d"/9h.stderr "$RUNNER_TEMP/out/$d/" || true
+          done
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:

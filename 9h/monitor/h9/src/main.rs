@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use h9_dev::acpipm::{self, AcpiPm};
 use h9_dev::cmos::{self, Cmos};
 use h9_dev::h9;
 use h9_dev::h9cons::H9Cons;
@@ -11,6 +12,7 @@ use h9_dev::h9ctl::H9Ctl;
 use h9_dev::h9disk::H9Disk;
 use h9_dev::h9fs::H9Fs;
 use h9_dev::h9snarf::{Clipboard, H9Snarf, Host, Memory};
+use h9_dev::pcinone::{self, PciNone};
 use h9_dev::pl011::Pl011;
 use h9_dev::pl031::Pl031;
 use h9_dev::{Bus, PORTS};
@@ -60,9 +62,10 @@ const USAGE: &str = "usage:
       --headless opens no window. The monitor has no window yet, so each session is headless
       now.
       On amd64, FILE is a 6l kernel with a multiboot header (9pc64). The machine is a PC with
-      RAM from address 0, the APICs, the 8259s and the 8254 of KVM, a CMOS clock, and ACPI
-      tables for --cpus processors. The kernel gets --bootargs as its multiboot command line and
-      the --ini file as its first module. Its console is the 9h hypercall console with IRQ 5.
+      RAM from address 0, the APICs, the 8259s and the 8254 of KVM, a CMOS clock, the PCI
+      configuration ports with no device on the bus, and ACPI tables for --cpus processors.
+      The kernel gets *nocga=1 and --bootargs as its multiboot command line and the --ini file
+      as its first module. Its console is the 9h hypercall console with IRQ 5.
       --machine virt is for arm64 only. The machine needs /dev/kvm.";
 
 const RAM_BASE: u64 = 0x4000_0000;
@@ -317,6 +320,21 @@ fn load_arm64(o: &Options, bytes: &[u8]) -> Result<(Arc<Ram>, u64, u64), String>
     Ok((ram, image.entry, DTB))
 }
 
+/// The variables that the amd64 machine gives the kernel before `--bootargs`. The machine has no
+/// CGA, and `screeninit` of `pc/cga.c` reads the cursor of the CGA through ports 0x3d4 and 0x3d5
+/// unless `*nocga` is set.
+const PC_CMDLINE: &str = "*nocga=1";
+
+/// The multiboot command line of the amd64 machine: `PC_CMDLINE`, then `--bootargs`. The kernel
+/// takes each word as a line of plan9.ini.
+fn pc_cmdline(bootargs: &str) -> String {
+    if bootargs.is_empty() {
+        PC_CMDLINE.into()
+    } else {
+        format!("{PC_CMDLINE} {bootargs}")
+    }
+}
+
 /// The RAM of the amd64 machine, with the kernel at its addresses, the multiboot information
 /// block and the ACPI tables, and the entry and the EBX of vCPU 0.
 fn load_pc(o: &Options, bytes: &[u8]) -> Result<(Arc<Ram>, u64, u64), String> {
@@ -338,9 +356,10 @@ fn load_pc(o: &Options, bytes: &[u8]) -> Result<(Arc<Ram>, u64, u64), String> {
         Some(f) => Some(std::fs::read(f).map_err(|e| format!("{f}: {e}"))?),
         None => None,
     };
+    let cmdline = pc_cmdline(&o.bootargs);
     let info = multiboot::info(&multiboot::Info {
         mem,
-        cmdline: &o.bootargs,
+        cmdline: &cmdline,
         ini: ini.as_deref(),
     })?;
     if !ram.write(multiboot::INFO, &info) || !ram.write(acpi::RSDP, &acpi::tables(o.cpus)?) {
@@ -418,11 +437,42 @@ fn run(o: &Options) -> Result<ExitCode, String> {
     }
     if PC {
         bus.add(PORTS + cmos::PORT, 2, Box::new(Cmos::new()));
+        bus.add(
+            PORTS + pcinone::PORT,
+            pcinone::LEN,
+            Box::new(PciNone::new()),
+        );
+        bus.add(PORTS + acpipm::PORT, acpipm::LEN, Box::new(AcpiPm::new()));
     } else {
         bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     }
     let script = o.script.clone().zip(log);
     backend::run(ram, bus, o.cpus as usize, entry, x0, script)
+}
+
+/// The lines of the report of the addresses with no device that the guest used, one line for
+/// each address with its count. A port of the amd64 machine shows as a port.
+#[cfg_attr(
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    )),
+    allow(dead_code)
+)]
+fn unknown_report(bus: &Bus) -> Vec<String> {
+    bus.unknown_accesses()
+        .iter()
+        .map(|(&pa, &n)| {
+            if pa >= PORTS {
+                format!("9h: no device: port {:#x}, {n} accesses", pa - PORTS)
+            } else {
+                format!("9h: no device: address {pa:#x}, {n} accesses")
+            }
+        })
+        .collect()
 }
 
 /// Type the bytes on the console of the machine.
@@ -461,7 +511,7 @@ type Script = (Vec<(usize, Step)>, Transcript);
     )
 ))]
 mod backend {
-    use super::{Script, script, type_in};
+    use super::{Script, script, type_in, unknown_report};
     use h9_dev::Bus;
     #[cfg(target_os = "macos")]
     use h9_hvf::{Stop, Vm};
@@ -500,7 +550,11 @@ mod backend {
                 }
             });
         }
-        let stop = vm.run(entry, x0)?;
+        let stop = vm.run(entry, x0);
+        for line in vm.machine().with_bus(|bus| unknown_report(bus)) {
+            eprintln!("{line}");
+        }
+        let stop = stop?;
         if scripted {
             return Ok(match done.lock().unwrap().take() {
                 Some(Ok(())) => {
@@ -585,7 +639,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{devtree, parse};
+    use super::{Bus, PORTS, devtree, parse, pc_cmdline, unknown_report};
 
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(String::from).collect()
@@ -627,6 +681,29 @@ mod tests {
             parse(&args("--kernel k --what"))
                 .unwrap_err()
                 .contains("--what")
+        );
+    }
+
+    #[test]
+    fn the_pc_kernel_gets_nocga_before_the_bootargs() {
+        assert_eq!(pc_cmdline(""), "*nocga=1");
+        assert_eq!(pc_cmdline("console=0"), "*nocga=1 console=0");
+    }
+
+    #[test]
+    fn the_report_names_each_address_with_no_device() {
+        let mut bus = Bus::new();
+        bus.write(PORTS + 0x3d4, 1, 0xe).unwrap();
+        bus.read(PORTS + 0x3d5, 1).unwrap();
+        bus.read(PORTS + 0x3d5, 1).unwrap();
+        bus.read(0xfec0_0000, 4).unwrap();
+        assert_eq!(
+            unknown_report(&bus),
+            [
+                "9h: no device: address 0xfec00000, 1 accesses",
+                "9h: no device: port 0x3d4, 1 accesses",
+                "9h: no device: port 0x3d5, 2 accesses",
+            ]
         );
     }
 
