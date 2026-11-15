@@ -1,44 +1,60 @@
-//! The KVM back end of the 9h monitor, for amd64 on Linux (plan 10.4).
+//! The KVM back end of the 9h monitor, for amd64 and arm64 on Linux (plan 10.3 and 10.4).
 //!
-//! It makes the PC that `9pc64` of the tree knows. KVM gives the local APICs, the I/O APIC and the
-//! two 8259s (`KVM_CREATE_IRQCHIP`), and the 8254 timer (`KVM_CREATE_PIT2`). The monitor gives the
-//! RAM from address 0, the devices of the bus, and the 9h hypercalls. A hypercall is an `OUT` to
-//! `HYPERCALL_PORT`, with the number in RAX and the arguments in RBX, RCX, RSI, RDI and R8. The
-//! result goes in RAX. An access to another port goes to the bus at `PORTS` plus the port.
+//! On amd64, it makes the PC that `9pc64` of the tree knows. KVM gives the local APICs, the I/O
+//! APIC and the two 8259s (`KVM_CREATE_IRQCHIP`), and the 8254 timer (`KVM_CREATE_PIT2`). The
+//! monitor gives the RAM from address 0, the devices of the bus, and the 9h hypercalls. A
+//! hypercall is an `OUT` to `HYPERCALL_PORT`, with the number in RAX and the arguments in RBX,
+//! RCX, RSI, RDI and R8. The result goes in RAX. An access to another port goes to the bus at
+//! `PORTS` plus the port.
 //!
 //! A write with bit 2 set to `RESET_PORT`, the reset control register of the PC, resets the
 //! machine. `archreset` of the tree writes 6 there when the kernel exits or reboots.
 //!
 //! vCPU 0 starts at the multiboot entry of the kernel, in 32-bit protected mode with no paging,
 //! with `EAX` and `EBX` as the multiboot specification says. The other vCPUs wait in KVM until
-//! the kernel starts them with INIT and SIPI through its local APIC. Each vCPU runs on a thread of
-//! its own.
+//! the kernel starts them with INIT and SIPI through its local APIC.
 //!
-//! The monitor needs KVM. It has no emulator to use when the host has no KVM (open question 13).
-#![cfg(all(target_os = "linux", target_arch = "x86_64"))]
+//! On arm64, it makes the machine of the HVF back end: the layout of the QEMU `virt` machine, with
+//! the `GICv3` of KVM (`KVM_DEV_TYPE_ARM_VGIC_V3`) at `GICD` and `GICR`, and the timer and PSCI of
+//! KVM. The RAM is at the base address of the `Ram`. A hypercall is `HVC #0` with the number in
+//! X0 and the arguments in X1 to X5. The SMCCC filter of KVM (`KVM_ARM_VM_SMCCC_FILTER`, Linux 6.4
+//! and later) sends the calls of the 9h range to the monitor as `KVM_EXIT_HYPERCALL`. KVM does
+//! each other call, such as the PSCI calls, itself. vCPU 0 starts at the entry with the address of
+//! the device tree in X0. The other vCPUs are off until the kernel starts them with PSCI `CPU_ON`.
+//!
+//! Each vCPU runs on a thread of its own. The monitor needs KVM. It has no emulator to use when
+//! the host has no KVM (open question 13).
+#![cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use h9_dev::Bus;
 use h9_dev::psci::{self, Action};
-use h9_dev::{Bus, PORTS};
 use h9_vm::Ram;
-use h9_vm::multiboot;
 use kvm_bindings::{
-    KVM_MAX_CPUID_ENTRIES, KVM_PIT_SPEAKER_DUMMY, KVM_SYSTEM_EVENT_RESET,
-    KVM_SYSTEM_EVENT_SHUTDOWN, kvm_pit_config, kvm_regs, kvm_segment, kvm_userspace_memory_region,
+    KVM_SYSTEM_EVENT_RESET, KVM_SYSTEM_EVENT_SHUTDOWN, kvm_userspace_memory_region,
 };
 use kvm_ioctls::{Kvm, VcpuExit, VcpuFd, VmFd};
 
-/// The port of the 9h hypercalls.
-pub const HYPERCALL_PORT: u16 = 0x509;
-/// The reset control register of the PC.
-pub const RESET_PORT: u16 = 0xcf9;
-/// The bit of `RESET_PORT` that starts the reset.
-const RESET_CPU: u8 = 1 << 2;
-/// The three pages that KVM needs for the TSS of a real-mode guest on Intel, below the BIOS.
-const TSS: usize = 0xfffb_d000;
+#[cfg(target_arch = "x86_64")]
+mod pc;
+#[cfg(target_arch = "x86_64")]
+use pc as arch;
+#[cfg(target_arch = "x86_64")]
+pub use pc::{HYPERCALL_PORT, RESET_PORT};
+
+#[cfg(target_arch = "aarch64")]
+mod virt;
+#[cfg(target_arch = "aarch64")]
+use virt as arch;
+#[cfg(target_arch = "aarch64")]
+pub use virt::{GICD, GICR, H9_CALLS};
+
 /// The signal that makes a vCPU thread leave `KVM_RUN`.
 const KICK: libc::c_int = libc::SIGUSR1;
 
@@ -78,32 +94,22 @@ fn kvm_error(what: &str) -> impl Fn(kvm_ioctls::Error) -> String + '_ {
 /// The answer when `/dev/kvm` does not open.
 fn no_kvm(e: kvm_ioctls::Error) -> String {
     format!(
-        "cannot open /dev/kvm: {e}. The amd64 machine of 9h needs KVM: the kvm module must be loaded, and the user must be able to read and write /dev/kvm, as a member of its group. The monitor has no emulator for a host with no KVM."
+        "cannot open /dev/kvm: {e}. The {} machine of 9h needs KVM: the kvm module must be loaded, and the user must be able to read and write /dev/kvm, as a member of its group. The monitor has no emulator for a host with no KVM.",
+        arch::NAME
     )
 }
 
 impl Vm {
-    /// Make the VM with `ncpu` processors and its devices in KVM, and map the RAM, which must
-    /// start at address 0.
+    /// Make the VM with `ncpu` processors and its devices in KVM, and map the RAM. On amd64 the
+    /// RAM must start at address 0.
     pub fn new(ram: Arc<Ram>, bus: Bus, ncpu: usize) -> Result<Vm, String> {
-        if ram.base() != 0 {
-            return Err("the RAM of the amd64 machine starts at address 0".into());
-        }
         let kvm = Kvm::new().map_err(no_kvm)?;
         let vm = kvm.create_vm().map_err(kvm_error("KVM_CREATE_VM"))?;
-        vm.set_tss_address(TSS)
-            .map_err(kvm_error("KVM_SET_TSS_ADDR"))?;
-        vm.create_irq_chip()
-            .map_err(kvm_error("KVM_CREATE_IRQCHIP"))?;
-        vm.create_pit2(kvm_pit_config {
-            flags: KVM_PIT_SPEAKER_DUMMY,
-            ..Default::default()
-        })
-        .map_err(kvm_error("KVM_CREATE_PIT2"))?;
+        arch::before_ram(&vm, &ram)?;
         let region = kvm_userspace_memory_region {
             slot: 0,
             flags: 0,
-            guest_phys_addr: 0,
+            guest_phys_addr: ram.base(),
             memory_size: ram.len() as u64,
             userspace_addr: ram.host_ptr() as u64,
         };
@@ -111,27 +117,7 @@ impl Vm {
         // valid while the guest can use it.
         unsafe { vm.set_user_memory_region(region) }
             .map_err(kvm_error("KVM_SET_USER_MEMORY_REGION"))?;
-        let cpuid = kvm
-            .get_supported_cpuid(KVM_MAX_CPUID_ENTRIES)
-            .map_err(kvm_error("KVM_GET_SUPPORTED_CPUID"))?;
-        let mut vcpus = Vec::new();
-        for n in 0..ncpu.max(1) {
-            let cpu = vm
-                .create_vcpu(n as u64)
-                .map_err(kvm_error("KVM_CREATE_VCPU"))?;
-            // The kernel finds the APIC ID of each processor in CPUID, and it must be the one of
-            // the MADT, which is the number of the processor.
-            let mut id = cpuid.clone();
-            for e in id.as_mut_slice() {
-                match e.function {
-                    1 => e.ebx = e.ebx & 0x00ff_ffff | (n as u32) << 24,
-                    0xb | 0x1f => e.edx = n as u32,
-                    _ => {}
-                }
-            }
-            cpu.set_cpuid2(&id).map_err(kvm_error("KVM_SET_CPUID2"))?;
-            vcpus.push(cpu);
-        }
+        let vcpus = arch::vcpus(&kvm, &vm, ncpu.max(1))?;
         let machine = Machine {
             ram,
             vm,
@@ -153,14 +139,15 @@ impl Vm {
         self.machine.clone()
     }
 
-    /// Start vCPU 0 at the multiboot `entry` with `info` in EBX, start a thread for each vCPU,
-    /// and wait until the session ends.
-    pub fn run(&self, entry: u64, info: u64) -> Result<Stop, String> {
+    /// Start vCPU 0 at `entry`, start a thread for each vCPU, and wait until the session ends. On
+    /// amd64, `entry` is the multiboot entry, and `x0` is the multiboot information, which goes in
+    /// EBX. On arm64, `x0` is the address of the device tree, which goes in X0.
+    pub fn run(&self, entry: u64, x0: u64) -> Result<Stop, String> {
         let vcpus = std::mem::take(&mut *self.vcpus.lock().unwrap());
         let Some(first) = vcpus.first() else {
             return Err("the session was run already".into());
         };
-        boot(first, entry, info)?;
+        arch::boot(first, entry, x0)?;
         install_kick()?;
         let m = &self.machine;
         for (n, cpu) in vcpus.into_iter().enumerate() {
@@ -226,51 +213,6 @@ fn install_kick() -> Result<(), String> {
     Ok(())
 }
 
-/// Put vCPU 0 in the state that the multiboot specification gives at the entry: 32-bit protected
-/// mode with flat segments, no paging, no interrupts, and the magic number in EAX.
-fn boot(cpu: &VcpuFd, entry: u64, info: u64) -> Result<(), String> {
-    let mut s = cpu.get_sregs().map_err(kvm_error("KVM_GET_SREGS"))?;
-    let code = kvm_segment {
-        base: 0,
-        limit: 0xffff_ffff,
-        selector: 0x08,
-        type_: 0xb,
-        present: 1,
-        dpl: 0,
-        db: 1,
-        s: 1,
-        l: 0,
-        g: 1,
-        avl: 0,
-        unusable: 0,
-        padding: 0,
-    };
-    let data = kvm_segment {
-        selector: 0x10,
-        type_: 0x3,
-        ..code
-    };
-    s.cs = code;
-    s.ds = data;
-    s.es = data;
-    s.fs = data;
-    s.gs = data;
-    s.ss = data;
-    // PE and ET. The caches are on, and the kernel turns on paging itself.
-    s.cr0 = 0x11;
-    s.cr4 = 0;
-    s.efer = 0;
-    cpu.set_sregs(&s).map_err(kvm_error("KVM_SET_SREGS"))?;
-    let regs = kvm_regs {
-        rip: entry,
-        rax: u64::from(multiboot::BOOT_MAGIC),
-        rbx: info,
-        rflags: 2,
-        ..Default::default()
-    };
-    cpu.set_regs(&regs).map_err(kvm_error("KVM_SET_REGS"))
-}
-
 /// The little-endian value of the bytes of an access.
 fn value(data: &[u8]) -> u64 {
     data.iter().rev().fold(0, |v, &b| v << 8 | u64::from(b))
@@ -285,11 +227,13 @@ fn fill(data: &mut [u8], v: u64) {
 /// The accesses of a port exit. A string instruction (`INS`, `OUTS`) gives the data of several
 /// accesses. The size of each is not in the slice, so such data is taken as accesses of one byte,
 /// which the 9h kernel does not make to a device of the monitor.
+#[cfg(target_arch = "x86_64")]
 fn chunks(len: usize) -> usize {
     if matches!(len, 1 | 2 | 4) { len } else { 1 }
 }
 
 /// What the loop does after an exit.
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 enum Next {
     Run,
     Hypercall,
@@ -303,23 +247,33 @@ fn run_vcpu(m: &Machine, cpu: &mut VcpuFd) -> Result<Option<Stop>, String> {
             return Ok(None);
         }
         let next = match cpu.run() {
+            #[cfg(target_arch = "x86_64")]
             Ok(VcpuExit::IoOut(HYPERCALL_PORT, _)) => Next::Hypercall,
-            Ok(VcpuExit::IoOut(RESET_PORT, [v])) if v & RESET_CPU != 0 => Next::End(Stop::Reset),
+            #[cfg(target_arch = "x86_64")]
+            Ok(VcpuExit::IoOut(RESET_PORT, [v])) if v & pc::RESET_CPU != 0 => {
+                Next::End(Stop::Reset)
+            }
+            #[cfg(target_arch = "x86_64")]
             Ok(VcpuExit::IoOut(port, data)) => {
                 let size = chunks(data.len());
                 for c in data.chunks(size) {
-                    m.with_bus(|b| b.write(PORTS + u64::from(port), size as u8, value(c)))?;
+                    m.with_bus(|b| b.write(h9_dev::PORTS + u64::from(port), size as u8, value(c)))?;
                 }
                 Next::Run
             }
+            #[cfg(target_arch = "x86_64")]
             Ok(VcpuExit::IoIn(port, data)) => {
                 let size = chunks(data.len());
                 for c in data.chunks_mut(size) {
-                    let v = m.with_bus(|b| b.read(PORTS + u64::from(port), size as u8))?;
+                    let v = m.with_bus(|b| b.read(h9_dev::PORTS + u64::from(port), size as u8))?;
                     fill(c, v);
                 }
                 Next::Run
             }
+            // The SMCCC filter sends only the calls of the 9h range. KVM moved the PC past the
+            // HVC.
+            #[cfg(target_arch = "aarch64")]
+            Ok(VcpuExit::Hypercall(_)) => Next::Hypercall,
             Ok(VcpuExit::MmioRead(pa, data)) => {
                 let v = m.with_bus(|b| b.read(pa, data.len() as u8))?;
                 fill(data, v);
@@ -358,16 +312,15 @@ fn run_vcpu(m: &Machine, cpu: &mut VcpuFd) -> Result<Option<Stop>, String> {
     }
 }
 
-/// Do the hypercall of the vCPU, and put the result in RAX. KVM moves RIP past the `OUT` when the
-/// vCPU runs again.
+/// Do the hypercall of the vCPU, and put the result in RAX or X0.
 fn hypercall(m: &Machine, cpu: &VcpuFd) -> Result<Option<Stop>, String> {
-    let mut r = cpu.get_regs().map_err(kvm_error("KVM_GET_REGS"))?;
-    let x = [r.rax, r.rbx, r.rcx, r.rsi, r.rdi, r.r8];
-    r.rax = match psci::call(&x) {
+    let x = arch::call_args(cpu)?;
+    let v = match psci::call(&x) {
         Some(Action::Return(v)) => v,
         Some(Action::Off) => return Ok(Some(Stop::Off)),
         Some(Action::Reset) => return Ok(Some(Stop::Reset)),
-        // The PC starts and stops its processors through the local APICs.
+        // The PC starts and stops its processors through the local APICs. On arm64, KVM does
+        // the PSCI calls, and the filter does not send them.
         Some(_) => psci::NOT_SUPPORTED,
         None => {
             let (v, stop) = m.with_bus(|b| (b.call(&x, &m.ram), b.stopping()));
@@ -377,7 +330,7 @@ fn hypercall(m: &Machine, cpu: &VcpuFd) -> Result<Option<Stop>, String> {
             v
         }
     };
-    cpu.set_regs(&r).map_err(kvm_error("KVM_SET_REGS"))?;
+    arch::call_result(cpu, v)?;
     Ok(None)
 }
 
@@ -401,7 +354,7 @@ impl Machine {
                     level
                 }
             };
-            if changed && let Err(e) = self.vm.set_irq_line(irq, level) {
+            if changed && let Err(e) = self.vm.set_irq_line(arch::irq_line(irq), level) {
                 eprintln!("9h: KVM_IRQ_LINE {irq}: {e}");
             }
         }
@@ -428,7 +381,7 @@ impl Machine {
 
 #[cfg(test)]
 mod tests {
-    use super::{chunks, fill, value};
+    use super::{fill, value};
 
     #[test]
     fn the_data_of_an_access_is_little_endian() {
@@ -436,7 +389,12 @@ mod tests {
         let mut b = [0u8; 2];
         fill(&mut b, 0xffff_abcd);
         assert_eq!(b, [0xcd, 0xab]);
-        assert_eq!(chunks(4), 4);
-        assert_eq!(chunks(12), 1);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn a_string_access_is_taken_as_bytes() {
+        assert_eq!(super::chunks(4), 4);
+        assert_eq!(super::chunks(12), 1);
     }
 }

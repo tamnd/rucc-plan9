@@ -7,11 +7,11 @@ This is the monitor of `9h`, the hosted runtime of plan 10. It runs a 9front ker
 | `h9-vm` | the guest RAM, the kernel loaders (a.out, U-Boot images and multiboot), the device tree builder, the ACPI tables and the exits |
 | `h9-dev` | the bus, the PSCI calls, the 9h hypercall devices (console and disk), the bring-up devices (PL011 and PL031) and the CMOS clock of the PC |
 | `h9-hvf` | the Hypervisor.framework back end, for macOS on arm64 |
-| `h9-kvm` | the KVM back end, for Linux on x86-64. It runs a multiboot amd64 kernel on a PC with the APICs and the timer of KVM |
+| `h9-kvm` | the KVM back end, for Linux on x86-64 and arm64. On x86-64 it runs a multiboot amd64 kernel on a PC with the APICs and the timer of KVM. On arm64 it runs the machine of `h9-hvf` with the GIC, the timer and the PSCI of KVM |
 | `h9-9p` | the 9P2000 server over a host directory, for `/mnt/term` of the guest. `h9-dev` connects it to `#Z/hostfs` with three hypercalls |
 | `h9` | the `9h` command |
 
-The `9h` kernel for amd64 comes in a later step of P7. On Linux, `9h` needs `/dev/kvm`, and it has no emulator for a host with no KVM (open question 13).
+On Linux, `9h` needs `/dev/kvm`, and it has no emulator for a host with no KVM (open question 13). On Linux on arm64, it also needs Linux 6.4 or later. The SMCCC filter of KVM (`KVM_ARM_VM_SMCCC_FILTER`) sends the 9h hypercalls to the monitor, and older kernels do not have the filter.
 
 ## Build
 
@@ -19,7 +19,7 @@ The `9h` kernel for amd64 comes in a later step of P7. On Linux, `9h` needs `/de
 
 ## Run
 
-This runs the `qemu` kernel of the tree, with no change, on macOS 15 or later on arm64:
+This runs the `qemu` kernel of the tree, with no change, on macOS 15 or later on arm64, or on Linux on arm64:
 
 ```
 target/release/9h run --machine virt --kernel 9qemu.u --ini plan9.ini --mem 512 --cpus 4
@@ -47,4 +47,4 @@ quit
 
 ## Test
 
-`cargo test` runs the unit tests on each host. The tests do not need a hypervisor.
+`cargo test` runs the unit tests on each host. The unit tests do not need a hypervisor. On Linux, the tests of `h9-kvm/tests` run a small guest on KVM. With no `/dev/kvm` they pass with a note, unless `H9_NEED_KVM=1` is set. CI sets it on the x86-64 runner, and on the arm64 runner when that runner has `/dev/kvm`.

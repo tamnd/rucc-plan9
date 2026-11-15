@@ -49,8 +49,13 @@ jobs:
         include:
           - name: linux x86-64
             os: ubuntu-24.04
+            kvm: need
+          - name: linux arm64
+            os: ubuntu-24.04-arm
+            kvm: try
           - name: macos arm64
             os: macos-26
+            kvm: none
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: Swatinem/rust-cache@v2.9.2
@@ -66,8 +71,13 @@ jobs:
         include:
           - name: linux x86-64
             os: ubuntu-24.04
+            kvm: need
+          - name: linux arm64
+            os: ubuntu-24.04-arm
+            kvm: try
           - name: macos arm64
             os: macos-26
+            kvm: none
     defaults:
       run:
         working-directory: 9h/monitor
@@ -80,11 +90,15 @@ jobs:
         run: cargo fmt --all --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      # The hosted Linux runners have KVM, and this rule lets the user of the job open /dev/kvm.
-      # The KVM guest test then runs, and H9_NEED_KVM makes it fail when /dev/kvm does not open.
+      # The hosted x86-64 Linux runners have KVM, and this rule lets the user of the job open
+      # /dev/kvm. The KVM guest test then runs, and H9_NEED_KVM makes it fail when /dev/kvm does
+      # not open. The arm64 Linux runners can have no KVM. There the step gives /dev/kvm when it
+      # is there, and the guest test runs only then.
       - name: give the job /dev/kvm
-        if: runner.os == 'Linux'
+        if: matrix.kvm != 'none'
         run: |
+          uname -r
+          if [ "${{ matrix.kvm }}" = try ] && [ ! -e /dev/kvm ]; then echo "no /dev/kvm on this runner"; exit 0; fi
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm

@@ -22,7 +22,10 @@ use h9_vm::{acpi, multiboot};
 #[cfg_attr(
     not(any(
         all(target_os = "macos", target_arch = "aarch64"),
-        all(target_os = "linux", target_arch = "x86_64")
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
     )),
     allow(dead_code)
 )]
@@ -35,7 +38,8 @@ const USAGE: &str = "usage:
          [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--snarf host|memory]
          [--ini FILE] [--strict] [--timeout SECS] [--script FILE] [--headless]
       Run a kernel of the tree on the hypervisor of the host: an arm64 kernel on HVF on macOS
-      on arm64, and an amd64 kernel on KVM on Linux on x86-64. On arm64, FILE is a 7l a.out
+      on arm64 or on KVM on Linux on arm64, and an amd64 kernel on KVM on Linux on x86-64.
+      KVM on arm64 needs Linux 6.4 or later, for the SMCCC filter. On arm64, FILE is a 7l a.out
       or the U-Boot image of one (9qemu or 9qemu.u). The machine has the layout of the QEMU virt
       machine: RAM at 0x40000000 (--mem MiB, 1024 by default), the device tree at the start of
       the RAM, and the GICv3 of the hypervisor. --machine 9h, the default, is the machine of
@@ -425,7 +429,10 @@ fn run(o: &Options) -> Result<ExitCode, String> {
 #[cfg_attr(
     not(any(
         all(target_os = "macos", target_arch = "aarch64"),
-        all(target_os = "linux", target_arch = "x86_64")
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
     )),
     allow(dead_code)
 )]
@@ -444,11 +451,14 @@ fn type_in(bus: &mut Bus, b: &[u8]) {
 /// A session script and the console output that it reads.
 type Script = (Vec<(usize, Step)>, Transcript);
 
-/// The back end of the host: HVF on macOS on arm64, KVM on Linux on x86-64. The two have the
-/// same interface.
+/// The back end of the host: HVF on macOS on arm64, KVM on Linux on x86-64 and arm64. The two
+/// have the same interface.
 #[cfg(any(
     all(target_os = "macos", target_arch = "aarch64"),
-    all(target_os = "linux", target_arch = "x86_64")
+    all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )
 ))]
 mod backend {
     use super::{Script, script, type_in};
@@ -517,7 +527,10 @@ mod backend {
 
 #[cfg(not(any(
     all(target_os = "macos", target_arch = "aarch64"),
-    all(target_os = "linux", target_arch = "x86_64")
+    all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )
 )))]
 mod backend {
     use h9_dev::Bus;
@@ -533,7 +546,7 @@ mod backend {
         _: u64,
         _: Option<super::Script>,
     ) -> Result<ExitCode, String> {
-        Err("this host has no back end: the monitor runs on macOS on arm64 (HVF) and on Linux on x86-64 (KVM)".into())
+        Err("this host has no back end: the monitor runs on macOS on arm64 (HVF) and on Linux on x86-64 and arm64 (KVM)".into())
     }
 }
 
