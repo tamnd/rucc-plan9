@@ -292,6 +292,9 @@ usage:
       wrote: the calls by origin and by compiler, the calls that failed, the calls from pcc,
       the time by directory, and the sources compiled more than once. The census of an R build
       fails when a call went to kencc. The side comes from the records when --side is not given.
+      The first line says GRADED or UNGRADED (plan 02.8). An R build is graded when its census
+      passes and it used no bring-up, as R9_BRINGUP='' gives. The bring-up comes from the
+      build.toml next to the collected directory of FILE.
   r9 demands FILE --root DIR [--flags FLAGS] [--out FILE] [--top N] [--kencc]
       Compile each unit of a G build again with rucc -fsyntax-only on the host, and rank the
       first errors by the number of units they stop. FILE is the compile.jsonl of the build. DIR

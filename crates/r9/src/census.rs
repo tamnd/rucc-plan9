@@ -216,10 +216,44 @@ impl Census {
         p
     }
 
-    /// The report `r9 census` prints.
+    /// Whether a build with this census is graded (plan 02.8). It is an R build whose census
+    /// has no problem, and that used no bring-up. `bringup` is the value of `R9_BRINGUP` in the
+    /// build, and `None` when it is not known.
     #[must_use]
-    pub fn report(&self, side: Side) -> String {
+    pub fn graded(&self, side: Side, bringup: Option<&str>) -> bool {
+        side == Side::R
+            && bringup.is_some_and(|b| b.trim().is_empty())
+            && self.problems(side).is_empty()
+    }
+
+    /// The first line of a report (plan 14.7): whether the build is graded, the counts of
+    /// `ref-c`, `ref-as` and `other-arch`, and the bring-up.
+    #[must_use]
+    pub fn headline(&self, side: Side, bringup: Option<&str>) -> String {
+        let n = |origin: &str| self.by_origin.get(origin).copied().unwrap_or(0);
+        let word = match side {
+            Side::G => "G BUILD",
+            Side::R if self.graded(side, bringup) => "GRADED",
+            Side::R => "UNGRADED",
+        };
+        let bringup = match bringup.map(str::trim) {
+            None => "bring-up not known".to_owned(),
+            Some("") => "no bring-up".to_owned(),
+            Some(b) => format!("bring-up {b}"),
+        };
+        format!(
+            "{word}: ref-c {}, ref-as {}, other-arch {}, {bringup}",
+            n("ref-c"),
+            n("ref-as"),
+            n("other-arch")
+        )
+    }
+
+    /// The report `r9 census` prints. The first line is the headline.
+    #[must_use]
+    pub fn report(&self, side: Side, bringup: Option<&str>) -> String {
         let mut out = String::new();
+        let _ = writeln!(out, "{}", self.headline(side, bringup));
         let _ = writeln!(out, "calls      {}", self.calls);
         for (origin, n) in &self.by_origin {
             let _ = writeln!(out, "  origin   {origin:<12} {n}");
@@ -328,6 +362,34 @@ mod tests {
     }
 
     #[test]
+    fn only_an_r_build_with_no_problem_and_no_bring_up_is_graded() {
+        let line = SAMPLE
+            .lines()
+            .next()
+            .unwrap()
+            .replace("\"origin\":\"ref-c\"", "\"origin\":\"rucc\"");
+        let c = take(&parse(&line).unwrap());
+        assert!(c.graded(Side::R, Some("")));
+        assert_eq!(
+            c.report(Side::R, Some("")).lines().next(),
+            Some("GRADED: ref-c 0, ref-as 0, other-arch 0, no bring-up")
+        );
+        assert!(!c.graded(Side::R, Some("cc:auto")));
+        assert_eq!(
+            c.headline(Side::R, Some("cc:auto")),
+            "UNGRADED: ref-c 0, ref-as 0, other-arch 0, bring-up cc:auto"
+        );
+        assert!(!c.graded(Side::R, None));
+        assert!(!c.graded(Side::G, Some("")));
+        let c = take(&parse(SAMPLE).unwrap());
+        assert!(!c.graded(Side::R, Some("")));
+        assert_eq!(
+            c.headline(Side::R, Some("")),
+            "UNGRADED: ref-c 3, ref-as 0, other-arch 1, no bring-up"
+        );
+    }
+
+    #[test]
     fn a_negative_time_is_read_as_zero() {
         let line = SAMPLE
             .lines()
@@ -358,7 +420,7 @@ mod tests {
             }
         );
         assert_eq!(c.unit_cpu_ms.max, 240);
-        assert!(c.report(Side::G).contains("cpu        0.2s"));
+        assert!(c.report(Side::G, None).contains("cpu        0.2s"));
         assert_eq!(c.failed.len(), 1);
         let (places, same) = &c.repeated["aa"];
         assert_eq!(places.len(), 2);
@@ -366,7 +428,10 @@ mod tests {
         assert_eq!(Side::pick(None, &records).unwrap(), Side::G);
         assert_eq!(c.problems(Side::G), vec!["1 calls failed"]);
         assert_eq!(c.problems(Side::R).len(), 2);
-        assert!(c.report(Side::G).contains("census of the G build fails"));
+        assert!(
+            c.report(Side::G, None)
+                .contains("census of the G build fails")
+        );
     }
 
     #[test]

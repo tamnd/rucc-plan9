@@ -269,6 +269,15 @@ fn run_sdiff(args: &Args) -> Result<ExitCode, String> {
 }
 
 /// `r9 tree-diff`: compare the files of two builds, or only their names and modes.
+/// The bring-up of the build that wrote `records`, from the `build.toml` of `r9 build` next to
+/// the `collected` directory. `None` when there is no such file, or when an older r9 wrote it.
+fn census_bringup(records: &std::path::Path) -> Option<String> {
+    let dir = records.parent()?.parent()?;
+    let text = std::fs::read_to_string(dir.join("build.toml")).ok()?;
+    let table: toml::Table = text.parse().ok()?;
+    table.get("bringup")?.as_str().map(str::to_owned)
+}
+
 fn tree_diff(args: &Args) -> Result<ExitCode, String> {
     let a = args
         .target
@@ -343,7 +352,8 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
             let records = r9::census::load(std::path::Path::new(path))?;
             let side = r9::census::Side::pick(args.get("side"), &records)?;
             let census = r9::census::take(&records);
-            print!("{}", census.report(side));
+            let bringup = census_bringup(std::path::Path::new(path));
+            print!("{}", census.report(side, bringup.as_deref()));
             Ok(if census.problems(side).is_empty() {
                 ExitCode::SUCCESS
             } else {
