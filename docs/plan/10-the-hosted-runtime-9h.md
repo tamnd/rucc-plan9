@@ -63,7 +63,7 @@ The monitor builds the machine the tree's `arm64` code already knows: QEMU's `vi
 | Range | What |
 |---|---|
 | `0x08000000` | GICv3 distributor; redistributors at `0x080a0000` |
-| `0x09000000` | reserved; there is no UART, and the console is a hypercall |
+| `0x09000000` | reserved for the `9h` kernel, where the console is a hypercall. Until that kernel exists, the monitor puts a PL011 here and a PL031 at `0x09010000`, so the `qemu` kernel of the tree can run (10.3.1) |
 | `0x40000000` | RAM, 1 GiB by default (`-m`), one host allocation mapped with `hv_vm_map` or `KVM_SET_USER_MEMORY_REGION` |
 | top of RAM | the screen's framebuffer is ordinary RAM the kernel allocates; the monitor reads it through the same host mapping |
 
@@ -81,6 +81,17 @@ The monitor builds the machine the tree's `arm64` code already knows: QEMU's `vi
 - The generic timer is the guest's own virtual timer. When it fires, `hv_vcpu_run` returns `HV_EXIT_REASON_VTIMER_ACTIVATED`. The monitor asserts the timer's PPI in the GIC and unmasks the timer when the guest acknowledges it.
 - `HVC #0` from EL1 exits as an exception with class `0x16`. That is the hypercall path (10.5), and PSCI uses it too.
 - To interrupt a running vCPU for a device interrupt, the monitor calls `hv_vcpus_exit`, injects the interrupt and resumes.
+
+### 10.3.1 First boot on the M4
+
+The first test of the monitor is the `qemu` kernel of the tree, `9qemu.u` from the G arm64 image, with no change. It boots on the M4 (macOS 15.8) to the `bootargs` prompt of `bootrc`, and `!rc` at that prompt gives a shell on the terminal. The boot showed these facts about the framework and the kernel:
+
+- With `hv_gic_create`, the framework delivers the PPI of the virtual timer and handles `WFI` itself. The boot had no `HV_EXIT_REASON_VTIMER_ACTIVATED` exit and no `WFI` exit. The monitor keeps both exit paths, because a configuration without the framework GIC needs them.
+- `ID_AA64DFR0_EL1.PMUVer` is 0 by default. With that value, a PMU access in the guest takes an Undefined exception in the guest, and the monitor does not see it. The header of `hv_vm_config.h` says that such an access exits to the monitor when EL2 is off, but on the M4 it does not. `clockinit` writes `PMCR_EL0`, so the monitor sets `PMUVer` to 1 (PMUv3), and the framework then emulates the PMU.
+- `bootargs.c` copies `/chosen/bootargs` over the `plan9.ini` at `CONFADDR` when the property exists, even when it is empty. The monitor puts the property in the device tree only when `--bootargs` is given. Without the `plan9.ini`, `$console` is not set, `kbdfs` does not open `/dev/eia0`, and the console gets no input.
+- The PCI scan of `pciqemu.c` reads the ECAM window at `0x3f000000`. There is no device there, so each read gives all ones, and the scan finds no PCI device. That is the result the kernel expects from an empty bus.
+
+`9h run --kernel 9qemu.u --ini plan9.ini` starts this test. `H9_TRACE=1` logs each exit, and it logs the state of the timer and of the GIC each 500 ms.
 
 **KVM on Linux arm64.** This is the same machine, with KVM's in-kernel vGICv3 (`KVM_DEV_TYPE_ARM_VGIC_V3`) and timer, and `KVM_EXIT_HYPERCALL` for `HVC` with SMCCC filtering (`KVM_ARM_VM_SMCCC_FILTER`, Linux 6.4 and later). PSCI is KVM's own.
 
