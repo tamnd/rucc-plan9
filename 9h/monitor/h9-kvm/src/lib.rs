@@ -6,6 +6,9 @@
 //! `HYPERCALL_PORT`, with the number in RAX and the arguments in RBX, RCX, RSI, RDI and R8. The
 //! result goes in RAX. An access to another port goes to the bus at `PORTS` plus the port.
 //!
+//! A write with bit 2 set to `RESET_PORT`, the reset control register of the PC, resets the
+//! machine. `archreset` of the tree writes 6 there when the kernel exits or reboots.
+//!
 //! vCPU 0 starts at the multiboot entry of the kernel, in 32-bit protected mode with no paging,
 //! with `EAX` and `EBX` as the multiboot specification says. The other vCPUs wait in KVM until
 //! the kernel starts them with INIT and SIPI through its local APIC. Each vCPU runs on a thread of
@@ -30,6 +33,10 @@ use kvm_ioctls::{Kvm, VcpuExit, VcpuFd, VmFd};
 
 /// The port of the 9h hypercalls.
 pub const HYPERCALL_PORT: u16 = 0x509;
+/// The reset control register of the PC.
+pub const RESET_PORT: u16 = 0xcf9;
+/// The bit of `RESET_PORT` that starts the reset.
+const RESET_CPU: u8 = 1 << 2;
 /// The three pages that KVM needs for the TSS of a real-mode guest on Intel, below the BIOS.
 const TSS: usize = 0xfffb_d000;
 /// The signal that makes a vCPU thread leave `KVM_RUN`.
@@ -297,6 +304,7 @@ fn run_vcpu(m: &Machine, cpu: &mut VcpuFd) -> Result<Option<Stop>, String> {
         }
         let next = match cpu.run() {
             Ok(VcpuExit::IoOut(HYPERCALL_PORT, _)) => Next::Hypercall,
+            Ok(VcpuExit::IoOut(RESET_PORT, [v])) if v & RESET_CPU != 0 => Next::End(Stop::Reset),
             Ok(VcpuExit::IoOut(port, data)) => {
                 let size = chunks(data.len());
                 for c in data.chunks(size) {
