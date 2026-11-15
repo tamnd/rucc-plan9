@@ -94,6 +94,16 @@ pub fn overlay_command(req: &Request) -> Vec<String> {
     ]
 }
 
+/// The monitor socket of a boot. On a write error, such as a full disk on the host, QEMU stops
+/// the guest. The guest then waits for the command `cont` on the monitor.
+#[must_use]
+pub fn monitor(req: &Request) -> PathBuf {
+    req.work.join("monitor")
+}
+
+/// The length limit of the name of a Unix socket on macOS, less the terminating zero.
+const SOCKET_NAME_MAX: usize = 103;
+
 /// The QEMU command line. The console is the first serial port on standard input and output.
 #[must_use]
 pub fn qemu_command(req: &Request) -> Vec<String> {
@@ -116,6 +126,11 @@ pub fn qemu_command(req: &Request) -> Vec<String> {
         "-serial".into(),
         "stdio".into(),
     ];
+    let mon = monitor(req).display().to_string();
+    if mon.len() <= SOCKET_NAME_MAX {
+        c.push("-monitor".into());
+        c.push(format!("unix:{mon},server=on,wait=off"));
+    }
     if let Some(fw) = &req.firmware {
         c.push("-bios".into());
         c.push(fw.display().to_string());
@@ -246,10 +261,15 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
     let mut lines = Lines::default();
     let mut timed_out = false;
     let mut halted_at: Option<Instant> = None;
+    let mut resumed_at = Instant::now();
     loop {
         if start.elapsed() > req.timeout {
             timed_out = true;
             break;
+        }
+        if resumed_at.elapsed() > RESUME_EVERY {
+            resume(&monitor(req));
+            resumed_at = Instant::now();
         }
         match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(bytes) => {
@@ -278,6 +298,7 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
         }
     }
     stop(&mut child);
+    let _ = std::fs::remove_file(monitor(req));
     let _ = reader.join();
     clean_up(req)?;
     let passed = session.passed() && session.phase == Phase::Halted && !timed_out;
@@ -292,6 +313,27 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
     };
     write_steps(&req.work.join("steps.json"), &outcome)?;
     Ok(outcome)
+}
+
+/// The time between two commands `cont` on the monitor.
+const RESUME_EVERY: Duration = Duration::from_secs(30);
+
+/// Send `cont` on the monitor `path`. When a write error stopped the guest, `cont` makes QEMU
+/// do the write again, and the guest continues if the disk has space now. When the guest runs,
+/// `cont` has no effect. An error is not reported, because the boot does not need the monitor.
+fn resume(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixStream;
+        if let Ok(mut s) = UnixStream::connect(path) {
+            let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
+            let _ = s.write_all(b"cont\n");
+            let mut buf = [0u8; 512];
+            let _ = s.read(&mut buf);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 /// Stop QEMU. QEMU keeps a part of the qcow2 metadata of the overlay in memory, and writes it
@@ -645,7 +687,7 @@ mod tests {
     fn the_amd64_command() {
         let c = qemu_command(&request(row("qemu-system-x86_64", "virtio"), "kvm")).join(" ");
         assert!(c.starts_with("qemu-system-x86_64 -machine q35,accel=kvm -cpu host -smp 4 -m 4G"));
-        assert!(c.contains("-serial stdio"));
+        assert!(c.contains("-serial stdio -monitor unix:/w/monitor,server=on,wait=off"));
         assert!(c.contains("file=/w/root.qcow2,if=none,id=root,format=qcow2"));
         assert!(c.contains("-device virtio-blk-pci,drive=root -drive file=/w/data.tar,if=none,id=d1,format=raw -device virtio-blk-pci,drive=d1"));
         let c = qemu_command(&request(row("qemu-system-x86_64", "ahci"), "tcg")).join(" ");
@@ -666,6 +708,14 @@ mod tests {
         assert!(c.ends_with(
             "-netdev user,id=net0 -device virtio-net-pci,netdev=net0,disable-legacy=on"
         ));
+    }
+
+    #[test]
+    fn a_long_work_directory_has_no_monitor() {
+        let mut req = request(row("qemu-system-x86_64", "virtio"), "tcg");
+        req.work = PathBuf::from(format!("/{}", "w".repeat(100)));
+        let c = qemu_command(&req).join(" ");
+        assert!(!c.contains("-monitor"));
     }
 
     #[test]
