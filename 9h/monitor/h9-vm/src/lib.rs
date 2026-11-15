@@ -1,8 +1,10 @@
 //! The parts of the 9h machine that are the same for each hypervisor (plan 10.3 and 10.8): the
 //! RAM of the guest, the kernel image, the device tree, and the exits of a vCPU.
 
+pub mod acpi;
 pub mod fdt;
 pub mod kernel;
+pub mod multiboot;
 pub mod ram;
 
 pub use ram::Ram;
