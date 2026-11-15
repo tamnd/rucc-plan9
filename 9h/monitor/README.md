@@ -28,7 +28,7 @@ target/release/9h run --machine virt --kernel 9qemu.u --ini plan9.ini --mem 512 
 
 `#Z/snarf` is the host clipboard, and `--snarf memory` keeps it in the monitor. `#Z/ctl` takes `quit` and `title TEXT`.
 
-`--script FILE` drives the console with no person at it, as `r9 9h boot` does. Each line of FILE is a step: `wait TEXT`, `send TEXT`, `timeout SECS` or `quit`. TEXT can be a string in double quotes with the escapes `\n`, `\r`, `\t`, `\\`, `\"` and `\xHH`. A `wait` waits for TEXT after the last match, for 60 seconds by default. The exit status is 0 when the script passes, and 3 when a `wait` times out or the session ends first. This script types a command at the shell of the boot and waits for its output:
+`--script FILE` drives the console with no person at it. Each line of FILE is a step: `wait TEXT`, `send TEXT`, `timeout SECS` or `quit`. TEXT can be a string in double quotes with the escapes `\n`, `\r`, `\t`, `\\`, `\"` and `\xHH`. A `wait` waits for TEXT after the last match, for 60 seconds by default. The exit status is 0 when the script passes, and 3 when a `wait` times out or the session ends first. This script types a command at the shell of the boot and waits for its output:
 
 ```
 timeout 120
