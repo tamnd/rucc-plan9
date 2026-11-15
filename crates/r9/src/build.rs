@@ -527,6 +527,14 @@ mod tests {
     }
 
     #[test]
+    fn r9_build_has_the_target_cross_for_one_objtype() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let script = std::fs::read_to_string(root.join("guest/r9-build")).unwrap();
+        assert!(script.contains("\tcase cross cross.*\n"));
+        assert!(script.contains("os=`{echo $t | sed 's/^cross\\.//'}"));
+    }
+
+    #[test]
     fn r9_build_has_the_target_9h() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let script = std::fs::read_to_string(root.join("guest/r9-build")).unwrap();
