@@ -297,9 +297,10 @@ usage:
       /lib, /rc and each OBJTYPE/include, and build 6c, 6l, 6a, 7c, 7l and 7a three times. The
       last two builds must give the same bytes. Then build r9-cc, keep the overlay in the cache
       as the g-base image, and write its summary to baselines/.
-  r9 9h verify --tree DIR [--records FILE] [--row OBJTYPE]
+  r9 9h verify [--tree DIR] [--records FILE] [--row OBJTYPE]
       Check that the 9h kernel uses the pinned tree with no change (plan 10.2). DIR is the root
-      of the pinned tree on the host. No file in 9h/OBJTYPE may have the name of a file in port,
+      of the pinned tree on the host. With no --tree, the command writes sys/src/9 of the first
+      tree of pins.toml from the history clone in the cache to work/9h/verify. No file in 9h/OBJTYPE may have the name of a file in port,
       in the arch directory, or in pc for amd64, and no device of the tree may use #Z. With
       --records, FILE is the compile.jsonl of the build. Each source in /sys/src/9 must then be
       a file of the tree with the hash of the pin, a file of 9h/OBJTYPE with its hash, or a file

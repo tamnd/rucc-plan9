@@ -5,7 +5,8 @@
 # The job makes the g-base image of the pinned tree, as g-base.yml does. r9 build --side G with
 # the targets cross.arm64 and 9h.arm64 then builds the arm64 user space and the 9h kernel in the
 # amd64 guest. The boot file system of the kernel has arm64 programs, so the kernel needs the
-# cross build first. The console log, the build log and the kernel go to an artifact.
+# cross build first. r9 9h verify checks the sources of the build against the pinned tree. The
+# console log, the build log, the compile records and the kernel go to an artifact.
 
 name: 9h arm64
 
@@ -59,12 +60,14 @@ jobs:
         run: target/release/r9 image build --row amd64 --accel kvm --out "$RUNNER_TEMP/image"
       - name: r9 build, the targets cross.arm64 and 9h.arm64
         run: target/release/r9 build --side G --row amd64 --accel kvm --targets 'cross.arm64 9h.arm64' --out "$RUNNER_TEMP/k"
+      - name: r9 9h verify
+        run: target/release/r9 9h verify --records "$RUNNER_TEMP/k/collected/compile.jsonl" --row arm64
       - name: gather the results
         if: always()
         run: |
           mkdir -p "$RUNNER_TEMP/out/k"
           cp "$RUNNER_TEMP/k"/*.toml "$RUNNER_TEMP/k"/console.log "$RUNNER_TEMP/out/k/" || true
-          cp "$RUNNER_TEMP/k/collected/mk.log" "$RUNNER_TEMP/out/k/" || true
+          cp "$RUNNER_TEMP/k/collected/mk.log" "$RUNNER_TEMP/k/collected/compile.jsonl" "$RUNNER_TEMP/out/k/" || true
           cp -r "$RUNNER_TEMP/k/collected/9h" "$RUNNER_TEMP/out/k/" || true
       - uses: actions/upload-artifact@v7.0.1
         if: always()
