@@ -16,6 +16,11 @@ use h9_dev::pl031::Pl031;
 use h9_vm::Ram;
 use h9_vm::fdt::Fdt;
 
+// Only the back end of HVF runs a script, until the one of KVM exists.
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 mod script;
 
 use script::{Step, Tee, Transcript};
