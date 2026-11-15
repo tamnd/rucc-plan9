@@ -12,7 +12,6 @@
 #include "dat.h"
 #include "fns.h"
 #include "io.h"
-#include "ureg.h"
 #include "h9.h"
 
 extern PhysUart h9physuart;
@@ -30,87 +29,6 @@ pnp(void)
 	return &h9uart;
 }
 
-/*
- * The keys ^T^T p of old Plan 9: the console writes the state
- * of each process. When rio has the screen, the console
- * keyboard goes to a window, and a guest that hangs there has
- * no shell to run ps. Each byte, the ^T too, goes to the uart
- * as before, but the p that follows ^T^T does not. The
- * interrupt only wakes the kernel process h9dump, because the
- * stack of the interrupt is too small for the prints.
- */
-static Rendez dumpr;
-static int dumpwanted;
-
-static int
-wanted(void*)
-{
-	return dumpwanted;
-}
-
-static void
-dumpproc(void*)
-{
-	int i;
-	char *ps;
-	Proc *p;
-	Mach *m;
-	Ureg *u;
-
-	for(;;){
-		sleep(&dumpr, wanted, nil);
-		dumpwanted = 0;
-		for(i = 0; i < conf.nproc; i++){
-			p = proctab(i);	/* nil when the slot was never used */
-			if(p == nil || p->state == Dead)
-				continue;
-			ps = p->psstate;
-			if(ps == nil)
-				ps = statename[p->state];
-			m = p->mach;	/* it changes as the process runs */
-			u = p->dbgreg;	/* the user registers, at a system call */
-			iprint("%lud %s %s pc %#p qpc %#p nl %d mach %d upc %#p ulink %#p\n",
-				p->pid, p->text, ps, p->pc, p->qpc, p->nlocks,
-				m != nil ? m->machno : -1,
-				u != nil ? u->pc : 0, u != nil ? u->link : 0);
-		}
-		for(i = 0; i < conf.nmach; i++)
-			iprint("cpu%d ticks %lud\n", i, MACHP(i)->ticks);
-		iprint("uart staged %ld queued %d\n",
-			h9uart.iw >= h9uart.ir ? h9uart.iw - h9uart.ir : Stagesize - (h9uart.ir - h9uart.iw),
-			h9uart.iq != nil ? qlen(h9uart.iq) : -1);
-	}
-}
-
-/* devhost calls this at its init, from the first process */
-void
-h9dumpinit(void)
-{
-	kproc("h9dump", dumpproc, nil);
-}
-
-static int
-debugkey(int c)
-{
-	static int ctrlt;
-
-	if(c == 0x14){
-		if(ctrlt < 2)
-			ctrlt++;
-		return 0;
-	}
-	if(ctrlt != 2){
-		ctrlt = 0;
-		return 0;
-	}
-	ctrlt = 0;
-	if(c != 'p')
-		return 0;
-	dumpwanted = 1;
-	wakeup(&dumpr);
-	return 1;
-}
-
 static void
 interrupt(Ureg*, void *arg)
 {
@@ -118,8 +36,7 @@ interrupt(Ureg*, void *arg)
 	uvlong c;
 
 	while((c = h9call(H9consgetc, 0, 0, 0, 0)) != ~0ULL)
-		if(!debugkey(c & 0xFF))
-			uartrecv(uart, c & 0xFF);
+		uartrecv(uart, c & 0xFF);
 }
 
 static void

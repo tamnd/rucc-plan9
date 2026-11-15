@@ -37,4 +37,3 @@ enum {
 };
 
 extern uvlong	h9call(uvlong, uvlong, uvlong, uvlong, uvlong);
-extern void	h9dumpinit(void);
