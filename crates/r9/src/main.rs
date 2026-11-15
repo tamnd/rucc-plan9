@@ -414,10 +414,11 @@ fn run_9h(args: &Args) -> Result<ExitCode, String> {
             ExitCode::FAILURE
         });
     }
-    let tree = std::path::Path::new(
-        args.get("tree")
-            .ok_or("give --tree, the pinned tree on the host")?,
-    );
+    let tree = match args.get("tree") {
+        Some(t) => std::path::PathBuf::from(t),
+        None => r9::h9verify::pinned_tree(&repo, &repo.root.join("work/9h/verify"))?,
+    };
+    let tree = tree.as_path();
     let row = args.get("row").unwrap_or("arm64");
     let h9 = repo.root.join("9h");
     let mut v = r9::h9verify::check_trees(tree, &h9, row);

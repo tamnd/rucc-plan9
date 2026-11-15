@@ -2,7 +2,7 @@
 #
 # The job makes the g-base image of the pinned tree, as g-base.yml does. r9 build --side G with
 # the target 9h.amd64 then builds the 9h kernel in the guest with the compilers of the tree. r9
-# 9h verify checks the sources of the build against the pinned tree. The job builds the 9h
+# 9h verify checks the sources of the build against sys/src/9 of the pin. The job builds the 9h
 # monitor, and r9 9h boot boots the kernel on the g-base image and runs smoke/boot.rc on its
 # console. The monitor logs each port and address with no device that the kernel used. A second
 # boot with --strict stops the machine at the first such access. The console logs, the steps,
@@ -70,10 +70,7 @@ jobs:
       - name: r9 build, the target 9h.amd64
         run: target/release/r9 build --side G --row amd64 --accel kvm --targets 9h.amd64 --out "$RUNNER_TEMP/k"
       - name: r9 9h verify
-        run: |
-          mkdir -p "$RUNNER_TEMP/tree"
-          tar xf "$RUNNER_TEMP/image/in/tree.tar" -C "$RUNNER_TEMP/tree"
-          target/release/r9 9h verify --tree "$RUNNER_TEMP/tree" --records "$RUNNER_TEMP/k/collected/compile.jsonl" --row amd64
+        run: target/release/r9 9h verify --records "$RUNNER_TEMP/k/collected/compile.jsonl" --row amd64
       - name: r9 9h boot
         run: |
           root=$(ls /mnt/r9/images/g-base-*.amd64.qcow2 | head -1)

@@ -163,6 +163,34 @@ pub fn devchars(dir: &Path) -> BTreeMap<char, String> {
     out
 }
 
+/// The kernel sources of the pinned tree, which `r9 9h verify` reads when it has no `--tree`.
+/// Write `sys/src/9` of the first tree of `pins.toml` from the history clone in the cache to
+/// `dir`, and return `dir`. The check reads only `sys/src/9`, so only those blobs are fetched.
+pub fn pinned_tree(repo: &crate::repo::Repo, dir: &Path) -> Result<PathBuf, String> {
+    let pins = r9_pins::pins::PinsFile::load(&repo.root)?
+        .ok_or("there is no pins.toml; run r9 sets --write")?;
+    let (_, tree) = pins.tree.iter().next().ok_or("pins.toml has no tree")?;
+    let history = crate::locate::history(&repo.cache, &tree.repo)?;
+    if dir.exists() {
+        std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let tar = dir.join("kernel.tar");
+    crate::image::archive(&history, &tree.commit, &["sys/src/9".to_string()], &tar)?;
+    let status = std::process::Command::new("tar")
+        .arg("xf")
+        .arg(&tar)
+        .arg("-C")
+        .arg(dir)
+        .status()
+        .map_err(|e| format!("cannot run tar: {e}"))?;
+    if !status.success() {
+        return Err(format!("tar cannot read {}", tar.display()));
+    }
+    std::fs::remove_file(&tar).map_err(|e| format!("{}: {e}", tar.display()))?;
+    Ok(dir.to_path_buf())
+}
+
 /// The part of the check that reads only the trees. `tree` is the root of the pinned tree, and
 /// `h9` is the `9h` directory of this repository.
 #[must_use]
