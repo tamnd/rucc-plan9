@@ -1,0 +1,7 @@
+# v210 shows a file of 10-bit v210 video, 96 by 48 pixels. v210 finds the size of the image in /lib/video.specs by the size of the file, so the script binds the lib directory of gui/data before /lib. The script mounts gui/data on /mnt/term. The q key stops v210.
+class exact
+window 300x200
+run mount -nc '#Z/hostfs' /mnt/term; bind -b /mnt/term/lib /lib; v210 /mnt/term/bars.v210
+quiet
+snap image
+exit "q"
