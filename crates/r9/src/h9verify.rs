@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn the_shared_drivers_are_the_same() {
         let h9 = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../9h");
-        for f in ["sdh9.c", "devhost.c", "h9mouse.c"] {
+        for f in ["sdh9.c", "devhost.c", "h9mouse.c", "devh9kbd.c"] {
             let a = std::fs::read(h9.join("arm64").join(f)).unwrap();
             let b = std::fs::read(h9.join("amd64").join(f)).unwrap();
             assert!(a == b, "9h/arm64/{f} and 9h/amd64/{f} are not the same");

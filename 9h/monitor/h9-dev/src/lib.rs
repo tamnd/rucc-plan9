@@ -14,6 +14,7 @@ pub mod h9cons;
 pub mod h9ctl;
 pub mod h9disk;
 pub mod h9fs;
+pub mod h9kbd;
 pub mod h9mouse;
 pub mod h9screen;
 pub mod h9snarf;

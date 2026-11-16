@@ -27,6 +27,7 @@ dev
 	host
 	draw	swcursor
 	mouse
+	h9kbd
 
 link
 	h9screen

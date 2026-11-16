@@ -1,0 +1,13 @@
+# doom plays the demo of the shareware WAD file in /sys/games/lib/doom. The demo moves with time, so the script is a smoke test. The Esc key opens the menu, the Up key moves from the first item to the last item, which is Quit Game, and the Enter key selects it. The key y stops doom.
+class smoke
+window 660x440
+run games/doom
+pause 10
+snap open
+keys "\x1b"
+pause 1
+keys "\xef\x80\x8e"
+pause 1
+keys "\n"
+pause 1
+exit "y"

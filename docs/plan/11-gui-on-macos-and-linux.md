@@ -46,7 +46,7 @@ The monitor scales mouse coordinates the same way, so `absmousetrack` always rec
 
 ## 11.4 Keyboard
 
-`kbdfs` reads `/dev/kbd` if the kernel provides one, and `/dev/scancode` otherwise (`kbdfs.c:1664`). `h9kbd.c` provides `#b/kbd`, which carries messages of `r` or `R` and one UTF-8 rune, each NUL-terminated: key down and key up (`kbdfs.c:543`). This way:
+`kbdfs` reads `/dev/kbd` if the kernel provides one, and `/dev/scancode` otherwise (`kbdfs.c:1664`). `devh9kbd.c` provides `#b/kbd`, which carries messages of `r` or `R` and one UTF-8 rune, each NUL-terminated: key down and key up (`kbdfs.c:543`). Before this device, typed text came on the console only, and `kbdfs` gave `c` messages only. Programs that read the `k` and `K` messages of `/dev/kbd`, such as `doom`, did not get the keys. This way:
 - the **host's layout and input method** produce the runes, so a French or Japanese user types as on any other host program, and `kbdfs` does not need a `kbmap`;
 - programs that read key-up events, such as `doom` and the emulators, still get them.
 
@@ -55,6 +55,8 @@ The monitor's key table maps:
 - AltGr to `Kaltgr`;
 - macOS Command and the Linux Super key to `Kmod4`;
 - arrows, Home, End, Page Up/Down, Insert, Delete, Escape and F1–F12 to their `keyboard.h` runes.
+
+At present, the host window and the `keys` step of a script give each typed rune as a key down and then a key up. This is sufficient for the menus of `doom` and for the keys that stop a program. The key table above and the key up events of the host window are the next step, so that a program also sees a key that the user holds.
 
 The monitor remembers which rune each physical key produced when it went down. It sends the key-up for that rune, not for whatever the key would produce now, so a key-up is never lost when a modifier changes in between.
 

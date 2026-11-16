@@ -11,6 +11,7 @@ use h9_dev::h9cons::H9Cons;
 use h9_dev::h9ctl::H9Ctl;
 use h9_dev::h9disk::H9Disk;
 use h9_dev::h9fs::H9Fs;
+use h9_dev::h9kbd::H9Kbd;
 use h9_dev::h9mouse::{self, H9Mouse};
 use h9_dev::h9screen::{self, H9Screen};
 use h9_dev::h9snarf::{Clipboard, H9Snarf, Host, Memory};
@@ -486,6 +487,8 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         bus.add_hyper(Box::new(H9Screen::new(w, h)));
         let irq = if PC { h9::MOUSE_IRQ } else { h9::MOUSE_SPI };
         bus.add_hyper(Box::new(H9Mouse::new(irq)));
+        let irq = if PC { h9::KBD_IRQ } else { h9::KBD_SPI };
+        bus.add_hyper(Box::new(H9Kbd::new(irq)));
     }
     if PC {
         bus.add(PORTS + cmos::PORT, 2, Box::new(Cmos::new()));
@@ -563,7 +566,8 @@ fn unknown_report(bus: &Bus) -> Vec<String> {
         .collect()
 }
 
-/// Type the bytes on the console of the machine.
+/// Type the bytes on the machine: on the keyboard h9kbd while the kernel has `#b/kbd` open, and
+/// on the console at other times.
 #[cfg_attr(
     not(any(
         all(target_os = "macos", target_arch = "aarch64"),
@@ -575,7 +579,11 @@ fn unknown_report(bus: &Bus) -> Vec<String> {
     allow(dead_code)
 )]
 fn type_in(bus: &mut Bus, b: &[u8]) {
-    if let Some(u) = bus.device::<Pl011>(UART) {
+    if let Some(k) = bus.hyper_device::<H9Kbd>()
+        && k.is_open()
+    {
+        k.type_in(b);
+    } else if let Some(u) = bus.device::<Pl011>(UART) {
         for &c in b {
             u.push(c);
         }
@@ -598,7 +606,8 @@ fn type_in(bus: &mut Bus, b: &[u8]) {
     allow(dead_code)
 )]
 fn keys_pending(bus: &mut Bus) -> usize {
-    if let Some(u) = bus.device::<Pl011>(UART) {
+    let kbd = bus.hyper_device::<H9Kbd>().map_or(0, |k| k.pending());
+    kbd + if let Some(u) = bus.device::<Pl011>(UART) {
         u.pending()
     } else {
         bus.hyper_device::<H9Cons>().map_or(0, |c| c.pending())
