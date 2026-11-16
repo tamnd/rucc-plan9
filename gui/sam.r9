@@ -1,0 +1,17 @@
+# sam edits a file of three lines. sam reads the file only when a command first uses it, so the command window is empty at the start, and the line " -. /tmp/r9gui.txt" comes before the output of the first command. When the command reads the file, samterm asks for a window for it, and all keys wait until the user sweeps the window with button 3. The script sweeps the window, clicks button 1 in the command window to make it current, and then the command q stops sam, because the file did not change.
+class exact
+window 500x600
+run {echo one; echo two; echo three} > /tmp/r9gui.txt; sam /tmp/r9gui.txt
+pause 5
+quiet
+snap open
+keys ",p\n"
+quiet
+pause 2
+snap print
+drag 3 20,140 480,580
+quiet
+snap file
+mouse 1 at 250,60
+quiet
+exit "q\n"

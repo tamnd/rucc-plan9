@@ -1,0 +1,10 @@
+# rio runs in a window of the rio of the machine. The script starts it with one window that runs rc. A menu item is the font height and 2 pixels, 18 pixels in all, so a drag of 91 pixels down from the push chooses Exit, the sixth item of the menu of button 3. rio then shows the skull cursor, and a click of button 3 tells it to stop.
+class exact
+window 500x400
+run rio -i 'window -r 40 40 300 200 rc'
+quiet
+snap open
+drag 3 400,200 400,291
+pause 1
+mouse 3 at 400,291
+exit none
