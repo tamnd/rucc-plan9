@@ -1,0 +1,7 @@
+# games/life plays the game of life of Conway. The script gives it a glider in a file, with x for a live cell and a dot for a dead cell. The cells change each second, so the script is a smoke test. The key q stops it.
+class smoke
+window 400x400
+run {echo .x.; echo ..x; echo xxx} > /tmp/r9gui.life; games/life /tmp/r9gui.life
+pause 3
+snap open
+exit "q"

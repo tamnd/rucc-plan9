@@ -1,0 +1,8 @@
+# spred edits sprites and palettes. It starts with a command window. The fifth item of the menu of button 3, quit, stops it when no file has changes. The menu opens with the first item under the mouse, so the drag goes down four items of 18 pixels.
+class exact
+window 600x400
+run spred
+quiet
+snap open
+drag 3 300,200 300,273
+exit none
