@@ -1,0 +1,8 @@
+# ico shows the images of a Windows icon file. The script makes a JPEG file 64 by 64 pixels with resize, and then makes the icon file with toico. A menu item is the font height and 2 pixels, 18 pixels in all, so a drag of 37 pixels down from the push chooses exit, the third item of the menu of button 3.
+class exact
+window 300x200
+run jpg -9 /sys/src/cmd/gs/jpeg/testprog.jpg | resize -x 64 -y 64 > /tmp/r9gui.bit; toico /tmp/r9gui.bit > /tmp/r9gui.ico; ico /tmp/r9gui.ico
+quiet
+snap open
+drag 3 150,120 150,157
+exit none
