@@ -36,6 +36,8 @@ pub mod optab7l;
 pub mod optab6;
 #[rustfmt::skip]
 pub mod optab7;
+#[cfg(unix)]
+pub mod qgui;
 pub mod repo;
 pub mod rtt;
 pub mod sdiff;

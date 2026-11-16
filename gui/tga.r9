@@ -1,7 +1,7 @@
 # tga shows a TGA file. The file bars.tga of gui/data has colour bars and a grey ramp, 96 by 48 pixels. The script mounts gui/data on /mnt/term. The q key stops tga.
 class exact
 window 300x200
-run mount -nc '#Z/hostfs' /mnt/term; tga /mnt/term/bars.tga
+run {mount -nc '#Z/hostfs' /mnt/term >[2]/dev/null || bind /lib/r9data /mnt/term}; tga /mnt/term/bars.tga
 quiet
 snap image
 exit "q"

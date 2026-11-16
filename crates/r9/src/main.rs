@@ -442,21 +442,31 @@ fn run_gui(args: &Args) -> Result<ExitCode, String> {
                 || repo.root.join("work").join("gui").join(&name),
                 PathBuf::from,
             );
-            let mut req = r9::h9boot::request_from(&repo, args, false)?;
-            req.work.clone_from(&out);
-            req.snap = Some(out.join("screen.png"));
-            if req.hostfs.is_none() {
-                // The data files of the scripts, such as images and ROMs, are in the directory
-                // data next to the script.
-                let data = script.parent().unwrap_or(Path::new(".")).join("data");
-                if data.is_dir() {
-                    req.hostfs = Some(data.canonicalize().unwrap_or(data));
+            // The data files of the scripts, such as images and ROMs, are in the directory data
+            // next to the script.
+            let data = script.parent().unwrap_or(Path::new(".")).join("data");
+            let data = data.is_dir().then(|| data.canonicalize().unwrap_or(data));
+            let record = match args.get("on").unwrap_or("9h") {
+                "9h" => {
+                    let mut req = r9::h9boot::request_from(&repo, args, false)?;
+                    req.work.clone_from(&out);
+                    req.snap = Some(out.join("screen.png"));
+                    if req.hostfs.is_none() {
+                        req.hostfs = data;
+                    }
+                    if args.get("timeout").is_none() {
+                        req.timeout = std::time::Duration::from_secs(600);
+                    }
+                    r9::gui::run(&req, &script)?
                 }
-            }
-            if args.get("timeout").is_none() {
-                req.timeout = std::time::Duration::from_secs(600);
-            }
-            let record = r9::gui::run(&req, &script)?;
+                "qemu" => {
+                    let mut req = gq_request(&repo, args, &out)?;
+                    let bases = repo.root.join("work").join("gq");
+                    req.base = r9::qgui::prepare(&req, data.as_deref(), &bases)?;
+                    r9::gui::run_q(&req, &script)?
+                }
+                o => return Err(format!("--on {o}: give 9h or qemu")),
+            };
             for s in &record.snaps {
                 println!("{} {}", s.sha256, s.name);
             }
@@ -497,6 +507,56 @@ fn run_gui(args: &Args) -> Result<ExitCode, String> {
         Some(w) => Err(format!("gui {w}: the gui commands are: run and compare")),
         None => Err("give a gui command: run or compare".into()),
     }
+}
+
+/// The request of `r9 gui run --on qemu`: the root image of `--root` on the row of `--row`, amd64
+/// by default, with no commands.
+fn gq_request(
+    repo: &Repo,
+    args: &Args,
+    out: &std::path::Path,
+) -> Result<r9::boot::Request, String> {
+    use std::path::PathBuf;
+    let objtype = args.get("row").unwrap_or("amd64").to_string();
+    if objtype != "amd64" {
+        return Err(format!(
+            "--row {objtype}: G/Q runs only on amd64, because the arm64 kernel of 9front under QEMU has no screen"
+        ));
+    }
+    let rows = r9_pins::rows::Rows::load(&repo.root)?;
+    let row = rows.get(&objtype)?.clone();
+    let base = PathBuf::from(
+        args.get("root")
+            .ok_or("give --root, the qcow2 root image")?,
+    );
+    if !base.is_file() {
+        return Err(format!("{} is not a file", base.display()));
+    }
+    let base = base.canonicalize().unwrap_or(base);
+    let accel = args
+        .get("accel")
+        .map_or_else(|| r9::boot::accel_for(&row), str::to_string);
+    let timeout = args.get("timeout").map_or(Ok(600), |t| {
+        t.parse()
+            .map_err(|_| format!("--timeout {t}: give a number of seconds"))
+    })?;
+    Ok(r9::boot::Request {
+        objtype,
+        row,
+        base,
+        work: out.to_path_buf(),
+        accel,
+        firmware: None,
+        bootargs: String::new(),
+        commands: Vec::new(),
+        extra: None,
+        disks: Vec::new(),
+        input: None,
+        collect_mib: None,
+        timeout: std::time::Duration::from_secs(timeout),
+        keep: args.has("keep"),
+        net: false,
+    })
 }
 
 /// `r9 9h verify`, `r9 9h boot` and `r9 9h smoke`.

@@ -1,7 +1,7 @@
 # The Mega Drive emulator runs a test ROM of 2 KB. The ROM is bands.md in gui/data/rom, which gui/data/mkroms.py makes. It draws a fixed picture and then loops, so the script is an exact test. Plane A shows diagonal bands of 4 colours. The Del key stops the emulator.
 class exact
 window 500x400
-run mount -nc '#Z/hostfs' /mnt/term; games/md /mnt/term/rom/bands.md
+run {mount -nc '#Z/hostfs' /mnt/term >[2]/dev/null || bind /lib/r9data /mnt/term}; games/md /mnt/term/rom/bands.md
 pause 3
 quiet
 snap rom

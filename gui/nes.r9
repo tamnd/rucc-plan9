@@ -1,7 +1,7 @@
 # The NES emulator runs a test ROM with mapper 0. The ROM is grid.nes in gui/data/rom, which gui/data/mkroms.py makes. It draws a fixed picture and then loops, so the script is an exact test. The ROM fills the name table and the attribute table with a grid of tiles. The Del key stops the emulator.
 class exact
 window 500x400
-run mount -nc '#Z/hostfs' /mnt/term; games/nes /mnt/term/rom/grid.nes
+run {mount -nc '#Z/hostfs' /mnt/term >[2]/dev/null || bind /lib/r9data /mnt/term}; games/nes /mnt/term/rom/grid.nes
 pause 3
 quiet
 snap rom
