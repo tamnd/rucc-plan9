@@ -1,0 +1,7 @@
+# games/4s is a game of falling pieces. The pieces fall with time, so the script is a smoke test. The key q stops it.
+class smoke
+window 400x500
+run games/4s
+pause 3
+snap open
+exit "q"

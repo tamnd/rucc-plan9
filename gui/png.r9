@@ -1,0 +1,7 @@
+# png shows a PNG file. The q key stops it.
+class exact
+window 400x300
+run png /sys/src/cmd/gs/libpng/pngtest.png
+quiet
+snap image
+exit "q"

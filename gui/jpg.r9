@@ -1,0 +1,7 @@
+# jpg shows a JPEG file. The q key stops it.
+class exact
+window 400x300
+run jpg /sys/src/cmd/gs/jpeg/testprog.jpg
+quiet
+snap image
+exit "q"

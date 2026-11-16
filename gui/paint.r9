@@ -1,0 +1,10 @@
+# paint draws a line with button 1. The q key opens the command prompt, and q and a newline stop it.
+class exact
+window 400x300
+run paint
+quiet
+snap blank
+drag 1 50,60 300,200
+quiet
+snap line
+exit "q\n"

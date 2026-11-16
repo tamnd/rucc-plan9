@@ -1,0 +1,8 @@
+# mandel draws the Mandelbrot set. The third item of the menu of button 3, quit, stops it. The drag goes from the first item to the third item.
+class exact
+window 400x300
+run games/mandel
+quiet 1000 60
+snap set
+drag 3 200,150 200,182
+exit none

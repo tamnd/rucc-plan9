@@ -1,0 +1,7 @@
+# vdiff shows the output of diff -u. The script makes two files that are different in one line. The output of diff goes to a file first, because diff exits with the status some, and the status of a pipeline has it. The q key stops it.
+class exact
+window 500x300
+run {echo one; echo two; echo three} > /tmp/r9gui.a; {echo one; echo 2; echo three} > /tmp/r9gui.b; diff -u /tmp/r9gui.a /tmp/r9gui.b > /tmp/r9gui.d; vdiff < /tmp/r9gui.d
+quiet
+snap diff
+exit "q"

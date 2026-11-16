@@ -1,0 +1,7 @@
+# games/mahjongg puts the tiles at random, with the time as the seed. The script sets the clock of the machine to 2026-01-01 00:00 UTC first, so the tiles are the same each time. The key q stops it.
+class exact
+window 900x600
+run echo 1767225600 > /dev/time; games/mahjongg
+quiet
+snap open
+exit "q"

@@ -1,0 +1,7 @@
+# tif shows a TIFF file. The script makes the file from a JPEG file with jpg -9 and totif. The q key stops it.
+class exact
+window 400x300
+run jpg -9 /sys/src/cmd/gs/jpeg/testprog.jpg | totif > /tmp/r9gui.tif; tif /tmp/r9gui.tif
+quiet
+snap image
+exit "q"

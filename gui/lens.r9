@@ -1,0 +1,7 @@
+# lens shows the screen near the mouse, made larger. The key q stops it.
+class exact
+window 400x300
+run lens
+quiet
+snap open
+exit "q"
