@@ -68,9 +68,9 @@ const USAGE: &str = "usage:
       seconds with exit status 2. --script FILE drives the console with the steps of FILE: wait
       TEXT, send TEXT, timeout SECS, pause SECS, mouse X Y [BUTTONS], click X Y [BUTTON], quiet [MS] [SECS], snap FILE [X0 Y0 X1 Y1] and quit. The script owns the input, so the monitor does
       not read its own. The exit status is 0 when the script passes and 3 when it fails.
-      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click, pause, quiet, snap, wait, absent and timeout, one line each. A wait looks at the console output after the text that the last wait found. An absent fails when that output has the text. The monitor answers each line with ok or error. --headless opens no window. On macOS on arm64, and on Linux when DISPLAY is set, a 9h
+      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click, pause, quiet, snap, wait, absent and timeout, one line each. A wait looks at the console output after the text that the last wait found. An absent fails when that output has the text. The monitor answers each line with ok or error. --headless opens no window. On macOS on arm64, and on Linux when WAYLAND_DISPLAY or DISPLAY is set, a 9h
       session with a screen shows the screen in a window, which gives the keyboard and the mouse of the host to the machine. On
-      Linux, the window is an X11 window. With no DISPLAY, a session on Linux is headless. The 9h machine has a screen of --screen WxH, 1024x768 by default, in the RAM of the
+      Linux, the window is a Wayland window when WAYLAND_DISPLAY is set, and an X11 window when only DISPLAY is set. H9_GUI=x11 or H9_GUI=wayland chooses one. With neither variable, a session on Linux is headless. The 9h machine has a screen of --screen WxH, 1024x768 by default, in the RAM of the
       guest. With --screen none, the machine has no screen, so the profile of the guest does not start rio. --snap FILE writes the screen as a PNG file at the end of the session.
       On amd64, FILE is a 6l kernel with a multiboot header (9pc64). The machine is a PC with
       RAM from address 0, the APICs, the 8259s and the 8254 of KVM, a CMOS clock, the PCI

@@ -1,7 +1,8 @@
 //! The host window of the 9h machine (plan 11). The window shows the screen of the machine, and
 //! it gives the keyboard and the mouse of the host to the machine. The back end of macOS on arm64
-//! is `AppKit` (`cocoa.rs`). The back end of Linux is X11 (`x11.rs`), when `DISPLAY` is set.
-//! With no `DISPLAY`, a session on Linux is headless.
+//! is `AppKit` (`cocoa.rs`). On Linux, the back end is Wayland (`wayland.rs`) when
+//! `WAYLAND_DISPLAY` is set, and X11 (`x11.rs`) when `DISPLAY` is set. `H9_GUI=x11` or
+//! `H9_GUI=wayland` chooses one of the two. With neither, a session on Linux is headless.
 //!
 //! The monitor gives the window a `Host`. The window calls it on the main thread of the
 //! process, 60 times a second for the screen and once for each input event.
@@ -12,6 +13,8 @@
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod cocoa;
+#[cfg(unix)]
+mod wayland;
 #[cfg(unix)]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod x11;
@@ -51,7 +54,8 @@ pub fn run(
     cocoa::run(title, width, height, host)
 }
 
-/// Show a window on the X11 display of `DISPLAY`, as [`run`] does on macOS.
+/// Show a window on the Wayland compositor of `WAYLAND_DISPLAY` or on the X11 display of
+/// `DISPLAY`, as [`run`] does on macOS.
 #[cfg(target_os = "linux")]
 #[allow(clippy::needless_pass_by_value)] // The same signature as the run of macOS.
 pub fn run(
@@ -60,7 +64,37 @@ pub fn run(
     height: u32,
     host: std::sync::Arc<dyn Host>,
 ) -> Result<(), String> {
-    x11::run(title, width, height, &*host)
+    match linux_back_end(&|v| std::env::var(v).ok()) {
+        Some(LinuxBackEnd::Wayland) => wayland::run(title, width, height, &*host),
+        Some(LinuxBackEnd::X11) => x11::run(title, width, height, &*host),
+        None => Err("set WAYLAND_DISPLAY or DISPLAY, or use --headless".into()),
+    }
+}
+
+/// A window back end of Linux.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinuxBackEnd {
+    /// The Wayland compositor of `WAYLAND_DISPLAY`.
+    Wayland,
+    /// The X11 display of `DISPLAY`.
+    X11,
+}
+
+/// The back end of Linux for the environment `env`: the back end of `H9_GUI` when it is `x11`
+/// or `wayland` and its variable is set, else Wayland when `WAYLAND_DISPLAY` is set, else X11
+/// when `DISPLAY` is set.
+#[must_use]
+pub fn linux_back_end(env: &dyn Fn(&str) -> Option<String>) -> Option<LinuxBackEnd> {
+    let set = |v: &str| env(v).is_some_and(|d| !d.is_empty());
+    let (wayland, x11) = (set("WAYLAND_DISPLAY"), set("DISPLAY"));
+    match env("H9_GUI").as_deref() {
+        Some("x11") if x11 => Some(LinuxBackEnd::X11),
+        Some("wayland") if wayland => Some(LinuxBackEnd::Wayland),
+        Some("x11" | "wayland") => None,
+        _ if wayland => Some(LinuxBackEnd::Wayland),
+        _ if x11 => Some(LinuxBackEnd::X11),
+        _ => None,
+    }
 }
 
 /// The other hosts have no window back end.
@@ -69,14 +103,14 @@ pub fn run(_: &str, _: u32, _: u32, _: std::sync::Arc<dyn Host>) -> Result<(), S
     Err("this host has no window back end; use --headless".into())
 }
 
-/// True when the host has a window back end: on macOS on arm64, and on Linux when `DISPLAY`
-/// is set.
+/// True when the host has a window back end: on macOS on arm64, and on Linux when
+/// [`linux_back_end`] gives one.
 #[must_use]
 pub fn available() -> bool {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         return true;
     }
-    cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
+    cfg!(target_os = "linux") && linux_back_end(&|v| std::env::var(v).ok()).is_some()
 }
 
 /// The runes of `keyboard.h` for the keys that have no character.
@@ -331,6 +365,31 @@ mod tests {
         COMMAND, CONTROL, Held, OPTION, SHIFT, Scroll, buttons, is_modifier, k, key_rune,
         rune_utf8, screen_point,
     };
+
+    #[test]
+    fn wayland_comes_before_x11_and_h9_gui_chooses() {
+        use super::{LinuxBackEnd, linux_back_end};
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |v: &str| {
+                vars.iter()
+                    .find(|(k, _)| *k == v)
+                    .map(|(_, x)| (*x).to_string())
+            }
+        };
+        let both = env(&[("WAYLAND_DISPLAY", "wayland-1"), ("DISPLAY", ":0")]);
+        assert_eq!(linux_back_end(&both), Some(LinuxBackEnd::Wayland));
+        let x = env(&[
+            ("WAYLAND_DISPLAY", "wayland-1"),
+            ("DISPLAY", ":0"),
+            ("H9_GUI", "x11"),
+        ]);
+        assert_eq!(linux_back_end(&x), Some(LinuxBackEnd::X11));
+        let x = env(&[("WAYLAND_DISPLAY", ""), ("DISPLAY", ":0")]);
+        assert_eq!(linux_back_end(&x), Some(LinuxBackEnd::X11));
+        let none = env(&[("DISPLAY", ":0"), ("H9_GUI", "wayland")]);
+        assert_eq!(linux_back_end(&none), None);
+        assert_eq!(linux_back_end(&env(&[])), None);
+    }
 
     #[test]
     fn a_key_up_is_for_the_rune_of_the_key_down() {

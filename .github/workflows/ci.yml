@@ -112,3 +112,22 @@ jobs:
         run: |
           command -v xvfb-run || { sudo apt-get update -q && sudo apt-get install -y -q xvfb; }
           H9_NEED_X11=1 xvfb-run -a -s '-screen 0 1280x1024x24' cargo test -p h9-gui x11
+      # The Wayland back end shows an image in a window of sway on a headless output, and grim
+      # reads the pixels back. The config of sway puts the window at 0,0 with no border.
+      - name: the Wayland window on sway
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends sway grim
+          export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$RUNNER_TEMP/xdg}"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          printf '%s\n' 'output HEADLESS-1 resolution 1280x1024 position 0 0' 'default_border none' 'default_floating_border none' 'for_window [app_id="9h"] floating enable, move position 0 0' > "$RUNNER_TEMP/sway.config"
+          WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman sway -c "$RUNNER_TEMP/sway.config" > "$RUNNER_TEMP/sway.log" 2>&1 &
+          s=
+          for i in $(seq 100); do
+            s=$(ls "$XDG_RUNTIME_DIR" | grep -E '^wayland-[0-9]+$' | head -1)
+            [ -n "$s" ] && break
+            sleep 0.1
+          done
+          [ -n "$s" ] || { cat "$RUNNER_TEMP/sway.log"; exit 1; }
+          WAYLAND_DISPLAY=$s H9_NEED_WAYLAND=1 cargo test -p h9-gui wayland || { cat "$RUNNER_TEMP/sway.log"; exit 1; }
