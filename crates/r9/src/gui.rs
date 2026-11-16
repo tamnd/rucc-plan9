@@ -322,6 +322,22 @@ pub fn parse(src: &str) -> Result<Script, String> {
 }
 
 /// Text for the `send` step of the monitor, in double quotes with escapes.
+/// The keys of `k`: each UTF-8 sequence, or each byte that does not start one.
+fn keys(k: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut rest = k;
+    std::iter::from_fn(move || {
+        let n = match *rest.first()? {
+            0xf0.. => 4,
+            0xe0.. => 3,
+            0xc0.. => 2,
+            _ => 1,
+        };
+        let (key, r) = rest.split_at(n.min(rest.len()));
+        rest = r;
+        Some(key)
+    })
+}
+
 fn send(bytes: &[u8]) -> String {
     let mut s = String::from("send \"");
     for &b in bytes {
@@ -386,7 +402,10 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
             mouse(*q, 0),
         ],
         Step::Keys(k) | Step::Exit(k) if k.is_empty() => Vec::new(),
-        Step::Keys(k) | Step::Exit(k) => vec![send(k)],
+        // A program such as samterm reads /dev/kbd and keeps only the last key until its loop
+        // takes it, so a burst of keys loses keys. One key on each line makes the monitor wait
+        // after each key.
+        Step::Keys(k) | Step::Exit(k) => keys(k).map(send).collect(),
         Step::Pause(s) => vec![format!("pause {s}")],
         Step::Mask(_) => Vec::new(),
     }
@@ -972,8 +991,15 @@ exit Del
             ]
         );
         assert_eq!(
-            l(Step::Keys(b"a\"\\\n\x7f".to_vec())),
-            vec!["send \"a\\\"\\\\\\n\\x7f\""]
+            l(Step::Keys("a\"\\\n\u{7f}\u{f00e}".into())),
+            vec![
+                "send \"a\"",
+                "send \"\\\"\"",
+                "send \"\\\\\"",
+                "send \"\\n\"",
+                "send \"\\x7f\"",
+                "send \"\\xef\\x80\\x8e\""
+            ]
         );
         assert!(l(Step::Mask(None)).is_empty());
         assert!(l(Step::Exit(Vec::new())).is_empty());
