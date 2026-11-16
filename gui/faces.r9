@@ -1,0 +1,8 @@
+# faces shows a face for each message in a mailbox. The script writes a mailbox with one message from glenda, and upas/fs serves it on /mail/fs. faces -i loads the faces of the messages that are in the mailbox. faces shows the time, so the script sets the clock of the machine to 2026-01-01 00:00 UTC first. faces has no command to stop, so the script sends a kill note to its note group after 15 seconds.
+class exact
+window 400x200
+run echo 1767225600 > /dev/time; {echo 'From glenda Thu Jan  1 00:00:00 GMT 2026'; echo 'From: glenda@example.com'; echo 'Subject: test'; echo; echo hello} > /tmp/mbox; upas/fs -f /tmp/mbox; {rfork s; exec faces -i} & pid=$apid; sleep 15; echo kill > /proc/$pid/notepg
+pause 4
+quiet
+snap open
+exit none

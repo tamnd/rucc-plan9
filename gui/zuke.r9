@@ -1,0 +1,7 @@
+# audio/zuke plays the music of a playlist and shows the playlist. The script makes two FLAC files of 2 seconds of silence with audio/flacenc, each with the tags of an artist, an album and a title. audio/mkplist makes the playlist, and zuke reads it from its standard input. The script does not play the music. The q key stops zuke.
+class exact
+window 500x300
+run mkdir -p /tmp/music; for(t in one two) dd -if /dev/zero -bs 176400 -count 2 >[2]/dev/null | audio/flacenc -T 'ARTIST=glenda' -T 'ALBUM=r9' -T 'TITLE='$t > /tmp/music/$t.flac; audio/mkplist /tmp/music > /tmp/r9.plist; audio/zuke < /tmp/r9.plist
+quiet
+snap open
+exit "q"

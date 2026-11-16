@@ -1,0 +1,7 @@
+# bar shows the date and the time in a bar. It moves its own window to the bottom right corner of the screen, and the time changes each second, so the script is a smoke test. bar reads lines of text for the bar from its standard input, and it stops at the end of the input. The script gives it the output of sleep 12, an input that ends after 12 seconds.
+class smoke
+window 400x100
+run sleep 12 | bar
+pause 3
+snap open
+exit none
