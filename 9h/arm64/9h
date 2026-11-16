@@ -18,6 +18,7 @@ dev
 	draw	swcursor
 	mouse
 	h9kbd
+	audio
 	sd
 	uart
 	rtc
@@ -25,6 +26,7 @@ dev
 
 link
 	h9screen
+	audioh9
 	h9mouse
 	ethersink
 	ethermedium

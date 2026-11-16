@@ -50,6 +50,9 @@ pub struct Request {
     pub strict: bool,
     /// The PNG file for the screen at the end of the session.
     pub snap: Option<PathBuf>,
+    /// The WAV file for the samples that the guest writes to `/dev/audio`. With none, the monitor
+    /// drops them.
+    pub audio: Option<PathBuf>,
 }
 
 /// The bootargs of the kernel: the console is the uart of 9h, which is `/dev/eia0`.
@@ -123,7 +126,8 @@ fn copy_root(root: &Path, copy: &Path) -> Result<(), String> {
 }
 
 /// The command of the monitor. `disks` are the raw tar disks, after the root disk and `disk`.
-/// The snarf buffer is in the monitor, so a boot does not change the host clipboard. The kernel
+/// The snarf buffer is in the monitor, so a boot does not change the host clipboard, and the
+/// audio goes to a file or nowhere, so a boot does not play on the host. The kernel
 /// gets `console=0` as its bootargs, because `bootrc` starts `kbdfs` on `/dev/eia$console`, and
 /// with no `console` the console has no input.
 #[must_use]
@@ -139,6 +143,10 @@ pub fn command(req: &Request, disks: &[PathBuf]) -> Vec<String> {
         req.mem.to_string(),
         "--snarf".into(),
         "memory".into(),
+        "--audio".into(),
+        req.audio
+            .as_ref()
+            .map_or_else(|| "none".into(), |a| a.display().to_string()),
         "--headless".into(),
         "--bootargs".into(),
         CONSOLE.into(),
@@ -374,6 +382,7 @@ pub fn request_from(
         keep: args.has("keep"),
         strict: args.has("strict"),
         snap: args.get("snap").map(PathBuf::from),
+        audio: args.get("audio").map(PathBuf::from),
     })
 }
 
@@ -400,6 +409,7 @@ mod tests {
             keep: false,
             strict: true,
             snap: None,
+            audio: None,
         }
     }
 
@@ -416,7 +426,7 @@ mod tests {
         let c = command(&request(Path::new("/w")), &["/w/in.tar".into()]).join(" ");
         assert_eq!(
             c,
-            "/b/9h run --kernel /k/99h.u --cpus 2 --mem 2048 --snarf memory --headless \
+            "/b/9h run --kernel /k/99h.u --cpus 2 --mem 2048 --snarf memory --audio none --headless \
              --bootargs console=0 --disk /w/root.img --strict --disk /i/src.img,ro --disk /w/in.tar --hostfs /home/glenda,ro \
              --screen none"
         );

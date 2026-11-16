@@ -27,12 +27,16 @@ enum {
 	H9mouseget	= 0xC6000060,	/* () returns x | y<<16 | buttons<<32 of the next event, or -1 */
 	H9kbdget	= 0xC6000061,	/* () returns rune | down<<32 of the next key event, or -1 */
 	H9kbdopen	= 0xC6000062,	/* (open) #b/kbd is open, 1, or closed, 0, returns 0 */
+	H9audiowrite	= 0xC6000070,	/* (pa, n, speed, left | right<<8) queues samples, returns the count */
+	H9audiobuffered	= 0xC6000071,	/* () returns the bytes in the queue */
 
 	H9sdsecsize	= 512,		/* bytes in a sector */
 	H9sdmax	= 128,		/* the most sectors of one call */
 	H9fsmax	= 65536+24,	/* the largest 9P message of the host */
 	H9snarfmax	= 1<<20,	/* the largest snarf */
 	H9ctlmax	= 256,		/* the largest request of H9ctl */
+	H9audiomax	= 1<<16,	/* the most bytes of one H9audiowrite */
+	H9audioqueue	= 1<<18,	/* the bytes of the queue of the monitor */
 
 	H9revision	= 1,
 

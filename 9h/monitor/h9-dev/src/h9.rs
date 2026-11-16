@@ -60,8 +60,21 @@ pub const KBD_GET: u32 = 0xc600_0061;
 /// open 0, and returns 0.
 pub const KBD_OPEN: u32 = 0xc600_0062;
 
+/// `H9audiowrite`: (pa, n, speed, volume) gives the n bytes of samples at pa to the audio
+/// output, at speed samples a second, with the volume left | right<<8, each 0 to 100. It returns
+/// the number of bytes it took, which is less than n when the queue is full. One call gives at
+/// most `AUDIO_MAX` bytes.
+pub const AUDIO_WRITE: u32 = 0xc600_0070;
+/// `H9audiobuffered`: () returns the number of bytes in the queue of the audio output that did
+/// not play yet.
+pub const AUDIO_BUFFERED: u32 = 0xc600_0071;
+
 /// The largest snarf, 1 MiB.
 pub const SNARF_MAX: u64 = 1 << 20;
+/// The most bytes of one `H9audiowrite`, 64 KiB.
+pub const AUDIO_MAX: u64 = 1 << 16;
+/// The bytes of the queue of the audio output, 256 KiB, which is about 1.5 s at 44100 Hz.
+pub const AUDIO_QUEUE: u64 = 1 << 18;
 /// The largest request of `H9ctl`.
 pub const CTL_MAX: u64 = 256;
 /// The size of a sector of a disk unit.

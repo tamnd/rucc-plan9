@@ -28,9 +28,11 @@ dev
 	draw	swcursor
 	mouse
 	h9kbd
+	audio
 
 link
 	h9screen
+	audioh9
 	h9mouse
 	ethersink
 	ethermedium
