@@ -20,6 +20,7 @@ on:
       - crates/r9/src/build.rs
       - crates/r9/src/h9boot.rs
       - crates/r9/src/boot.rs
+      - crates/r9/src/image.rs
       - smoke/boot.rc
       - .github/workflows/9h-amd64.yml
   workflow_dispatch:

@@ -204,10 +204,9 @@ A `9h` session is `9h run --kernel=9h.r --disk=root.r.img --scale=auto`. The dis
 - `mouseport=h9`, `monitor=h9`;
 - `service=terminal`.
 
-The boot is 9front's own: `bootrc` from the kernel's `bootfs.paq`, then `/rc/bin/termrc`. `9h` adds `/rc/bin/termrc.local` to the disk, as `r9 image` does for Q (09.4). It is the session's only addition, and it does three things:
-- `bind -a '#Z' /dev` and `mount -c /dev/hostfs /mnt/term`;
-- it starts `rio` with the screen the window has;
-- it starts the program the user asked for, if any (`9h run … -- acme`), in the first window.
+The boot is 9front's own: `bootrc` from the kernel's `bootfs.paq`, then `/rc/bin/termrc`. `r9 image build` adds `/rc/bin/termrc.local` to the `g-base` image, and `/rc/bin/termrc` runs it at each boot (line 30 at the pin). It is the only file of the image that is not in the tree or the release. It has one line, `bind -qa '#Z' /dev`. Thus `/dev/snarf` is the host clipboard before `lib/profile` starts `rio`, and `rio` opens it. On QEMU there is no `#Z`, and `-q` makes the bind do nothing. The profile of the user starts `rio` with the screen that the window has, as on a 9front terminal. The file does not mount `/dev/hostfs`, because `#Z/hostfs` has one user at a time, and a GUI script mounts it with `mount -nc '#Z/hostfs' /mnt/term`.
+
+A program that the user asks for in the first window (`9h run … -- acme`) is not done yet.
 
 From power-on to `rio` drawing, `9h` should take under two seconds on the M4. That is a target, measured at P7, not a claim.
 

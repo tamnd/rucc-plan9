@@ -12,7 +12,8 @@
 //! must give the same bytes: that is the fixed point of kencc (04.2 and open question 2). The
 //! tools of the third build are G's tools. With them, the guest builds and installs the
 //! libraries of the pinned tree, because the tests of the tree link with them. It also builds
-//! `r9-cc`.
+//! `r9-cc`. Last, it writes `/rc/bin/termrc.local`, which binds the host devices of the 9h
+//! machine into `/dev` (plan 10.6).
 //!
 //! The overlay is kept in the cache as the `g-base` image, and `baselines/` gets a summary
 //! with its hash.
@@ -38,6 +39,13 @@ const W: &str = "/tmp/r9";
 
 /// The number of builds of the tools.
 pub const STAGES: usize = 3;
+
+/// The line of `/rc/bin/termrc.local`, in rc quotes, which `/rc/bin/termrc` runs at each boot of
+/// a terminal (plan 10.6). It binds the host devices of the 9h machine, `#Z`, into `/dev`, so
+/// `rio` reads and writes the host clipboard in `/dev/snarf`. On QEMU there is no `#Z`, and `-q`
+/// makes the bind do nothing. The file is not in the tree, so the stale files of the tree do not
+/// include it.
+const TERMRC_LOCAL: &str = "'bind -qa ''#Z'' /dev'";
 
 /// The include directories of the `objtype`s in a list of the directories of a tree, such as
 /// `amd64/include`.
@@ -101,6 +109,7 @@ pub fn commands(paths: &[String]) -> Vec<String> {
         "cp /tmp/r9in/r9-build /usr/glenda/r9/bin/ && cd /tmp/r9in/r9-cc && mk install && mk clean"
             .into(),
     );
+    c.push(format!("echo {TERMRC_LOCAL} > /rc/bin/termrc.local"));
     c.push(format!(
         "cd {W} && tar cf $r9collect {} tools.sha256 stale && cd / && rm -rf /tmp/r9in {W}",
         logs.join(" ")
@@ -449,6 +458,7 @@ mod tests {
                 .contains("stage3.log libs.log tools.sha256")
         );
         assert!(c.last().unwrap().contains("tar cf $r9collect"));
+        assert!(c.contains(&"echo 'bind -qa ''#Z'' /dev' > /rc/bin/termrc.local".to_string()));
         assert!(c.iter().all(|l| !l.contains('\n')));
     }
 
