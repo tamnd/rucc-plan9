@@ -81,7 +81,11 @@ pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
             format!("r9ccd='tcp!10.0.2.2!{port}' r9bringup='{bringup}' "),
         ),
     };
-    vec![
+    let mut c = Vec::new();
+    if targets.split_whitespace().any(|t| t == "clean") {
+        c.push(reset_command());
+    }
+    c.extend([
         format!(
             "rm -rf /tmp/r9in {w} && mkdir -p /tmp/r9in /usr/glenda/r9/bin {w} && touch {w}/rucc.err && chmod +a {w}/rucc.err && cd /tmp/r9in && tar xf $r9in{net}"
         ),
@@ -117,8 +121,37 @@ pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
                 ""
             }
         ),
-    ]
+    ]);
+    c
 }
+
+/// The command that undoes the outputs of an earlier build in the image, before a build with
+/// the target `clean` (plan 12.4).
+///
+/// `mk clean` does not remove each output. An archive such as `libplot.a6`, a generated file such
+/// as `enam.c` and an installed rc script stay, and mk then does not make them again. In the
+/// image of an R build, a link then uses the objects that rucc compiled, and the walk does not
+/// see the files that mk did not write. The earlier build left its list of changed files in
+/// `/tmp/r9/changed`. The command removes each file in that list that is not installed, so that
+/// mk makes it again as in a new tree. It gives the date 0 to each installed file in
+/// `/$objtype/bin` and `/$objtype/lib`, so that `mk install` copies it again. `mk install` also
+/// writes to `/sys/lib`, `/rc/bin` and `/acme/bin`, which the walk does not see. The command
+/// gives the date 0 to each file in these directories that is newer than the start of the
+/// earlier build, in `/tmp/r9/t0`. Without this, mk takes an installed file such as
+/// `/sys/lib/tmac/tmac.pictures` as up to date, and does not make the file in `/sys/src` that it
+/// copies. With no list, the command does nothing. The last `echo` makes the status empty.
+#[must_use]
+pub fn reset_command() -> String {
+    let w = "/tmp/r9";
+    let inst = "'^/'$objtype'/(bin|lib)/'";
+    let more = RESET_DIRS.join(" ");
+    format!(
+        "test -f {w}/changed && {{rm -f `{{grep -v {inst} {w}/changed}}; touch -c -t 0 `{{grep {inst} {w}/changed}}; touch -c -t 0 `{{walk -f -e mp {more} | awk -v 't='`{{cat {w}/t0}} '$1 >= t+0 {{print $2}}'}}}}; echo r9-reset"
+    )
+}
+
+/// The directories outside the walk that `mk install` writes to.
+pub const RESET_DIRS: [&str; 3] = ["/sys/lib", "/rc/bin", "/acme/bin"];
 
 /// A test that the guest runs after the build (plan 12.8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -250,7 +283,12 @@ pub fn run(
     req.commands = commands(dir, targets, slot);
     if let Some(t) = guest_test {
         // After the tail of the log, and before the walk and the collection.
-        req.commands.insert(4, test_command(t));
+        let at = req
+            .commands
+            .iter()
+            .position(|c| c.starts_with("tail -20 "))
+            .map_or(req.commands.len(), |i| i + 1);
+        req.commands.insert(at, test_command(t));
         if let Some(last) = req.commands.last_mut() {
             for f in TEST_FILES {
                 last.push(' ');
@@ -547,6 +585,18 @@ mod tests {
         );
         assert!(c.iter().all(|l| !l.contains('\n')));
         assert!(c[1].contains("dircp /tmp/r9in/9h /usr/glenda/r9/9h"));
+    }
+
+    #[test]
+    fn a_clean_build_first_undoes_the_earlier_build() {
+        let c = commands("/sys/src", "clean install", &Slot::G);
+        assert_eq!(c[0], reset_command());
+        assert!(c[1].starts_with("rm -rf /tmp/r9in /tmp/r9 && mkdir -p"));
+        assert_eq!(
+            c[0],
+            "test -f /tmp/r9/changed && {rm -f `{grep -v '^/'$objtype'/(bin|lib)/' /tmp/r9/changed}; touch -c -t 0 `{grep '^/'$objtype'/(bin|lib)/' /tmp/r9/changed}; touch -c -t 0 `{walk -f -e mp /sys/lib /rc/bin /acme/bin | awk -v 't='`{cat /tmp/r9/t0} '$1 >= t+0 {print $2}'}}; echo r9-reset"
+        );
+        assert_eq!(commands("/sys/src", "install", &Slot::G).len() + 1, c.len());
     }
 
     #[test]

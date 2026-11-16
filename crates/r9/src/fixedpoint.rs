@@ -9,8 +9,9 @@
 //!
 //! The tree of the R image already has the objects of the R build, and `mk install` alone does
 //! nothing there. So both builds run `mk clean` and then `mk install` in each directory, and each
-//! file is built again. The G side is a build of the `g-base` image with the same targets, or
-//! the directory of such a build with `--g`.
+//! file is built again. `mk clean` does not remove each output, so a clean build first undoes
+//! the outputs of the earlier build ([`crate::build::reset_command`]). The G side is a build of
+//! the `g-base` image with the same targets, or the directory of such a build with `--g`.
 
 use crate::treediff;
 use std::fmt::Write as _;
