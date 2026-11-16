@@ -663,8 +663,11 @@ fn run_steps(script: &Script, path: &Path, out: &Path) -> Result<Vec<Snap>, Stri
         )
         .map_err(|e| format!("the exit: {e}"))?;
     }
+    // The keys and the mouse come to rio on different paths, so the pause lets rio make the
+    // console window current before the next key, the f of fshalt, comes.
     let (x, y) = CONSOLE_POINT;
-    give(path, &[format!("click {x} {y}")]).map_err(|e| format!("the console click: {e}"))?;
+    give(path, &[format!("click {x} {y}"), "pause 1".into()])
+        .map_err(|e| format!("the console click: {e}"))?;
     Ok(snaps)
 }
 
