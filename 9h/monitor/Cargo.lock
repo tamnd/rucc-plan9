@@ -20,6 +20,7 @@ version = "0.1.0"
 dependencies = [
  "h9-9p",
  "h9-dev",
+ "h9-gui",
  "h9-hvf",
  "h9-kvm",
  "h9-vm",
@@ -37,6 +38,10 @@ dependencies = [
  "h9-9p",
  "h9-vm",
 ]
+
+[[package]]
+name = "h9-gui"
+version = "0.1.0"
 
 [[package]]
 name = "h9-hvf"

@@ -41,7 +41,7 @@ wait "ok arm64"
 quit
 ```
 
-`--headless` opens no window. The monitor has no window yet, so each session is headless now.
+`--headless` opens no window. On macOS on arm64, a session of the 9h machine with a screen opens a window of the size of the screen. The window shows the screen, and it gives the keyboard and the mouse of the host to the machine. Option-click is button 2 and Command-click is button 3. The scroll wheel gives buttons 4 and 5. Command-Q or a click on the close button ends the session. When the session ends, the window closes. Linux has no window back end yet, so a session on Linux is headless. `r9 9h boot` always gives `--headless`.
 
 `plan9.ini` needs `console=0`. At the `bootargs` prompt, type `!rc` for a shell. `--cpus N` gives the guest N processors, 1 to 16. A kernel of the pinned tree starts them with PSCI `CPU_ON`. The `9qemu.u` of the arm64 image runs on one processor only, because it reads `GICR_TYPER` as 32 bits, and the GIC of the framework gives 0 for such a read. `--timeout SECS` ends the session after SECS seconds. `--strict` stops the session at an access to an address that has no device. `H9_TRACE=1` logs each exit of the vCPU.
 
