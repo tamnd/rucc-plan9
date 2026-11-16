@@ -1,0 +1,10 @@
+# An rc window prints text, and then reads a line. This script tests r9 gui itself.
+class exact
+window 600x300
+run sed 12q /NOTICE; read
+quiet
+snap text
+mouse 1 at 100,40
+quiet
+snap select
+exit "\n"

@@ -19,6 +19,7 @@ pub mod disk;
 pub mod fetch;
 pub mod fixedpoint;
 pub mod flagsdiff;
+pub mod gui;
 pub mod h9boot;
 pub mod h9verify;
 pub mod helpers;

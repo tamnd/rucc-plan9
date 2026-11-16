@@ -175,7 +175,8 @@ pub fn command(req: &Request, disks: &[PathBuf]) -> Vec<String> {
 }
 
 /// The socket of `9h run --control` in the work directory.
-fn control_path(work: &Path) -> PathBuf {
+#[must_use]
+pub fn control_path(work: &Path) -> PathBuf {
     work.join("9h.sock")
 }
 
@@ -219,6 +220,13 @@ fn click_console(path: &Path) -> Result<(), String> {
 
 /// Boot the 9h kernel and run the commands.
 pub fn run(req: &Request) -> Result<Outcome, String> {
+    run_with(req, |_| {})
+}
+
+/// Boot the 9h kernel and run the commands. With `--snap`, `at_shell` runs at the first shell
+/// prompt, after the click in the console window and before the first command. It gets the path
+/// of the control socket of the monitor.
+pub fn run_with(req: &Request, mut at_shell: impl FnMut(&Path)) -> Result<Outcome, String> {
     std::fs::create_dir_all(&req.work).map_err(|e| format!("{}: {e}", req.work.display()))?;
     let mut disks = Vec::new();
     let mut commands = req.commands.clone();
@@ -257,10 +265,11 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
         req.timeout,
         || {},
         || {
-            if let Some(p) = &control
-                && let Err(e) = click_console(p)
-            {
-                eprintln!("r9: the click in the console window of rio failed: {e}");
+            if let Some(p) = &control {
+                if let Err(e) = click_console(p) {
+                    eprintln!("r9: the click in the console window of rio failed: {e}");
+                }
+                at_shell(p);
             }
         },
     );
