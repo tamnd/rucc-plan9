@@ -56,7 +56,12 @@ pub const EXIT_MARK: &str = "R9-GUI-EXIT";
 /// The time in seconds that the program can take to stop after `exit`.
 const EXIT_SECS: u32 = 60;
 
-/// The rc file in the guest that runs the program.
+/// The rc file in the guest that holds the run line of the script.
+const CMD_FILE: &str = "/tmp/r9gui.cmd";
+
+/// The rc file in the guest that the window runs. It runs [`CMD_FILE`] in a new rc and then
+/// writes [`EXIT_MARK`] and the status. When the run line has a syntax error, the new rc stops
+/// with the status `syntax error`, and the line still comes.
 const RUN_FILE: &str = "/tmp/r9gui.rc";
 
 /// The class of a script (plan 02.7).
@@ -381,9 +386,9 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
         // rio lost keys of the run line in chunks of 8, so each key goes on its own line.
         Step::Run(cmd) => keys(
             format!(
-                "echo {} > {RUN_FILE}; echo {} >> {RUN_FILE}; window -r {x0} {y0} {x1} {y1} rc {RUN_FILE}\n",
+                "echo {} > {CMD_FILE}; echo {} > {RUN_FILE}; window -r {x0} {y0} {x1} {y1} rc {RUN_FILE}\n",
                 rc_quote(cmd),
-                rc_quote("echo R9-GUI^-EXIT $status > '#c/cons'"),
+                rc_quote(&format!("rc {CMD_FILE}; echo R9-GUI^-EXIT $status > '#c/cons'")),
             )
             .as_bytes(),
         )
@@ -1006,7 +1011,7 @@ exit Del
             .collect();
         assert_eq!(
             typed,
-            "echo 'demo -x ''a b''' > /tmp/r9gui.rc; echo 'echo R9-GUI^-EXIT $status > ''#c/cons''' >> /tmp/r9gui.rc; window -r 624 468 1024 768 rc /tmp/r9gui.rc\n"
+            "echo 'demo -x ''a b''' > /tmp/r9gui.cmd; echo 'rc /tmp/r9gui.cmd; echo R9-GUI^-EXIT $status > ''#c/cons''' > /tmp/r9gui.rc; window -r 624 468 1024 768 rc /tmp/r9gui.rc\n"
         );
         assert_eq!(run.len(), typed.len());
         assert_eq!(
