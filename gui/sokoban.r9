@@ -1,0 +1,10 @@
+# sokoban shows the first level of the easy levels. The n key goes to the next level. The q key stops it.
+class exact
+window 500x400
+run games/sokoban
+quiet
+snap level1
+keys "n"
+quiet
+snap level2
+exit "q"

@@ -1,0 +1,7 @@
+# gif shows a GIF file. The q key stops it.
+class exact
+window 400x300
+run gif /sys/src/cmd/mothra/mothra.gif
+quiet
+snap image
+exit "q"

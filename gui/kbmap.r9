@@ -1,0 +1,7 @@
+# kbmap shows the keyboard maps in /sys/lib/kbmap. The q key stops it, and it does not change the map.
+class exact
+window 300x400
+run kbmap
+quiet
+snap maps
+exit "q"

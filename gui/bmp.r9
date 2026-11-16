@@ -1,0 +1,7 @@
+# bmp shows a BMP file. The q key stops it.
+class exact
+window 400x300
+run bmp /sys/src/cmd/gs/jpeg/testimg.bmp
+quiet
+snap image
+exit "q"

@@ -1,0 +1,7 @@
+# plot draws the output of graph. graph makes the plot commands for the numbers 0 to 20. The q key stops it.
+class exact
+window 400x300
+run seq 0 20 | graph -a | plot
+quiet
+snap graph
+exit "q"

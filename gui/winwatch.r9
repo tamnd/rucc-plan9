@@ -1,0 +1,7 @@
+# winwatch shows the labels of the windows of rio. The q key stops it.
+class exact
+window 400x200
+run winwatch
+quiet
+snap labels
+exit "q"

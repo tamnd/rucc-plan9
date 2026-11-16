@@ -1,0 +1,7 @@
+# ppm shows a PPM file. The script makes the file from a JPEG file with jpg -9 and toppm. The q key stops it.
+class exact
+window 400x300
+run jpg -9 /sys/src/cmd/gs/jpeg/testprog.jpg | toppm > /tmp/r9gui.ppm; ppm /tmp/r9gui.ppm
+quiet
+snap image
+exit "q"

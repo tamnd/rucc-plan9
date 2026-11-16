@@ -1,0 +1,7 @@
+# page shows a PNG file. The q key stops it.
+class exact
+window 400x300
+run page /sys/src/cmd/gs/libpng/pngtest.png
+quiet
+snap page
+exit "q"

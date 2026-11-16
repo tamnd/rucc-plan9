@@ -1,0 +1,7 @@
+# image/histogram shows the histogram of an image. The script makes a Plan 9 image from a JPEG file with jpg -9. The q key stops it.
+class exact
+window 500x400
+run jpg -9 /sys/src/cmd/gs/jpeg/testprog.jpg > /tmp/r9gui.bit; image/histogram /tmp/r9gui.bit
+quiet
+snap histogram
+exit "q"
