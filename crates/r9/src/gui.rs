@@ -374,14 +374,17 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
     };
     let still = format!("quiet 200 10 {x0} {y0} {x1} {y1}");
     match step {
-        Step::Run(cmd) => vec![send(
+        // rio lost keys of the run line in chunks of 8, so each key goes on its own line.
+        Step::Run(cmd) => keys(
             format!(
                 "echo {} > {RUN_FILE}; echo {} >> {RUN_FILE}; window -r {x0} {y0} {x1} {y1} rc {RUN_FILE}\n",
                 rc_quote(cmd),
                 rc_quote("echo R9-GUI^-EXIT $status > '#c/cons'"),
             )
             .as_bytes(),
-        )],
+        )
+        .map(send)
+        .collect(),
         Step::Quiet(ms, secs) => vec![format!("quiet {ms} {secs} {x0} {y0} {x1} {y1}")],
         Step::Snap(name) => vec![format!(
             "snap {} {x0} {y0} {x1} {y1}",
@@ -968,12 +971,23 @@ exit Del
         let rect = [624, 468, 1024, 768];
         let snaps = Path::new("/w");
         let l = |s: Step| control_lines(&s, rect, snaps);
+        let run = l(Step::Run("demo -x 'a b'".into()));
+        let typed: String = run
+            .iter()
+            .map(|s| {
+                let k = s
+                    .strip_prefix("send \"")
+                    .unwrap()
+                    .strip_suffix('"')
+                    .unwrap();
+                if k == "\\n" { "\n" } else { k }
+            })
+            .collect();
         assert_eq!(
-            l(Step::Run("demo -x 'a b'".into())),
-            vec![
-                "send \"echo 'demo -x ''a b''' > /tmp/r9gui.rc; echo 'echo R9-GUI^-EXIT $status > ''#c/cons''' >> /tmp/r9gui.rc; window -r 624 468 1024 768 rc /tmp/r9gui.rc\\n\""
-            ]
+            typed,
+            "echo 'demo -x ''a b''' > /tmp/r9gui.rc; echo 'echo R9-GUI^-EXIT $status > ''#c/cons''' >> /tmp/r9gui.rc; window -r 624 468 1024 768 rc /tmp/r9gui.rc\n"
         );
+        assert_eq!(run.len(), typed.len());
         assert_eq!(
             l(Step::Quiet(500, 30)),
             vec!["quiet 500 30 624 468 1024 768"]
