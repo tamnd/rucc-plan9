@@ -105,3 +105,10 @@ jobs:
           echo H9_NEED_KVM=1 >> "$GITHUB_ENV"
       - name: cargo test
         run: cargo test --workspace
+      # The X11 back end draws in a window of Xvfb and reads the pixels back. xvfb-run gives the
+      # server a cookie in XAUTHORITY, so the test also uses the cookie.
+      - name: the X11 window on Xvfb
+        if: runner.os == 'Linux'
+        run: |
+          command -v xvfb-run || { sudo apt-get update -q && sudo apt-get install -y -q xvfb; }
+          H9_NEED_X11=1 xvfb-run -a -s '-screen 0 1280x1024x24' cargo test -p h9-gui x11
