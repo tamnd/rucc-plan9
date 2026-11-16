@@ -53,7 +53,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             positional: true,
             values: &[
                 "tree", "records", "row", "kernel", "root", "disk", "hostfs", "cpus", "mem",
-                "bootargs", "run", "in", "collect", "timeout", "out", "monitor", "snap",
+                "bootargs", "run", "in", "collect", "timeout", "out", "monitor", "snap", "audio",
             ],
             switches: &["keep", "strict"],
         },
@@ -61,7 +61,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             positional: true,
             values: &[
                 "kernel", "root", "script", "cpus", "mem", "timeout", "out", "monitor", "want",
-                "got", "diff", "hostfs",
+                "got", "diff", "hostfs", "audio",
             ],
             switches: &["keep"],
         },
@@ -319,7 +319,7 @@ usage:
       OBJTYPE is arm64 by default.
   r9 9h boot --kernel FILE --root IMAGE [--disk FILE] [--hostfs DIR] [--cpus N] [--mem MIB]
           [--bootargs TEXT] [--run FILE] [--in DIR|TAR] [--collect MIB] [--timeout SECS]
-          [--out DIR] [--monitor PATH] [--keep] [--strict] [--snap FILE]
+          [--out DIR] [--monitor PATH] [--keep] [--strict] [--snap FILE] [--audio FILE]
       Boot the 9h kernel FILE in the 9h monitor (plan 10.8), with a copy of IMAGE as sdH0, and
       run each command of FILE (smoke/boot.rc by default) at the shell prompt, as r9 boot does.
       IMAGE is raw or qcow2, and is never written. --disk adds a disk and --hostfs serves DIR on
@@ -331,12 +331,14 @@ usage:
       session, so that the boot fails. The machine has a screen only with --snap, which
       writes the screen as a PNG file at the end. With the screen, the profile of the guest starts
       rio, and the commands run in the console window of rio. r9 clicks in that window before the
-      first command, so that the window has the keyboard focus.
+      first command, so that the window has the keyboard focus. --audio writes the samples that
+      the guest writes to /dev/audio to the WAV file FILE. With no --audio, the monitor drops
+      them, so that a boot does not play on the host.
   r9 9h smoke --kernel FILE --root IMAGE [the options of r9 9h boot]
       Run the smoke suite of plan 09.5 on the 9h kernel: r9 9h boot with smoke/suite.rc and the
       guest directory as the input. The work goes to work/9h/smoke by default.
   r9 gui run --kernel FILE --root IMAGE --script FILE [--cpus N] [--mem MIB] [--timeout SECS]
-          [--hostfs DIR] [--out DIR] [--monitor PATH] [--keep]
+          [--hostfs DIR] [--out DIR] [--monitor PATH] [--keep] [--audio FILE]
       Run the GUI script FILE (plan 12.6) on the 9h kernel, as r9 9h boot --snap does. At the
       first shell prompt of the console window of rio, r9 gives the steps of the script to the
       monitor on its control socket. The program runs in a window at the bottom right of the
@@ -345,7 +347,7 @@ usage:
       or when the program does not stop with an empty status after its exit step. The monitor
       serves DIR on #Z/hostfs, which the guest can only read. Without --hostfs, it serves the
       directory data next to FILE, if there is one. A script mounts it with
-      mount -c '#Z/hostfs' /mnt/term.
+      mount -c '#Z/hostfs' /mnt/term. --audio is as for r9 9h boot.
   r9 gui compare --want DIR --got DIR [--diff DIR]
       Compare the snaps of two runs of a script, in order. The class of the script in the
       --want run tells how: exact compares all the pixels, masked compares the pixels outside

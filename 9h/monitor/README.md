@@ -5,7 +5,7 @@ This is the monitor of `9h`, the hosted runtime of plan 10. It runs a 9front ker
 | Crate | What |
 |---|---|
 | `h9-vm` | the guest RAM, the kernel loaders (a.out, U-Boot images and multiboot), the device tree builder, the ACPI tables and the exits |
-| `h9-dev` | the bus, the PSCI calls, the 9h hypercall devices (console and disk), the bring-up devices (PL011 and PL031), and the CMOS clock, the PCI configuration ports and the ACPI PM1a control register of the PC. The PCI bus has no device |
+| `h9-dev` | the bus, the PSCI calls, the 9h hypercall devices (console, disk, snarf, screen, mouse, keyboard and audio), the bring-up devices (PL011 and PL031), and the CMOS clock, the PCI configuration ports and the ACPI PM1a control register of the PC. The PCI bus has no device |
 | `h9-hvf` | the Hypervisor.framework back end, for macOS on arm64 |
 | `h9-kvm` | the KVM back end, for Linux on x86-64 and arm64. On x86-64 it runs a multiboot amd64 kernel on a PC with the APICs and the timer of KVM. On arm64 it runs the machine of `h9-hvf` with the GIC, the timer and the PSCI of KVM |
 | `h9-9p` | the 9P2000 server over a host directory, for `/mnt/term` of the guest. `h9-dev` connects it to `#Z/hostfs` with three hypercalls |
@@ -27,7 +27,7 @@ target/release/9h run --machine virt --kernel 9qemu.u --ini plan9.ini --mem 512 
 
 `--machine virt` adds a PL011 console for the `qemu` kernel. The default machine, `9h`, is for the 9h kernel of `9h/arm64`, which has a console and disks of hypercalls. `--disk FILE` adds a disk, which the kernel sees as `sdH0` to `sdH3`. `--disk FILE,ro` makes the disk read-only. `--hostfs DIR` serves a host directory on `#Z/hostfs`, which the kernel can mount on `/mnt/term`.
 
-`#Z/snarf` is the host clipboard, and `--snarf memory` keeps it in the monitor. `#Z/ctl` takes `quit` and `title TEXT`.
+`#Z/snarf` is the host clipboard, and `--snarf memory` keeps it in the monitor. `#Z/ctl` takes `quit` and `title TEXT`. `#A/audio` plays on the default output device on macOS, and through `pacat`, `pw-cat` or `aplay` on Linux. `--audio none` drops the samples at the speed of the stream, and `--audio FILE` writes them to a WAV file.
 
 `--script FILE` drives the console with no person at it. Each line of FILE is a step: `wait TEXT`, `send TEXT`, `timeout SECS` or `quit`. TEXT can be a string in double quotes with the escapes `\n`, `\r`, `\t`, `\\`, `\"` and `\xHH`. A `wait` waits for TEXT after the last match, for 60 seconds by default. The exit status is 0 when the script passes, and 3 when a `wait` times out or the session ends first. This script types a command at the shell of the boot and waits for its output:
 

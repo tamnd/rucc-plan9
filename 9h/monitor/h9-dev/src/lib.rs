@@ -10,6 +10,7 @@
 pub mod acpipm;
 pub mod cmos;
 pub mod h9;
+pub mod h9audio;
 pub mod h9cons;
 pub mod h9ctl;
 pub mod h9disk;

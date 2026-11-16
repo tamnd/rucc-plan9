@@ -88,13 +88,15 @@ A trackpad's continuous scroll accumulates deltas and emits one button-4 or butt
 
 ## 11.6 Audio
 
-9front's `/dev/audio` is signed 16-bit little-endian stereo at 44,100 Hz by default. `audioh9.c` is an `audio` card for port's `devaudio`. Its output is a ring of 4 KiB buffers in guest memory. The monitor plays the ring through:
-- CoreAudio (an `AudioUnit` with `kAudioUnitSubType_DefaultOutput`) on macOS;
-- PipeWire, PulseAudio or ALSA on Linux, the first that is present, each loaded with `dlopen`.
+9front's `/dev/audio` is signed 16-bit little-endian stereo at 44,100 Hz by default. `audioh9.c` is an `audio` card for port's `devaudio`, and the file is the same on arm64 and amd64. A write copies the samples to a buffer of 4 KiB in the kernel and gives them to the monitor with `H9audiowrite`, with the speed and the master volume. The samples wait in a queue of 256 KiB in the monitor. When the queue is full, the call takes fewer bytes, and the kernel tries again after 10 ms. As in `audiohda`, a write returns when the queue has at most `delay` samples, which `H9audiobuffered` tells. Thus the player of the host sets the pace, and the card needs no interrupt. The monitor scales the samples by the master volume. A player of the monitor takes the samples from the queue on its own thread:
+- on macOS, an output queue of `AudioToolbox` on the default output device, with 4 buffers of 1024 samples, about 93 ms at 44,100 Hz;
+- on Linux, the first of `pacat`, `pw-cat` and `aplay` that is on the path, which reads the samples on its standard input. A program is simpler than a client library of PipeWire, PulseAudio or ALSA, and the snarf device uses programs for the clipboard in the same way;
+- with `--audio none`, a clock that drops the samples at the speed of the stream;
+- with `--audio FILE`, the same clock, which writes the samples to the WAV file FILE.
 
-When a buffer has played, the monitor raises the card's interrupt, as a DMA engine would. Latency is about 50 ms, the same as `audiohda` with its default buffering. `/dev/volume` maps to the stream's volume.
+The clock gives a program the same pace as a sound card, and the file holds the exact bytes that the program wrote, scaled by the volume. `r9 9h boot` and `r9 gui run` give `--audio none`, or `--audio FILE` with their `--audio`, so a test never plays on the host. When the speed changes, the player starts again at the new speed.
 
-Recording (reading `/dev/audio`) is off unless `--audio-in` is given, because on macOS it triggers the microphone permission prompt. With it, the input path is the same ring in the other direction.
+Recording (reading `/dev/audio`) is not supported yet. A later `--audio-in` will turn it on, because on macOS it triggers the microphone permission prompt.
 
 ## 11.7 Rootless mode (open question 4)
 

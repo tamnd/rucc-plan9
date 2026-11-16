@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use h9_dev::acpipm::{self, AcpiPm};
 use h9_dev::cmos::{self, Cmos};
 use h9_dev::h9;
+use h9_dev::h9audio::{Clock, H9Audio, Player, Queue, Wav};
 use h9_dev::h9cons::H9Cons;
 use h9_dev::h9ctl::H9Ctl;
 use h9_dev::h9disk::H9Disk;
@@ -24,6 +25,8 @@ use h9_vm::fdt::Fdt;
 use h9_vm::{acpi, multiboot};
 
 // Only a host with a back end runs a script.
+#[cfg(target_os = "macos")]
+mod coreaudio;
 #[cfg_attr(
     not(any(
         all(target_os = "macos", target_arch = "aarch64"),
@@ -41,6 +44,7 @@ use script::{Step, Tee, Transcript};
 const USAGE: &str = "usage:
   9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
          [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--snarf host|memory]
+         [--audio host|none|FILE]
          [--ini FILE] [--strict] [--timeout SECS] [--script FILE] [--headless]
          [--screen WxH|none] [--snap FILE] [--control PATH]
       Run a kernel of the tree on the hypervisor of the host: an arm64 kernel on HVF on macOS
@@ -58,6 +62,7 @@ const USAGE: &str = "usage:
       9P2000 on #Z/hostfs of the 9h kernel, for /mnt/term. Each file has the owner NAME of
       --user, glenda by default. #Z/snarf of the 9h kernel is the host
       clipboard with --snarf host, the default, and a buffer of the monitor with --snarf memory.
+      #A/audio of the 9h kernel plays on the host with --audio host, the default: on the default output device on macOS, and through pacat, pw-cat or aplay on Linux. --audio none drops the samples at the speed of the stream, and --audio FILE writes them to the WAV file FILE.
       #Z/ctl takes the requests quit and title TEXT. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
       as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
       seconds with exit status 2. --script FILE drives the console with the steps of FILE: wait
@@ -93,6 +98,17 @@ enum Machine {
     Virt,
 }
 
+/// The output of `#A/audio`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Audio {
+    /// The audio output of the host.
+    Host,
+    /// No output.
+    None,
+    /// A WAV file.
+    File(String),
+}
+
 /// The clipboard of `#Z/snarf`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Snarf {
@@ -114,6 +130,7 @@ struct Options {
     hostfs: Option<(String, bool)>,
     user: String,
     snarf: Snarf,
+    audio: Audio,
     strict: bool,
     timeout: Option<u64>,
     script: Option<Vec<(usize, Step)>>,
@@ -122,6 +139,22 @@ struct Options {
     screen: Option<(u32, u32)>,
     snap: Option<String>,
     control: Option<String>,
+}
+
+/// The player of `#A/audio`.
+fn player(audio: &Audio, q: Arc<Queue>, wav: Option<Wav>) -> Box<dyn Player> {
+    if *audio != Audio::Host {
+        return Box::new(Clock::new(q, wav));
+    }
+    #[cfg(target_os = "macos")]
+    return Box::new(coreaudio::CoreAudio::new(q));
+    #[cfg(not(target_os = "macos"))]
+    if let Some(argv) = h9_dev::h9audio::Program::find() {
+        Box::new(h9_dev::h9audio::Program::new(q, argv))
+    } else {
+        eprintln!("9h: the host has no audio program, so the audio output is dropped");
+        Box::new(Clock::new(q, None))
+    }
 }
 
 /// A value with `,ro` at the end is read-only.
@@ -144,6 +177,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         hostfs: None,
         user: "glenda".into(),
         snarf: Snarf::Host,
+        audio: Audio::Host,
         strict: false,
         timeout: None,
         script: None,
@@ -185,6 +219,14 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     "host" => Snarf::Host,
                     "memory" => Snarf::Memory,
                     s => return Err(format!("--snarf {s}: the values are host and memory")),
+                };
+            }
+            "--audio" => {
+                o.audio = match val()?.as_str() {
+                    "host" => Audio::Host,
+                    "none" => Audio::None,
+                    "" => return Err("--audio needs host, none or a file".into()),
+                    f => Audio::File(f.to_string()),
                 };
             }
             "--strict" => o.strict = true,
@@ -478,6 +520,12 @@ fn run(o: &Options) -> Result<ExitCode, String> {
             (Snarf::Memory, _) => Box::new(Memory::default()),
         };
         bus.add_hyper(Box::new(H9Snarf::new(clip)));
+        let wav = match &o.audio {
+            Audio::File(f) => Some(Wav::create(f).map_err(|e| format!("{f}: {e}"))?),
+            _ => None,
+        };
+        let audio = o.audio.clone();
+        bus.add_hyper(Box::new(H9Audio::new(move |q| player(&audio, q, wav))));
         let term: Option<Box<dyn std::io::Write + Send>> = std::io::stdout()
             .is_terminal()
             .then(|| Box::new(std::io::stdout()) as Box<dyn std::io::Write + Send>);
@@ -1169,6 +1217,12 @@ mod tests {
         let o = parse(&args("--kernel k --snarf memory")).unwrap();
         assert_eq!(o.snarf, super::Snarf::Memory);
         assert!(parse(&args("--kernel k --snarf x11")).is_err());
+        assert_eq!(o.audio, super::Audio::Host);
+        let o = parse(&args("--kernel k --audio none")).unwrap();
+        assert_eq!(o.audio, super::Audio::None);
+        let o = parse(&args("--kernel k --audio=/tmp/a.wav")).unwrap();
+        assert_eq!(o.audio, super::Audio::File("/tmp/a.wav".into()));
+        assert!(parse(&args("--kernel k --audio=")).is_err());
         assert!(parse(&args("--kernel k --hostfs /nonexistent-dir")).is_err());
         assert!(
             parse(&args(
