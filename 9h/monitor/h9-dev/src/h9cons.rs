@@ -36,6 +36,12 @@ impl H9Cons {
         self.input.push_back(b);
     }
 
+    /// The number of bytes from the host that the guest did not read yet.
+    #[must_use]
+    pub fn pending(&self) -> usize {
+        self.input.len()
+    }
+
     fn put(&mut self, b: &[u8]) {
         // The console of the host is gone when this fails, and the guest cannot do anything
         // about it.

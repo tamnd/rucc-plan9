@@ -584,6 +584,25 @@ fn type_in(bus: &mut Bus, b: &[u8]) {
     }
 }
 
+/// The number of typed bytes that the guest did not read yet.
+#[cfg_attr(
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    )),
+    allow(dead_code)
+)]
+fn keys_pending(bus: &mut Bus) -> usize {
+    if let Some(u) = bus.device::<Pl011>(UART) {
+        u.pending()
+    } else {
+        bus.hyper_device::<H9Cons>().map_or(0, |c| c.pending())
+    }
+}
+
 /// Give the input of a script step to the machine.
 #[cfg_attr(
     not(any(
@@ -718,7 +737,7 @@ struct Session {
     )
 ))]
 mod backend {
-    use super::{H9Screen, Session, give, script, type_in, unknown_report};
+    use super::{H9Screen, Session, give, keys_pending, script, type_in, unknown_report};
     use h9_dev::Bus;
     #[cfg(target_os = "macos")]
     use h9_hvf::{Machine, Stop, Vm};
@@ -729,6 +748,7 @@ mod backend {
     use std::process::ExitCode;
     use std::sync::atomic::{AtomicI32, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
 
     fn off_screen(s: &H9Screen) -> String {
         let (w, h) = s.size();
@@ -740,8 +760,24 @@ mod backend {
     struct Drive(Arc<Machine>);
 
     impl script::Target for Drive {
+        /// Keys go to the guest a few at a time, as a person types them. A long line in one
+        /// burst loses bytes in the guest, after the console device: in a test, `rio` got the
+        /// first 150 bytes of a line of 210 bytes and the newline, and not the bytes between.
         fn give(&mut self, i: script::Input) {
-            self.0.with_bus(|bus| give(bus, &i));
+            const CHUNK: usize = 8;
+            const GAP: Duration = Duration::from_millis(20);
+            let script::Input::Keys(keys) = i else {
+                self.0.with_bus(|bus| give(bus, &i));
+                return;
+            };
+            for chunk in keys.chunks(CHUNK) {
+                self.0.with_bus(|bus| type_in(bus, chunk));
+                let limit = Instant::now() + Duration::from_secs(2);
+                while self.0.with_bus(keys_pending) > 0 && Instant::now() < limit {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                std::thread::sleep(GAP);
+            }
         }
 
         fn look(&mut self, rect: Option<[u16; 4]>) -> Result<u64, String> {
