@@ -209,3 +209,20 @@ mod tests {
         assert_eq!(irq_line(48), 0x0100_0030);
     }
 }
+
+/// The registers of a vCPU on one line, for `Machine::dump_regs`: the PC, the PSTATE, `SP_EL0`,
+/// `SP_EL1` and X0 to X30. A register that does not read gives `?`.
+pub fn regs_line(cpu: &VcpuFd) -> String {
+    let r = |id: u64| get(cpu, id).map_or_else(|_| "?".to_string(), |v| format!("{v:#x}"));
+    let xs: Vec<String> = (0..31)
+        .map(|n| get(cpu, x(n)).map_or_else(|_| "?".to_string(), |v| format!("{v:x}")))
+        .collect();
+    format!(
+        "pc {} pstate {} sp_el0 {} sp_el1 {} x0-x30 {}",
+        r(PC),
+        r(core(8 * 33)),
+        r(core(8 * 31)),
+        r(core(8 * 34)),
+        xs.join(" ")
+    )
+}

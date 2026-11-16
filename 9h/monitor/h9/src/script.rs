@@ -15,6 +15,8 @@
 //!   does not occur in SECS seconds, 30 by default;
 //! - `snap FILE [X0 Y0 X1 Y1]` writes the screen, or the rectangle of it from (X0, Y0) to
 //!   (X1, Y1), to FILE as a PNG file;
+//! - `regs` makes each vCPU write its registers to the standard error of the monitor, for a guest
+//!   that stops;
 //! - `quit` ends the session, and the script passes.
 //!
 //! TEXT is the rest of the line with the spaces at its two ends removed, or a string in double quotes with the escapes `\n`, `\r`, `\t`,
@@ -45,6 +47,8 @@ pub enum Step {
     Quiet(Duration, Duration, Option<[u16; 4]>),
     /// Write the screen, or a rectangle of it, to a PNG file.
     Snap(String, Option<[u16; 4]>),
+    /// Make each vCPU write its registers to the standard error.
+    Regs,
     /// End the session.
     Quit,
 }
@@ -71,6 +75,10 @@ pub trait Target {
     fn snap(&mut self, file: &str, rect: Option<[u16; 4]>) -> Result<(), String> {
         let _ = (file, rect);
         Err("the machine has no screen".into())
+    }
+    /// Make each vCPU write its registers to the standard error.
+    fn regs(&mut self) -> Result<(), String> {
+        Err("the machine cannot write its registers".into())
     }
 }
 
@@ -250,6 +258,7 @@ pub fn parse(src: &str) -> Result<Vec<(usize, Step)>, String> {
             })?,
             "snap" => snap_step(arg)
                 .ok_or_else(|| format!("line {n}: give snap FILE or snap FILE X0 Y0 X1 Y1"))?,
+            "regs" if arg.is_empty() => Step::Regs,
             "quit" if arg.is_empty() => Step::Quit,
             _ => return Err(format!("line {n}: the step {line:?} is not known")),
         };
@@ -341,8 +350,8 @@ impl Watch {
 }
 
 /// Do one line that a host program wrote on the socket of `--control`, and give the reply: `ok`,
-/// or `error: ` and the reason. The line has the steps `send`, `mouse`, `click`, `pause`, `quiet`
-/// and `snap`, and `wait`, `absent` and `timeout` when `watch` has the console output. The monitor does all
+/// or `error: ` and the reason. The line has the steps `send`, `mouse`, `click`, `pause`, `quiet`,
+/// `snap` and `regs`, and `wait`, `absent` and `timeout` when `watch` has the console output. The monitor does all
 /// the steps of the line before it replies, so a program that waits for the reply knows that the
 /// input is in the machine.
 pub fn control(line: &str, t: &mut impl Target, mut watch: Option<&mut Watch>) -> String {
@@ -376,6 +385,7 @@ pub fn control(line: &str, t: &mut impl Target, mut watch: Option<&mut Watch>) -
             }
             Step::Quiet(still, limit, r) => quiet(t, *still, *limit, *r),
             Step::Snap(f, r) => t.snap(f, *r),
+            Step::Regs => t.regs(),
             Step::Wait(text) => match watch.as_deref_mut() {
                 Some(w) => match w.log.find(text, w.seen, Instant::now() + w.timeout) {
                     Some(at) => {
@@ -443,6 +453,7 @@ pub fn run(steps: &[(usize, Step)], log: &Transcript, t: &mut impl Target) -> Re
                 quiet(t, *still, *limit, *r).map_err(|e| format!("line {n}: {e}"))?;
             }
             Step::Snap(f, r) => t.snap(f, *r).map_err(|e| format!("line {n}: {f}: {e}"))?,
+            Step::Regs => t.regs().map_err(|e| format!("line {n}: {e}"))?,
             Step::Quit => break,
         }
     }
