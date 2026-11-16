@@ -3,7 +3,7 @@
 //! the window, and the target of a timer that shows the screen 60 times a second. The layer of
 //! the view holds the screen as a `CGImage`, and it scales the image with the nearest pixel.
 
-use super::{COMMAND, Host, Scroll, buttons, key_rune, rune_utf8, screen_point};
+use super::{COMMAND, Held, Host, KeyEvent, Scroll, buttons, key_rune, screen_point};
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::{Arc, OnceLock};
@@ -136,6 +136,8 @@ struct State {
     /// The last point and buttons that went to the machine.
     at: (u16, u16, u8),
     scroll: Scroll,
+    /// The keys and the modifiers that are down.
+    held: Held,
 }
 
 thread_local! {
@@ -213,6 +215,17 @@ unsafe fn view_class() -> Id {
         add(c"isOpaque", yes as M0 as *const c_void, c"B@:");
         add(c"tick:", tick as M1 as *const c_void, c"v@:@");
         add(c"keyDown:", key_down as M1 as *const c_void, c"v@:@");
+        add(c"keyUp:", key_up as M1 as *const c_void, c"v@:@");
+        add(
+            c"flagsChanged:",
+            flags_changed as M1 as *const c_void,
+            c"v@:@",
+        );
+        add(
+            c"windowDidResignKey:",
+            resign_key as M1 as *const c_void,
+            c"v@:@",
+        );
         add(
             c"windowWillClose:",
             will_close as M1 as *const c_void,
@@ -333,7 +346,7 @@ unsafe fn point(view: Id, ev: Id) -> (u16, u16) {
 }
 
 extern "C" fn mouse(view: Id, _: Sel, ev: Id) {
-    let Some(h) = host() else { return };
+    let Some(host) = host() else { return };
     // SAFETY: `ev` is a mouse event.
     let (x, y, b) = unsafe {
         let (x, y) = point(view, ev);
@@ -341,8 +354,14 @@ extern "C" fn mouse(view: Id, _: Sel, ev: Id) {
         let flags = msg![usize; ev, c"modifierFlags"];
         (x, y, buttons(pressed as u64, flags as u64))
     };
-    STATE.with(|s| s.borrow_mut().at = (x, y, b));
-    h.mouse(x, y, b);
+    STATE.with(|s| {
+        let s = &mut *s.borrow_mut();
+        if b & !s.at.2 != 0 {
+            s.held.mouse_down();
+        }
+        s.at = (x, y, b);
+    });
+    host.mouse(x, y, b);
 }
 
 extern "C" fn scroll_wheel(_: Id, _: Sel, ev: Id) {
@@ -364,6 +383,13 @@ extern "C" fn scroll_wheel(_: Id, _: Sel, ev: Id) {
     }
 }
 
+/// Give the key events of `f` to the host. `f` gets the keys that are down.
+fn with_held(h: &Arc<dyn Host>, f: impl FnOnce(&mut Held) -> Vec<KeyEvent>) {
+    for (r, down) in STATE.with(|s| f(&mut s.borrow_mut().held)) {
+        h.key(r, down);
+    }
+}
+
 extern "C" fn key_down(_: Id, _: Sel, ev: Id) {
     let Some(h) = host() else { return };
     // SAFETY: `ev` is a key event, and its characters are an NSString.
@@ -379,20 +405,53 @@ extern "C" fn key_down(_: Id, _: Sel, ev: Id) {
             }
             return;
         }
+        let code = u32::from(msg![u16; ev, c"keyCode"]);
         let chars = msg![Id; ev, c"characters"];
-        if chars.is_null() || msg![usize; chars, c"length"] == 0 {
+        let n = if chars.is_null() {
+            0
+        } else {
+            msg![usize; chars, c"length"]
+        };
+        if n == 0 {
+            // A dead key of the input method: the next key gives the character.
+            with_held(h, |held| held.press(code, 0));
             return;
         }
         let first = msg![u16; chars, c"characterAtIndex:", 0usize => usize];
-        if let Some(r) = key_rune(first) {
-            h.keys(&rune_utf8(r));
-        } else {
+        let rune = match key_rune(first) {
+            Some(r) => Some(r),
+            None if n == 1 => char::from_u32(u32::from(first)).map(u32::from),
+            None => None,
+        };
+        // Text of the input method, or a rune outside the first plane, has no key of its own: it
+        // gives a key down and a key up for each rune.
+        with_held(h, |held| held.press(code, rune.unwrap_or(0)));
+        if rune.is_none() {
             let p = msg![*const c_char; chars, c"UTF8String"];
             if !p.is_null() {
                 h.keys(CStr::from_ptr(p).to_bytes());
             }
         }
     }
+}
+
+extern "C" fn key_up(_: Id, _: Sel, ev: Id) {
+    let Some(h) = host() else { return };
+    // SAFETY: `ev` is a key event.
+    let code = u32::from(unsafe { msg![u16; ev, c"keyCode"] });
+    with_held(h, |held| held.release(code));
+}
+
+extern "C" fn flags_changed(_: Id, _: Sel, ev: Id) {
+    let Some(h) = host() else { return };
+    // SAFETY: `ev` is a key event.
+    let flags = unsafe { msg![usize; ev, c"modifierFlags"] } as u64;
+    with_held(h, |held| held.modifiers(flags));
+}
+
+extern "C" fn resign_key(_: Id, _: Sel, _: Id) {
+    let Some(h) = host() else { return };
+    with_held(h, Held::release_all);
 }
 
 extern "C" fn will_close(_: Id, _: Sel, _: Id) {

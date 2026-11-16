@@ -8,10 +8,14 @@
 //!
 //! The key rules: the keysym of the key with Shift or Caps Lock gives a rune. Return is a new
 //! line, `BackSpace` is `\b`, `Delete` is 0x7F, and the arrows and the function keys are the
-//! runes of `keyboard.h`. With Control, a letter gives its control character. Buttons 1, 2 and
-//! 3 are the buttons of `/dev/mouse`, and the wheel gives buttons 4 and 5 (8 and 16).
+//! runes of `keyboard.h`. With Control, a letter gives its control character. Shift, Control,
+//! Alt, `AltGr` and Super give `Kshift`, `Kctl`, `Kalt`, `Kaltgr` and `Kmod4`. A key press is a
+//! key down and a key release is a key up of the rune of the press. The auto-repeat of the
+//! server gives a release and a press with the same time, which is one more key down. When the
+//! window loses the focus, each key that is down goes up. Buttons 1, 2 and 3 are the buttons of
+//! `/dev/mouse`, and the wheel gives buttons 4 and 5 (8 and 16).
 
-use crate::{Host, k, rune_utf8};
+use crate::{Held, Host, k};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
@@ -42,9 +46,12 @@ const WM_SIZE_HINTS: u32 = 41;
 const STRING: u32 = 31;
 const ATOM: u32 = 4;
 
-/// The events of the window: key press, button press and release, pointer motion, exposure
-/// and structure notify.
-const EVENT_MASK: u32 = 0x1 | 0x4 | 0x8 | 0x40 | 0x8000 | 0x2_0000;
+/// The events of the window: key press and release, button press and release, pointer motion,
+/// exposure, structure notify and focus change.
+const EVENT_MASK: u32 = 0x1 | 0x2 | 0x4 | 0x8 | 0x40 | 0x8000 | 0x2_0000 | 0x20_0000;
+
+/// How long a key release waits for the press of an auto-repeat.
+const REPEAT_WAIT: Duration = Duration::from_millis(2);
 
 /// The display of `DISPLAY`: a Unix socket for `:N` and `unix:N`, or TCP port 6000+N on a
 /// host.
@@ -303,6 +310,11 @@ fn keysym_rune(keysym: u32, state: u16) -> Option<u32> {
         0xff63 => k::INS,
         0xffb0..=0xffb9 => u32::from(b'0') + keysym - 0xffb0,
         0xffbe..=0xffc9 => k::KF + 1 + keysym - 0xffbe,
+        0xffe1 | 0xffe2 => k::SHIFT,
+        0xffe3 | 0xffe4 => k::CTL,
+        0xffe9 | 0xffea => k::ALT,
+        0xfe03 | 0xff7e => k::ALTGR,
+        0xffeb | 0xffec => k::MOD4,
         _ => return None,
     };
     if state & CONTROL != 0 && (0x40..=0x7f).contains(&(r & !0x20)) && r != k::DEL {
@@ -334,7 +346,9 @@ const fn button_bit(b: u8) -> u8 {
 /// An event from the X server that the window uses.
 #[derive(Debug, PartialEq, Eq)]
 enum Event {
-    Key(u8, u16),
+    /// A key press (true) or release (false), with the keycode, the state and the time.
+    Key(bool, u8, u16, u32),
+    FocusOut,
     Button(bool, u8, i16, i16),
     Motion(i16, i16, u16),
     Expose,
@@ -349,9 +363,10 @@ enum Event {
 fn event(b: &[u8; 32]) -> Option<Event> {
     Some(match b[0] & 0x7f {
         0 => Event::Error(b[1], b[10]),
-        2 => Event::Key(b[1], u16_at(b, 28)),
+        2 | 3 => Event::Key(b[0] & 0x7f == 2, b[1], u16_at(b, 28), u32_at(b, 4)),
         4 | 5 => Event::Button(b[0] & 0x7f == 4, b[1], i16_at(b, 24), i16_at(b, 26)),
         6 => Event::Motion(i16_at(b, 24), i16_at(b, 26), u16_at(b, 28)),
+        10 => Event::FocusOut,
         12 if u16_at(b, 16) == 0 => Event::Expose,
         33 if b[1] == 32 => Event::Close(u32_at(b, 12)),
         _ => return None,
@@ -681,12 +696,18 @@ impl Conn {
 /// The input state of the window.
 struct Input {
     keymap: Keymap,
+    held: Held,
     buttons: u8,
     w: u32,
     h: u32,
 }
 
 impl Input {
+    /// The rune of the key `code` with the modifiers of `state`, or 0 for a key that gives none.
+    fn rune(&self, code: u8, state: u16) -> u32 {
+        keysym_rune(self.keymap.keysym(code, state), state).unwrap_or(0)
+    }
+
     fn point(&self, x: i16, y: i16) -> (u16, u16) {
         let c = |v: i16, n: u32| {
             u16::try_from(v.max(0))
@@ -694,6 +715,13 @@ impl Input {
                 .min(u16::try_from(n.saturating_sub(1)).unwrap_or(u16::MAX))
         };
         (c(x, self.w), c(y, self.h))
+    }
+}
+
+/// Give the key events to the host.
+fn give(host: &dyn Host, events: Vec<crate::KeyEvent>) {
+    for (r, down) in events {
+        host.key(r, down);
     }
 }
 
@@ -712,6 +740,7 @@ pub fn run(title: &str, width: u32, height: u32, host: &dyn Host) -> Result<(), 
     c.events(tx)?;
     let mut input = Input {
         keymap,
+        held: Held::default(),
         buttons: 0,
         w: width,
         h: height,
@@ -720,6 +749,8 @@ pub fn run(title: &str, width: u32, height: u32, host: &dyn Host) -> Result<(), 
     let mut pixels = Vec::new();
     let mut shown: Option<(u32, u32)> = None;
     let mut next = Instant::now();
+    // An event that came while a key release waited for the press of an auto-repeat.
+    let mut early: Option<Event> = None;
     loop {
         if host.done() {
             let _ = c.destroy(win);
@@ -739,13 +770,27 @@ pub fn run(title: &str, width: u32, height: u32, host: &dyn Host) -> Result<(), 
                 next = now + FRAME;
             }
         }
-        match rx.recv_timeout(next.saturating_duration_since(Instant::now())) {
-            Ok(Event::Key(code, state)) => {
-                let sym = input.keymap.keysym(code, state);
-                if let Some(r) = keysym_rune(sym, state) {
-                    host.keys(&rune_utf8(r));
-                }
+        let ev = match early.take() {
+            Some(ev) => Ok(ev),
+            None => rx.recv_timeout(next.saturating_duration_since(Instant::now())),
+        };
+        match ev {
+            Ok(Event::Key(true, code, state, _)) => {
+                let r = input.rune(code, state);
+                give(host, input.held.press(u32::from(code), r));
             }
+            Ok(Event::Key(false, code, state, time)) => match rx.recv_timeout(REPEAT_WAIT) {
+                // The auto-repeat: the press that comes next is a key down of the same rune.
+                Ok(Event::Key(true, c, _, t)) if c == code && t == time => {
+                    let r = input.rune(code, state);
+                    give(host, input.held.press(u32::from(code), r));
+                }
+                next => {
+                    early = next.ok();
+                    give(host, input.held.release(u32::from(code)));
+                }
+            },
+            Ok(Event::FocusOut) => give(host, input.held.release_all()),
             Ok(Event::Button(press, b, x, y)) => {
                 let (x, y) = input.point(x, y);
                 let bit = button_bit(b);
@@ -910,7 +955,12 @@ mod tests {
         assert_eq!(keysym_rune(0xff54, 0), Some(0x80));
         assert_eq!(keysym_rune(0xffbe, 0), Some(0xF001));
         assert_eq!(keysym_rune(0x0100_00e9, 0), Some(0xe9));
-        assert_eq!(keysym_rune(0xffe1, 0), None);
+        assert_eq!(keysym_rune(0xffe1, 0), Some(k::SHIFT));
+        assert_eq!(keysym_rune(0xffe4, CONTROL), Some(k::CTL));
+        assert_eq!(keysym_rune(0xffe9, 0), Some(k::ALT));
+        assert_eq!(keysym_rune(0xfe03, 0), Some(k::ALTGR));
+        assert_eq!(keysym_rune(0xffeb, 0), Some(k::MOD4));
+        assert_eq!(keysym_rune(0xffe5, 0), None);
     }
 
     #[test]
@@ -930,8 +980,14 @@ mod tests {
         assert_eq!(event(&b), Some(Event::Button(true, 3, 10, -2)));
         b[0] = 0x80 | 2;
         b[1] = 38;
+        b[4..8].copy_from_slice(&9u32.to_le_bytes());
         b[28] = 1;
-        assert_eq!(event(&b), Some(Event::Key(38, 1)));
+        assert_eq!(event(&b), Some(Event::Key(true, 38, 1, 9)));
+        b[0] = 3;
+        assert_eq!(event(&b), Some(Event::Key(false, 38, 1, 9)));
+        b = [0u8; 32];
+        b[0] = 10;
+        assert_eq!(event(&b), Some(Event::FocusOut));
         b = [0u8; 32];
         b[0] = 12;
         b[16] = 1;

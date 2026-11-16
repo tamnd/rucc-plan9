@@ -56,11 +56,13 @@ The monitor's key table maps:
 - macOS Command and the Linux Super key to `Kmod4`;
 - arrows, Home, End, Page Up/Down, Insert, Delete, Escape and F1–F12 to their `keyboard.h` runes.
 
-At present, the host window and the `keys` step of a script give each typed rune as a key down and then a key up. This is sufficient for the menus of `doom` and for the keys that stop a program. The key table above and the key up events of the host window are the next step, so that a program also sees a key that the user holds.
+The host window gives a key down when a key goes down and a key up when it goes up, so a program sees a key that the user holds. A repeat of the host gives one more key down and no key up. `kbdfs` types the rune again but does not send one more `k` message. Text from an input method, which has no key of its own, gives a key down and a key up for each rune. The `keys` step of a script also gives a key down and a key up for each rune. When the window loses the keyboard focus, each key and modifier that is down goes up. While `#b/kbd` is not open, a key down types its rune on the console, and a key up and a modifier key do nothing.
+
+On X11, the auto-repeat of the server gives a key release and a key press with the same time. The window waits 2 milliseconds after a release for that press, and it gives the pair as one more key down. The code is `Held` in `h9-gui/src/lib.rs`, which both back ends use.
 
 The monitor remembers which rune each physical key produced when it went down. It sends the key-up for that rune, not for whatever the key would produce now, so a key-up is never lost when a modifier changes in between.
 
-**Compose.** 9front's compose sequence is `Kalt` followed by two characters, done in `kbdfs`. On macOS, Option is also the system's dead-key modifier. drawterm's rule applies: Option alone sends `Kalt` down and up, so Option-tap starts a Plan 9 compose, and Option held with a key goes through the macOS input method. `--keys=plan9` turns off the input method for users who want raw keys.
+**Compose.** 9front's compose sequence is `Kalt` followed by two characters, done in `kbdfs`. On macOS, Option is also the system's dead-key modifier. drawterm's rule applies: Option alone sends `Kalt` down and up when it goes up, so Option-tap starts a Plan 9 compose, and Option held with a key goes through the macOS input method. Option with a click of the mouse (button 2) or with another modifier is not a tap. On X11, Alt sends `Kalt` when it goes down, as the Alt key of a PC does on 9front. `--keys=plan9` turns off the input method for users who want raw keys.
 
 **Reserved host keys.** The host keeps Command-Q (quit `9h`), Command-H, Command-M and Command-Tab on macOS, and nothing on Linux. Everything else goes to Plan 9.
 
