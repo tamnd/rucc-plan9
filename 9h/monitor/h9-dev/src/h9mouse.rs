@@ -54,6 +54,12 @@ impl H9Mouse {
             self.events.push_back(e);
         }
     }
+
+    /// The number of events that the guest did not read yet.
+    #[must_use]
+    pub fn pending(&self) -> usize {
+        self.events.len()
+    }
 }
 
 impl Device for H9Mouse {
@@ -103,6 +109,7 @@ mod tests {
         m.push(ev(300, 200, 1));
         m.push(ev(300, 200, 0));
         assert_eq!(bus.irqs(), vec![(h9::MOUSE_SPI, true)]);
+        assert_eq!(bus.hyper_device::<H9Mouse>().unwrap().pending(), 2);
         assert_eq!(get(&mut bus), 0x12c | 0xc8 << 16 | 1 << 32);
         assert_eq!(get(&mut bus), 0x12c | 0xc8 << 16);
         assert_eq!(get(&mut bus), u64::MAX);

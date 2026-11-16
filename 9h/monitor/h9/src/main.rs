@@ -604,6 +604,21 @@ fn keys_pending(bus: &mut Bus) -> usize {
     }
 }
 
+/// The number of mouse events that the guest did not read yet.
+#[cfg_attr(
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    )),
+    allow(dead_code)
+)]
+fn mouse_pending(bus: &mut Bus) -> usize {
+    bus.hyper_device::<H9Mouse>().map_or(0, |m| m.pending())
+}
+
 /// Give the input of a script step to the machine.
 #[cfg_attr(
     not(any(
@@ -737,7 +752,9 @@ struct Session {
     )
 ))]
 mod backend {
-    use super::{H9Screen, Session, give, keys_pending, script, type_in, unknown_report};
+    use super::{
+        H9Screen, Session, give, keys_pending, mouse_pending, script, type_in, unknown_report,
+    };
     use h9_dev::Bus;
     #[cfg(target_os = "macos")]
     use h9_hvf::{Machine, Stop, Vm};
@@ -759,24 +776,35 @@ mod backend {
     #[derive(Clone)]
     struct Drive(Arc<Machine>);
 
+    impl Drive {
+        /// Wait until the guest read the input that waits in a device, for 2 seconds at most,
+        /// and then for a short gap. The kernel keeps a change of the buttons in a queue, but it
+        /// keeps only the last point of the mouse. Thus without the wait, a drag of the mouse
+        /// gets to rio as a press and a release, with no move between them.
+        fn drain(&self, pending: fn(&mut Bus) -> usize) {
+            const GAP: Duration = Duration::from_millis(20);
+            let limit = Instant::now() + Duration::from_secs(2);
+            while self.0.with_bus(pending) > 0 && Instant::now() < limit {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            std::thread::sleep(GAP);
+        }
+    }
+
     impl script::Target for Drive {
         /// Keys go to the guest a few at a time, as a person types them. A long line in one
         /// burst loses bytes in the guest, after the console device: in a test, `rio` got the
         /// first 150 bytes of a line of 210 bytes and the newline, and not the bytes between.
         fn give(&mut self, i: script::Input) {
             const CHUNK: usize = 8;
-            const GAP: Duration = Duration::from_millis(20);
             let script::Input::Keys(keys) = i else {
                 self.0.with_bus(|bus| give(bus, &i));
+                self.drain(mouse_pending);
                 return;
             };
             for chunk in keys.chunks(CHUNK) {
                 self.0.with_bus(|bus| type_in(bus, chunk));
-                let limit = Instant::now() + Duration::from_secs(2);
-                while self.0.with_bus(keys_pending) > 0 && Instant::now() < limit {
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                std::thread::sleep(GAP);
+                self.drain(keys_pending);
             }
         }
 
