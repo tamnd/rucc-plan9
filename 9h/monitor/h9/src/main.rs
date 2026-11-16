@@ -62,9 +62,9 @@ const USAGE: &str = "usage:
       seconds with exit status 2. --script FILE drives the console with the steps of FILE: wait
       TEXT, send TEXT, timeout SECS, pause SECS, mouse X Y [BUTTONS], click X Y [BUTTON], quiet [MS] [SECS], snap FILE [X0 Y0 X1 Y1] and quit. The script owns the input, so the monitor does
       not read its own. The exit status is 0 when the script passes and 3 when it fails.
-      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click, pause, quiet and snap, one line each. The monitor answers each line with ok or error. --headless opens no window. On macOS on arm64, a 9h session with a screen shows the screen
-      in a window, which gives the keyboard and the mouse of the host to the machine. On other
-      hosts, each session is headless. The 9h machine has a screen of --screen WxH, 1024x768 by default, in the RAM of the
+      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click, pause, quiet and snap, one line each. The monitor answers each line with ok or error. --headless opens no window. On macOS on arm64, and on Linux when DISPLAY is set, a 9h
+      session with a screen shows the screen in a window, which gives the keyboard and the mouse of the host to the machine. On
+      Linux, the window is an X11 window. With no DISPLAY, a session on Linux is headless. The 9h machine has a screen of --screen WxH, 1024x768 by default, in the RAM of the
       guest. With --screen none, the machine has no screen, so the profile of the guest does not start rio. --snap FILE writes the screen as a PNG file at the end of the session.
       On amd64, FILE is a 6l kernel with a multiboot header (9pc64). The machine is a PC with
       RAM from address 0, the APICs, the 8259s and the 8254 of KVM, a CMOS clock, the PCI
@@ -501,9 +501,11 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         Some(p) => Some(Control::bind(p)?),
         None => None,
     };
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let (false, Machine::H9, Some((w, h))) = (o.headless, o.machine, o.screen) {
-        // AppKit runs on the main thread, so the machine runs on a thread of its own.
+    if let (false, Machine::H9, Some((w, h)), true) =
+        (o.headless, o.machine, o.screen, h9_gui::available())
+    {
+        // AppKit runs on the main thread, so the machine runs on a thread of its own. The X11
+        // back end does the same.
         let window = Arc::new(backend::Window::default());
         let session = Session {
             script,
@@ -530,7 +532,6 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         script,
         snap: o.snap.clone(),
         control,
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         window: None,
     };
     backend::run(ram, bus, o.cpus as usize, entry, x0, session)
@@ -723,7 +724,6 @@ struct Session {
     /// The socket of `--control`.
     control: Option<Control>,
     /// The host window, which gets the machine when the machine is made.
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     window: Option<Arc<backend::Window>>,
 }
 
@@ -817,14 +817,12 @@ mod backend {
     }
 
     /// The host of the window (`h9-gui`): the screen, the keyboard and the mouse of the machine.
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[derive(Default)]
     pub struct Window {
         pub machine: std::sync::OnceLock<Arc<Machine>>,
         done: std::sync::atomic::AtomicBool,
     }
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     impl Window {
         /// The session ended: the window closes.
         pub fn end(&self) {
@@ -832,7 +830,6 @@ mod backend {
         }
     }
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     impl h9_gui::Host for Window {
         fn frame(&self, generation: &mut u64, pixels: &mut Vec<u32>) -> Option<(u32, u32)> {
             self.machine.get()?.with_bus(|bus| {
@@ -908,22 +905,14 @@ mod backend {
         x0: u64,
         session: Session,
     ) -> Result<ExitCode, String> {
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         let Session {
             script,
             snap,
             control,
             window,
         } = session;
-        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-        let Session {
-            script,
-            snap,
-            control,
-        } = session;
         let vm = Vm::new(ram, bus, ncpu)?;
         let m = vm.machine();
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         if let Some(w) = &window {
             let _ = w.machine.set(vm.machine());
         }
@@ -1000,6 +989,26 @@ mod backend {
     use h9_vm::Ram;
     use std::process::ExitCode;
     use std::sync::Arc;
+
+    /// These hosts have no window, and `h9_gui::available` is false.
+    #[derive(Default)]
+    pub struct Window;
+
+    impl Window {
+        pub const fn end(&self) {}
+    }
+
+    impl h9_gui::Host for Window {
+        fn frame(&self, _: &mut u64, _: &mut Vec<u32>) -> Option<(u32, u32)> {
+            None
+        }
+        fn mouse(&self, _: u16, _: u16, _: u8) {}
+        fn keys(&self, _: &[u8]) {}
+        fn quit(&self) {}
+        fn done(&self) -> bool {
+            true
+        }
+    }
 
     pub fn run(
         _: Arc<Ram>,

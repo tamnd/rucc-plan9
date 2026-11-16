@@ -1,6 +1,7 @@
 //! The host window of the 9h machine (plan 11). The window shows the screen of the machine, and
 //! it gives the keyboard and the mouse of the host to the machine. The back end of macOS on arm64
-//! is `AppKit` (`cocoa.rs`). Linux has no back end yet, so a session on Linux is headless.
+//! is `AppKit` (`cocoa.rs`). The back end of Linux is X11 (`x11.rs`), when `DISPLAY` is set.
+//! With no `DISPLAY`, a session on Linux is headless.
 //!
 //! The monitor gives the window a `Host`. The window calls it on the main thread of the
 //! process, 60 times a second for the screen and once for each input event.
@@ -11,6 +12,9 @@
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod cocoa;
+#[cfg(unix)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod x11;
 
 /// What the window needs from the monitor.
 pub trait Host: Send + Sync {
@@ -40,16 +44,32 @@ pub fn run(
     cocoa::run(title, width, height, host)
 }
 
-/// Linux has no window back end yet.
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-pub fn run(_: &str, _: u32, _: u32, _: std::sync::Arc<dyn Host>) -> Result<(), String> {
-    Err("this host has no window back end yet; use --headless".into())
+/// Show a window on the X11 display of `DISPLAY`, as [`run`] does on macOS.
+#[cfg(target_os = "linux")]
+#[allow(clippy::needless_pass_by_value)] // The same signature as the run of macOS.
+pub fn run(
+    title: &str,
+    width: u32,
+    height: u32,
+    host: std::sync::Arc<dyn Host>,
+) -> Result<(), String> {
+    x11::run(title, width, height, &*host)
 }
 
-/// True when the host has a window back end.
+/// The other hosts have no window back end.
+#[cfg(not(any(target_os = "linux", all(target_os = "macos", target_arch = "aarch64"))))]
+pub fn run(_: &str, _: u32, _: u32, _: std::sync::Arc<dyn Host>) -> Result<(), String> {
+    Err("this host has no window back end; use --headless".into())
+}
+
+/// True when the host has a window back end: on macOS on arm64, and on Linux when `DISPLAY`
+/// is set.
 #[must_use]
-pub const fn available() -> bool {
-    cfg!(all(target_os = "macos", target_arch = "aarch64"))
+pub fn available() -> bool {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return true;
+    }
+    cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
 }
 
 /// The runes of `keyboard.h` for the keys that have no character.
