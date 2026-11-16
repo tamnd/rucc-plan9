@@ -4,9 +4,10 @@
 //! console driver.
 //!
 //! The root image is never written. Each boot writes to a copy in the work directory, which is a
-//! clone on a file system that can clone a file. A qcow2 image becomes a raw copy through
-//! `qemu-img convert`, because the monitor reads raw disks only. The copy is removed after the
-//! boot unless `--keep` is given. The console goes to `console.log`, the command of the monitor
+//! clone on a file system that can clone a file. The monitor reads raw disks only, so a qcow2
+//! image becomes a raw image through `qemu-img convert` one time. The raw image stays next to the
+//! qcow2 image, with the name of the qcow2 image and `.raw`, and each later boot clones it. The
+//! copy is removed after the boot unless `--keep` is given. The console goes to `console.log`, the command of the monitor
 //! to `9h.cmd`, and the commands and their results to `steps.json`.
 
 use crate::boot::{self, Outcome};
@@ -71,25 +72,54 @@ fn is_qcow2(path: &Path) -> Result<bool, String> {
     Ok(f.read_exact(&mut magic).is_ok() && magic == *b"QFI\xfb")
 }
 
+/// The raw image of the qcow2 image `root`, next to it.
+#[must_use]
+pub fn raw_of(root: &Path) -> PathBuf {
+    let mut name = root.file_name().unwrap_or_default().to_os_string();
+    name.push(".raw");
+    root.with_file_name(name)
+}
+
+/// Make the raw image of the qcow2 image `root`, unless a raw image that is newer than `root` is
+/// there. `qemu-img` writes to a temporary file, and the file gets its name only when it is
+/// complete, so a stopped conversion does not leave a bad raw image.
+fn make_raw(root: &Path) -> Result<PathBuf, String> {
+    let raw = raw_of(root);
+    let time = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    if let (Some(r), Some(q)) = (time(&raw), time(root))
+        && r >= q
+    {
+        return Ok(raw);
+    }
+    let mut tmp = raw.clone().into_os_string();
+    tmp.push(format!(".{}", std::process::id()));
+    let tmp = PathBuf::from(tmp);
+    let status = Command::new("qemu-img")
+        .args(["convert", "-O", "raw"])
+        .arg(root)
+        .arg(&tmp)
+        .status()
+        .map_err(|e| format!("cannot run qemu-img: {e}"))?;
+    if !status.success() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("qemu-img could not convert {}", root.display()));
+    }
+    std::fs::rename(&tmp, &raw).map_err(|e| format!("cannot rename {}: {e}", tmp.display()))?;
+    Ok(raw)
+}
+
 /// Make the copy of the root image that the boot writes to.
 fn copy_root(root: &Path, copy: &Path) -> Result<(), String> {
     let _ = std::fs::remove_file(copy);
-    if is_qcow2(root)? {
-        let status = Command::new("qemu-img")
-            .args(["convert", "-O", "raw"])
-            .arg(root)
-            .arg(copy)
-            .status()
-            .map_err(|e| format!("cannot run qemu-img: {e}"))?;
-        if !status.success() {
-            return Err(format!("qemu-img could not convert {}", root.display()));
-        }
-        return Ok(());
-    }
+    let raw = if is_qcow2(root)? {
+        make_raw(root)?
+    } else {
+        root.to_path_buf()
+    };
     // std::fs::copy clones the file on APFS and on Btrfs, so a big image costs no space.
-    std::fs::copy(root, copy)
+    std::fs::copy(&raw, copy)
         .map(|_| ())
-        .map_err(|e| format!("cannot copy {}: {e}", root.display()))
+        .map_err(|e| format!("cannot copy {}: {e}", raw.display()))
 }
 
 /// The command of the monitor. `disks` are the raw tar disks, after the root disk and `disk`.
@@ -362,6 +392,14 @@ mod tests {
             strict: true,
             snap: None,
         }
+    }
+
+    #[test]
+    fn a_qcow2_image_has_its_raw_image_next_to_it() {
+        assert_eq!(
+            raw_of(Path::new("/c/images/g-base-1.arm64.qcow2")),
+            Path::new("/c/images/g-base-1.arm64.qcow2.raw")
+        );
     }
 
     #[test]
