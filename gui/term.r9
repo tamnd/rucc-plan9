@@ -1,0 +1,13 @@
+# An rc window prints 12 lines, and then reads a line. A drag with button 1 selects text. This script tests r9 gui itself.
+class exact
+window 600x300
+run seq 12; read
+quiet
+snap text
+drag 1 20,8 60,50
+quiet
+snap select
+# Typed text goes to the selection, and the selection is before the output point. Thus a click below the text puts the selection at the end, and then the newline gets to read.
+mouse 1 at 300,250
+quiet
+exit "\n"

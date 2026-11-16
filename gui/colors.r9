@@ -1,0 +1,14 @@
+# colors shows the 256 colours of the colour map. A click with button 1 on a colour shows its values at the top left. The exit item of the menu of button 3 stops it.
+class exact
+window 400x400
+run colors
+quiet
+snap map
+# Rio can use the first click in a new window to make the window current, and then colors does not get it. Thus the script clicks the same colour two times, and the image is the same in both cases. The point 100,100 is in a cell, and 200,200 is on a line between cells.
+mouse 1 at 100,100
+quiet
+mouse 1 at 100,100
+quiet
+snap value
+mouse 3 at 200,200
+exit none

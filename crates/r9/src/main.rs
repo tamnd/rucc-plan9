@@ -340,6 +340,7 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         "9h" => run_9h(args),
+        "gui" => run_gui(args),
         "tree-diff" => tree_diff(args),
         "objdiff" => run_objdiff(args),
         "sdiff" => run_sdiff(args),
@@ -388,6 +389,74 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         other => Err(format!("unknown command {other}; see r9 help")),
+    }
+}
+
+/// `r9 gui run` and `r9 gui compare`.
+fn run_gui(args: &Args) -> Result<ExitCode, String> {
+    use std::path::{Path, PathBuf};
+    let path = |k: &str| {
+        args.get(k)
+            .map(PathBuf::from)
+            .ok_or_else(|| format!("give --{k}"))
+    };
+    match args.target.as_deref() {
+        Some("run") => {
+            let repo = Repo::find()?;
+            let script = path("script")?;
+            let name = script
+                .file_stem()
+                .map_or_else(|| "gui".into(), |s| s.to_string_lossy().to_string());
+            let out = args.get("out").map_or_else(
+                || repo.root.join("work").join("gui").join(&name),
+                PathBuf::from,
+            );
+            let mut req = r9::h9boot::request_from(&repo, args, false)?;
+            req.work.clone_from(&out);
+            req.snap = Some(out.join("screen.png"));
+            if args.get("timeout").is_none() {
+                req.timeout = std::time::Duration::from_secs(600);
+            }
+            let record = r9::gui::run(&req, &script)?;
+            for s in &record.snaps {
+                println!("{} {}", s.sha256, s.name);
+            }
+            match &record.failure {
+                None => {
+                    println!("PASS {} in {}", script.display(), out.display());
+                    Ok(ExitCode::SUCCESS)
+                }
+                Some(f) => {
+                    println!("FAIL {}: {f}", script.display());
+                    Ok(ExitCode::FAILURE)
+                }
+            }
+        }
+        Some("compare") => {
+            let (want, got) = (path("want")?, path("got")?);
+            let diff = args
+                .get("diff")
+                .map_or_else(|| got.join("diff"), PathBuf::from);
+            match r9::gui::compare(Path::new(&want), Path::new(&got), &diff)? {
+                None => {
+                    println!("SAME {} {}", want.display(), got.display());
+                    Ok(ExitCode::SUCCESS)
+                }
+                Some(d) => {
+                    print!("DIFFERENT at snap {:?}: {}", d.snap, d.what);
+                    if d.pixels > 0 {
+                        print!(", {} pixels", d.pixels);
+                    }
+                    if let Some([x0, y0, x1, y1]) = d.bounds {
+                        print!(" in {x0},{y0} to {x1},{y1}; see {}", diff.display());
+                    }
+                    println!();
+                    Ok(ExitCode::FAILURE)
+                }
+            }
+        }
+        Some(w) => Err(format!("gui {w}: the gui commands are: run and compare")),
+        None => Err("give a gui command: run or compare".into()),
     }
 }
 

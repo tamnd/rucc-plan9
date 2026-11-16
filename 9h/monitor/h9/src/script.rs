@@ -305,20 +305,40 @@ impl<W: std::io::Write> std::io::Write for Tee<W> {
     }
 }
 
+/// The console output for the `wait` steps of the control socket: the transcript, the position
+/// after the last match, and the time that each `wait` can take.
+pub struct Watch {
+    log: Transcript,
+    seen: usize,
+    timeout: Duration,
+}
+
+impl Watch {
+    /// A watch of `log` from its start, with the default timeout.
+    #[must_use]
+    pub fn new(log: Transcript) -> Watch {
+        Watch {
+            log,
+            seen: 0,
+            timeout: TIMEOUT,
+        }
+    }
+}
+
 /// Do one line that a host program wrote on the socket of `--control`, and give the reply: `ok`,
 /// or `error: ` and the reason. The line has the steps `send`, `mouse`, `click`, `pause`, `quiet`
-/// and `snap` only, because the console output does not go to the socket. The monitor does all the steps of the
-/// line before it replies, so a program that waits for the reply knows that the input is in the
-/// machine.
-pub fn control(line: &str, t: &mut impl Target) -> String {
+/// and `snap`, and `wait` and `timeout` when `watch` has the console output. The monitor does all
+/// the steps of the line before it replies, so a program that waits for the reply knows that the
+/// input is in the machine.
+pub fn control(line: &str, t: &mut impl Target, mut watch: Option<&mut Watch>) -> String {
     let steps = match parse(line) {
         Ok(s) => s,
         Err(e) => return format!("error: {}", e.trim_start_matches("line 1: ")),
     };
-    if steps
-        .iter()
-        .any(|(_, s)| matches!(s, Step::Wait(_) | Step::Timeout(_) | Step::Quit))
-    {
+    let console = watch.is_some();
+    if steps.iter().any(|(_, s)| {
+        matches!(s, Step::Quit) || !console && matches!(s, Step::Wait(_) | Step::Timeout(_))
+    }) {
         return format!(
             "error: {:?} is not a step of the control socket",
             line.trim()
@@ -340,7 +360,27 @@ pub fn control(line: &str, t: &mut impl Target) -> String {
             }
             Step::Quiet(still, limit, r) => quiet(t, *still, *limit, *r),
             Step::Snap(f, r) => t.snap(f, *r),
-            Step::Wait(_) | Step::Timeout(_) | Step::Quit => Ok(()),
+            Step::Wait(text) => match watch.as_deref_mut() {
+                Some(w) => match w.log.find(text, w.seen, Instant::now() + w.timeout) {
+                    Some(at) => {
+                        w.seen = at;
+                        Ok(())
+                    }
+                    None => Err(format!(
+                        "the console did not write {:?} before the timeout of {} s",
+                        String::from_utf8_lossy(text),
+                        w.timeout.as_secs()
+                    )),
+                },
+                None => Ok(()),
+            },
+            Step::Timeout(d) => {
+                if let Some(w) = watch.as_deref_mut() {
+                    w.timeout = *d;
+                }
+                Ok(())
+            }
+            Step::Quit => Ok(()),
         };
         if let Err(e) = r {
             return format!("error: {e}");
@@ -552,9 +592,9 @@ mod tests {
             reads: 0,
             snaps: Vec::new(),
         };
-        assert_eq!(control("quiet 30 5", &mut s), "ok");
+        assert_eq!(control("quiet 30 5", &mut s, None), "ok");
         assert!(s.reads > 5, "quiet reads until the screen stops");
-        assert_eq!(control("snap a.png 0 0 8 8", &mut s), "ok");
+        assert_eq!(control("snap a.png 0 0 8 8", &mut s, None), "ok");
         assert_eq!(s.snaps, vec![("a.png".to_string(), Some([0, 0, 8, 8]))]);
 
         let mut busy = Screen {
@@ -562,12 +602,12 @@ mod tests {
             reads: 0,
             snaps: Vec::new(),
         };
-        let r = control("quiet 50 0", &mut busy);
+        let r = control("quiet 50 0", &mut busy, None);
         assert!(r.contains("did not stay the same"), "{r}");
 
         let mut none = |_: Input| {};
-        assert!(control("quiet", &mut none).contains("no screen"));
-        assert!(control("snap a.png", &mut none).contains("no screen"));
+        assert!(control("quiet", &mut none, None).contains("no screen"));
+        assert!(control("snap a.png", &mut none, None).contains("no screen"));
     }
 
     #[test]
@@ -579,13 +619,21 @@ mod tests {
                 Input::Mouse(x, y, b) => format!("mouse {x} {y} {b}"),
             });
         };
-        assert_eq!(control("click 300 300", &mut give), "ok");
-        assert_eq!(control("send \"ls\\n\"", &mut give), "ok");
-        assert_eq!(control("pause 0", &mut give), "ok");
-        assert!(control("wait term%", &mut give).starts_with("error: "));
-        assert!(control("quit", &mut give).starts_with("error: "));
+        assert_eq!(control("click 300 300", &mut give, None), "ok");
+        assert_eq!(control("send \"ls\\n\"", &mut give, None), "ok");
+        assert_eq!(control("pause 0", &mut give, None), "ok");
+        assert!(control("wait term%", &mut give, None).starts_with("error: "));
+        assert!(control("quit", &mut give, None).starts_with("error: "));
+        let log = Transcript::default();
+        let mut w = super::Watch::new(log.clone());
+        log.add(b"R9-GUI-EXIT 1\nR9-GUI-EXIT \n");
+        assert_eq!(control("wait R9-GUI-EXIT", &mut give, Some(&mut w)), "ok");
+        assert_eq!(control("wait R9-GUI-EXIT", &mut give, Some(&mut w)), "ok");
+        assert_eq!(control("timeout 0", &mut give, Some(&mut w)), "ok");
+        let r = control("wait R9-GUI-EXIT", &mut give, Some(&mut w));
+        assert!(r.contains("before the timeout of 0 s"), "{r}");
         assert_eq!(
-            control("mouse 1", &mut give),
+            control("mouse 1", &mut give, None),
             "error: give mouse X Y and a button number"
         );
         assert_eq!(

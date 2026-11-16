@@ -1,0 +1,7 @@
+# fplot draws the graphs of two functions in the range -4 to 4. The key q stops it.
+class exact
+window 500x400
+run fplot -r '-4 4 -2 2' 'sin(x)' 'x*x/4-1'
+quiet
+snap graph
+exit "q"
