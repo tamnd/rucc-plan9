@@ -84,6 +84,7 @@ The monitor builds the machine the tree's `arm64` code already knows: QEMU's `vi
 - The generic timer is the guest's own virtual timer. When it fires, `hv_vcpu_run` returns `HV_EXIT_REASON_VTIMER_ACTIVATED`. The monitor asserts the timer's PPI in the GIC and unmasks the timer when the guest acknowledges it.
 - `HVC #0` from EL1 exits as an exception with class `0x16`. That is the hypercall path (10.5), and PSCI uses it too.
 - To interrupt a running vCPU for a device interrupt, the monitor calls `hv_vcpus_exit`, injects the interrupt and resumes.
+- The framework has no exit for a vCPU that spins. `lock` in `port/taslock.c` reads the lock word in a loop with no `WFE`, so the monitor does not see the spin. When the host is very busy, the host thread of the vCPU that holds a lock can wait for a long time, and the other vCPUs spin during that time. After 100,000,000 tries, `lock` prints `lock ... loop key ... held by pc ...` on the console and then tries again. In one run of `gui/crop.r9` at a host load of about 70, the kernel printed this line 14 times for the lock of `allocasid` in `mmu.c`, and the run then continued normally. The next run of the same script at a lower load printed no such line. Thus the line shows a busy host. It does not show a fault in the kernel.
 
 ### 10.3.1 First boot on the M4
 
