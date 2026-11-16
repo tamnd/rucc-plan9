@@ -65,6 +65,12 @@ impl Pl011 {
         self.rx.push_back(b);
         self.ris |= RXI | RTI;
     }
+
+    /// The number of bytes from the host that the guest did not read yet.
+    #[must_use]
+    pub fn pending(&self) -> usize {
+        self.rx.len()
+    }
 }
 
 impl super::Device for Pl011 {
