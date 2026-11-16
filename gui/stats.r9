@@ -1,0 +1,7 @@
+# stats shows graphs of the load, the memory and the context switches of the machine. The graphs change with time, so the script is a smoke test. The key q stops it.
+class smoke
+window 400x300
+run stats -lmc
+pause 3
+snap open
+exit "q"

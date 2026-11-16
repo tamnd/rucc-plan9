@@ -1,0 +1,10 @@
+# games/mines puts the mines at random, with the time as the seed. The script sets the clock of the machine to 2026-01-01 00:00 UTC first, so the field is the same each time. A click with button 1 opens a square. The key q stops it.
+class exact
+window 400x400
+run echo 1767225600 > /dev/time; games/mines
+quiet
+snap open
+mouse 1 at 200,200
+quiet
+snap click
+exit "q"

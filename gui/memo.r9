@@ -1,0 +1,11 @@
+# games/memo is a memory game with pairs of faces. It puts the faces at random, with the time as the seed. The script sets the clock of the machine to 2026-01-01 00:00 UTC first, so the faces are the same each time. memo makes its window 225x225 for 16 faces, so the script uses this size. memo shows the faces until the first click, and then hides them. The menu of button 3 has the items restart, easy, hard and exit, and opens with restart under the mouse, so the drag goes down three items to exit.
+class exact
+window 225x225
+run echo 1767225600 > /dev/time; games/memo
+quiet
+snap open
+mouse 1 at 112,112
+quiet
+snap hidden
+drag 3 112,112 112,166
+exit none

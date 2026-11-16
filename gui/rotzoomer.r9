@@ -1,0 +1,7 @@
+# games/rotzoomer turns and zooms an image all the time, so the script is a smoke test. The key q stops it.
+class smoke
+window 400x300
+run games/rotzoomer
+pause 2
+snap open
+exit "q"

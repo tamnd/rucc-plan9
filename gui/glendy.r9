@@ -1,0 +1,8 @@
+# games/glendy is a game in which the player puts walls on a grid to catch glenda. It puts the first walls at random, with the time as the seed. The script sets the clock of the machine to 2026-01-01 00:00 UTC first, so the grid is the same each time. The menu of button 3 has the items New, Reset and Exit, and opens with New under the mouse, so the drag goes down two items to Exit.
+class exact
+window 600x500
+run echo 1767225600 > /dev/time; games/glendy
+quiet
+snap open
+drag 3 300,250 300,282
+exit none

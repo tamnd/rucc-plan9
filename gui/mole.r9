@@ -1,0 +1,7 @@
+# games/mole draws a path at random, so the script is a smoke test. The key q stops it.
+class smoke
+window 400x300
+run games/mole
+pause 2
+snap open
+exit "q"

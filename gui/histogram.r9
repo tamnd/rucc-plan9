@@ -1,0 +1,7 @@
+# histogram draws a graph of the numbers that it reads. The script gives it 100 numbers. With -h, it stays after the end of the input. The key Del stops it.
+class exact
+window 400x200
+run seq 1 100 | histogram -h
+quiet
+snap open
+exit Del

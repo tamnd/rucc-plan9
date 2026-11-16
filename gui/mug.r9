@@ -1,0 +1,8 @@
+# mug makes a face of 48 by 48 pixels from an image. The script makes a Plan 9 image from a JPEG file with jpg -9. The fifth item of the menu of button 3, Exit, stops it. The menu opens with the third item, Undo, under the mouse, so the drag goes down two items. After a move in an empty part of the window, mug reads the next mouse event and discards it, so the drag starts in the image at the top right, where mug does not do this.
+class exact
+window 600x400
+run jpg -9 /sys/src/cmd/gs/jpeg/testprog.jpg > /tmp/r9gui.bit; mug /tmp/r9gui.bit
+quiet
+snap open
+drag 3 380,80 380,112
+exit none

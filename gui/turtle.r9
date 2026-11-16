@@ -1,0 +1,7 @@
+# games/turtle reads turtle commands and draws the path. The script draws a square. The key q stops it.
+class exact
+window 400x400
+run {echo draw 100; echo turn 90; echo draw 100; echo turn 90; echo draw 100; echo turn 90; echo draw 100; echo end} | games/turtle
+quiet
+snap square
+exit "q"

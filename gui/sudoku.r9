@@ -1,0 +1,7 @@
+# games/sudoku makes a puzzle at random, with the time and the process id as the seed. The script sets the clock of the machine first, but the process id can change, so the script is a smoke test. The key q stops it.
+class smoke
+window 500x500
+run echo 1767225600 > /dev/time; games/sudoku
+quiet
+snap open
+exit "q"

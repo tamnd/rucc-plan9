@@ -1,0 +1,11 @@
+# vt is a terminal emulator that runs rc. The script runs echo in it. The sixth item of the menu of button 3, exit, stops it. The menu opens with the first item under the mouse, and each item is 18 pixels high, so the drag goes down 90 pixels. The command exit of rc does not do, because the console session of the machine gives rc a function exit that halts the file system.
+class exact
+window 500x300
+run vt
+quiet
+snap open
+keys "echo hello\n"
+quiet
+snap echo
+drag 3 250,100 250,190
+exit none
