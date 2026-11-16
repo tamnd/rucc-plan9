@@ -289,7 +289,7 @@ impl Keymap {
 /// The rune of `keyboard.h` for `keysym` with the modifiers of `state`, or None for a key that
 /// gives nothing, such as Shift.
 #[must_use]
-fn keysym_rune(keysym: u32, state: u16) -> Option<u32> {
+pub(crate) fn keysym_rune(keysym: u32, state: u16) -> Option<u32> {
     let r = match keysym {
         0x20..=0x7e | 0xa0..=0xff => keysym,
         0x0100_0000..=0x0110_ffff => keysym - 0x0100_0000,

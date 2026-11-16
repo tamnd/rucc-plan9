@@ -42,6 +42,9 @@ dependencies = [
 [[package]]
 name = "h9-gui"
 version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "h9-hvf"
