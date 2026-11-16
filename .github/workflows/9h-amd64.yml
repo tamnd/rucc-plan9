@@ -1,14 +1,15 @@
 # The 9h kernel for amd64 on KVM (plan 10.4 and 10.8). The hosted runners have KVM.
 #
-# The job makes the g-base image of the pinned tree, as g-base.yml does. r9 build --side G with
-# the target 9h.amd64 then builds the 9h kernel in the guest with the compilers of the tree. r9
-# 9h verify checks the sources of the build against sys/src/9 of the pin. The job builds the 9h
+# The job makes the g-base image of the pinned tree, as g-base.yml does. r9 build --side G with the
+# target 9h.amd64 then builds the 9h kernel in the guest with the compilers of the tree. r9 9h
+# verify checks the sources of the build against sys/src/9 of the pin. The job builds the 9h
 # monitor, and r9 9h boot boots the kernel on the g-base image and runs smoke/boot.rc on its
-# console. The monitor logs each port and address with no device that the kernel used. A second
-# boot with --strict stops the machine at the first such access. r9 9h smoke --snap boots the
-# kernel with a screen on 4 processors, starts rio, and runs the smoke suite in the console
-# window. The console logs, the steps, the logs of the monitor, the screen, the compile records
-# and the kernel go to an artifact.
+# console. The monitor logs each port and address with no device that the kernel used. A second boot
+# with --strict stops the machine at the first such access. r9 9h smoke --snap boots the kernel with
+# a screen on 4 processors, starts rio, and runs the smoke suite in the console window. r9 hostcheck
+# boots the kernel in a window of Xvfb, gives keys, clicks and clipboard text to the window with
+# xdotool and xclip, and checks what a probe in the guest gets. The console logs, the steps, the
+# logs of the monitor, the screen, the compile records and the kernel go to an artifact.
 
 name: 9h amd64
 
@@ -21,6 +22,8 @@ on:
       - crates/r9/src/h9boot.rs
       - crates/r9/src/boot.rs
       - crates/r9/src/image.rs
+      - crates/r9/src/hostcheck.rs
+      - guest/probe/**
       - smoke/boot.rc
       - .github/workflows/9h-amd64.yml
   workflow_dispatch:
@@ -88,15 +91,23 @@ jobs:
         run: |
           root=$(ls /mnt/r9/images/g-base-*.amd64.qcow2 | head -1)
           target/release/r9 9h smoke --kernel "$RUNNER_TEMP/k/collected/9h/amd64/99h" --root "$root" --cpus 4 --snap "$RUNNER_TEMP/rio/screen.png" --timeout 900 --out "$RUNNER_TEMP/rio"
+      - name: r9 hostcheck on Xvfb
+        run: |
+          sudo apt-get install -qy --no-install-recommends xvfb xdotool xclip
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &
+          export DISPLAY=:99
+          root=$(ls /mnt/r9/images/g-base-*.amd64.qcow2 | head -1)
+          target/release/r9 hostcheck --kernel "$RUNNER_TEMP/k/collected/9h/amd64/99h" --root "$root" --host x11 --out "$RUNNER_TEMP/hc"
       - name: gather the results
         if: always()
         run: |
-          mkdir -p "$RUNNER_TEMP/out/k" "$RUNNER_TEMP/out/boot" "$RUNNER_TEMP/out/strict" "$RUNNER_TEMP/out/rio"
+          mkdir -p "$RUNNER_TEMP/out/k" "$RUNNER_TEMP/out/boot" "$RUNNER_TEMP/out/strict" "$RUNNER_TEMP/out/rio" "$RUNNER_TEMP/out/hc"
           cp "$RUNNER_TEMP/k"/*.toml "$RUNNER_TEMP/k"/console.log "$RUNNER_TEMP/out/k/" || true
           cp "$RUNNER_TEMP/k/collected/mk.log" "$RUNNER_TEMP/k/collected/compile.jsonl" "$RUNNER_TEMP/out/k/" || true
           cp -r "$RUNNER_TEMP/k/collected/9h" "$RUNNER_TEMP/out/k/" || true
           cp "$RUNNER_TEMP/rio/screen.png" "$RUNNER_TEMP/out/rio/" || true
-          for d in boot strict rio; do
+          cp "$RUNNER_TEMP/hc/hostcheck.json" "$RUNNER_TEMP/hc/screen.png" "$RUNNER_TEMP/out/hc/" || true
+          for d in boot strict rio hc; do
             cp "$RUNNER_TEMP/$d"/console.log "$RUNNER_TEMP/$d"/steps.json "$RUNNER_TEMP/$d"/9h.cmd "$RUNNER_TEMP/$d"/9h.stderr "$RUNNER_TEMP/out/$d/" || true
           done
       - uses: actions/upload-artifact@v7.0.1

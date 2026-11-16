@@ -124,6 +124,8 @@ On the host, `r9 fetch` keeps each tree as a bare git repository. `r9 image sync
 
 A small probe program in the guest records what it receives: `/dev/kbd` runes, `/dev/mouse` events, `/dev/snarf` contents and `/dev/audio` writes. The probe is test rig, not a claim program.
 
+**Status.** The first version of `r9 hostcheck` is done. It boots the kernel with `--snarf host` and with its screen in a window of the host. In the console window of `rio`, it starts the probe of `guest/probe` in a window that covers the screen. The probe is built in the guest with the compilers of the tree. It writes a line to the kernel console for each message of `/dev/kbd`, for each change of the buttons in `/dev/mouse`, and for each read and write of `/dev/snarf`. Then a driver gives the input, and `r9` compares the lines of the probe with the input. The checks are: each key of the US layout with and without Shift, a modifier change, Control, the key ups, button 1 at points near the four corners and at the centre, buttons 2 and 3, the wheel, a host copy that `rio` reads from `/dev/snarf`, and a write to `/dev/snarf` that goes to the host clipboard. The `x11` driver gives the input with XTest through `xdotool` and uses `xclip`, and the job `9h amd64` runs it on Xvfb. The `control` driver gives the input on the control socket of the monitor, so it checks only the probe, the guest and `r9`. The macOS driver with `CGEventPost`, the Wayland driver, the layouts, compose, the scale 2, the warp, the `acme` chord, the resize, the audio capture and the quit come later.
+
 | Check | macOS (M4) | Linux X11 (gpc) | Linux Wayland (gpc) |
 |---|---|---|---|
 | Each ASCII key, with and without Shift, gives the right rune | yes | yes | yes |

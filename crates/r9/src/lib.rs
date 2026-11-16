@@ -23,6 +23,7 @@ pub mod gui;
 pub mod h9boot;
 pub mod h9verify;
 pub mod helpers;
+pub mod hostcheck;
 pub mod image;
 pub mod locate;
 pub mod mix;

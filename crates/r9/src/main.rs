@@ -341,6 +341,7 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
         }
         "9h" => run_9h(args),
         "gui" => run_gui(args),
+        "hostcheck" => run_hostcheck(args),
         "tree-diff" => tree_diff(args),
         "objdiff" => run_objdiff(args),
         "sdiff" => run_sdiff(args),
@@ -389,6 +390,36 @@ fn run_records(args: &Args) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         other => Err(format!("unknown command {other}; see r9 help")),
+    }
+}
+
+/// `r9 hostcheck`.
+fn run_hostcheck(args: &Args) -> Result<ExitCode, String> {
+    let repo = Repo::find()?;
+    let out = args.get("out").map_or_else(
+        || repo.root.join("work").join("hostcheck"),
+        std::path::PathBuf::from,
+    );
+    let mut req = r9::h9boot::request_from(&repo, args, false)?;
+    req.work.clone_from(&out);
+    if args.get("timeout").is_none() {
+        req.timeout = std::time::Duration::from_secs(600);
+    }
+    let mut x11 = r9::hostcheck::X11::default();
+    let mut control = r9::hostcheck::Control::default();
+    let driver: &mut dyn r9::hostcheck::Driver = match args.get("host").unwrap_or("x11") {
+        "x11" => &mut x11,
+        "control" => &mut control,
+        h => return Err(format!("--host {h}: the hosts are x11 and control")),
+    };
+    let record = r9::hostcheck::run(&req, driver)?;
+    print!("{}", r9::hostcheck::report(&record));
+    if record.passed {
+        println!("PASS hostcheck {} in {}", record.host, out.display());
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("FAIL hostcheck {}; see {}", record.host, out.display());
+        Ok(ExitCode::FAILURE)
     }
 }
 
