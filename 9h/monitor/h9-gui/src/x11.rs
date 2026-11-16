@@ -725,6 +725,20 @@ pub fn run(title: &str, width: u32, height: u32, host: &dyn Host) -> Result<(), 
             let _ = c.destroy(win);
             return Ok(());
         }
+        // A frame is due even when the events do not stop, as in a drag of the mouse.
+        let now = Instant::now();
+        if now >= next {
+            if let Some((w, h)) = host.frame(&mut generation, &mut pixels) {
+                shown = Some((w, h));
+                input.w = w;
+                input.h = h;
+                c.put(win, gc, w, h, &pixels)?;
+            }
+            next += FRAME;
+            if next < now {
+                next = now + FRAME;
+            }
+        }
         match rx.recv_timeout(next.saturating_duration_since(Instant::now())) {
             Ok(Event::Key(code, state)) => {
                 let sym = input.keymap.keysym(code, state);
@@ -760,7 +774,6 @@ pub fn run(title: &str, width: u32, height: u32, host: &dyn Host) -> Result<(), 
                 }
             }
             Ok(Event::Close(atom)) if atom == delete => host.quit(),
-            Ok(Event::Close(_)) => {}
             Ok(Event::Error(code, request)) => {
                 eprintln!("9h: the X server gave error {code} for request {request}");
             }
@@ -768,19 +781,7 @@ pub fn run(title: &str, width: u32, height: u32, host: &dyn Host) -> Result<(), 
                 host.quit();
                 return Err("the X server closed the connection".into());
             }
-            Err(RecvTimeoutError::Timeout) => {
-                if let Some((w, h)) = host.frame(&mut generation, &mut pixels) {
-                    shown = Some((w, h));
-                    input.w = w;
-                    input.h = h;
-                    c.put(win, gc, w, h, &pixels)?;
-                }
-                next += FRAME;
-                let now = Instant::now();
-                if next < now {
-                    next = now + FRAME;
-                }
-            }
+            Ok(Event::Close(_)) | Err(RecvTimeoutError::Timeout) => {}
         }
     }
 }
