@@ -196,20 +196,6 @@ pub const fn irq_line(irq: u32) -> u32 {
     KVM_ARM_IRQ_TYPE_SPI << KVM_ARM_IRQ_TYPE_SHIFT | irq
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{PC, irq_line, x};
-
-    #[test]
-    fn the_register_ids_are_those_of_linux() {
-        // KVM_REG_ARM64 | KVM_REG_SIZE_U64 | KVM_REG_ARM_CORE | offset / 4.
-        assert_eq!(x(0), 0x6030_0000_0010_0000);
-        assert_eq!(x(5), 0x6030_0000_0010_000a);
-        assert_eq!(PC, 0x6030_0000_0010_0040);
-        assert_eq!(irq_line(48), 0x0100_0030);
-    }
-}
-
 /// The registers of a vCPU on one line, for `Machine::dump_regs`: the PC, the PSTATE, `SP_EL0`,
 /// `SP_EL1` and X0 to X30. A register that does not read gives `?`.
 pub fn regs_line(cpu: &VcpuFd) -> String {
@@ -225,4 +211,18 @@ pub fn regs_line(cpu: &VcpuFd) -> String {
         r(core(8 * 34)),
         xs.join(" ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PC, irq_line, x};
+
+    #[test]
+    fn the_register_ids_are_those_of_linux() {
+        // KVM_REG_ARM64 | KVM_REG_SIZE_U64 | KVM_REG_ARM_CORE | offset / 4.
+        assert_eq!(x(0), 0x6030_0000_0010_0000);
+        assert_eq!(x(5), 0x6030_0000_0010_000a);
+        assert_eq!(PC, 0x6030_0000_0010_0040);
+        assert_eq!(irq_line(48), 0x0100_0030);
+    }
 }
