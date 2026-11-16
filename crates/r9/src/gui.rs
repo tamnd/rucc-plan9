@@ -398,7 +398,11 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
 pub fn exit_status(console: &str) -> Option<String> {
     let at = console.rfind(EXIT_MARK)? + EXIT_MARK.len();
     let rest = &console[at..];
-    Some(rest[..rest.find('\n').unwrap_or(rest.len())].trim().to_string())
+    Some(
+        rest[..rest.find('\n').unwrap_or(rest.len())]
+            .trim()
+            .to_string(),
+    )
 }
 
 /// An image of 8-bit RGB pixels.
