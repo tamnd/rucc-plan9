@@ -14,10 +14,12 @@ pub mod h9cons;
 pub mod h9ctl;
 pub mod h9disk;
 pub mod h9fs;
+pub mod h9screen;
 pub mod h9snarf;
 pub mod pcinone;
 pub mod pl011;
 pub mod pl031;
+pub mod png;
 pub mod psci;
 
 use std::collections::BTreeMap;

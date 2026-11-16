@@ -47,6 +47,8 @@ pub struct Request {
     pub keep: bool,
     /// Stop the session at an access to an address with no device.
     pub strict: bool,
+    /// The PNG file for the screen at the end of the session.
+    pub snap: Option<PathBuf>,
 }
 
 /// The bootargs of the kernel: the console is the uart of 9h, which is `/dev/eia0`.
@@ -127,6 +129,15 @@ pub fn command(req: &Request, disks: &[PathBuf]) -> Vec<String> {
     if let Some(d) = &req.hostfs {
         c.push("--hostfs".into());
         c.push(format!("{},ro", d.display()));
+    }
+    // With a screen, the profile of the guest starts rio, and the commands run in the console
+    // window of rio. Only a session with --snap needs this.
+    if let Some(f) = &req.snap {
+        c.push("--snap".into());
+        c.push(f.display().to_string());
+    } else {
+        c.push("--screen".into());
+        c.push("none".into());
     }
     c
 }
@@ -270,6 +281,7 @@ pub fn request_from(
         work,
         keep: args.has("keep"),
         strict: args.has("strict"),
+        snap: args.get("snap").map(PathBuf::from),
     })
 }
 
@@ -295,6 +307,7 @@ mod tests {
             work: work.into(),
             keep: false,
             strict: true,
+            snap: None,
         }
     }
 
@@ -304,7 +317,15 @@ mod tests {
         assert_eq!(
             c,
             "/b/9h run --kernel /k/99h.u --cpus 2 --mem 2048 --snarf memory --headless \
-             --bootargs console=0 --disk /w/root.img --strict --disk /i/src.img,ro --disk /w/in.tar --hostfs /home/glenda,ro"
+             --bootargs console=0 --disk /w/root.img --strict --disk /i/src.img,ro --disk /w/in.tar --hostfs /home/glenda,ro \
+             --screen none"
+        );
+        let mut r = request(Path::new("/w"));
+        r.snap = Some("/w/screen.png".into());
+        assert!(
+            command(&r, &[])
+                .join(" ")
+                .ends_with(" --snap /w/screen.png")
         );
     }
 

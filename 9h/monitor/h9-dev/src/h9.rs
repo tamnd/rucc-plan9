@@ -42,6 +42,15 @@ pub const SNARF_PUT: u32 = 0xc600_0032;
 /// for a request that the monitor does not know.
 pub const CTL: u32 = 0xc600_0040;
 
+/// `H9screeninfo`: () returns the size of the screen, width | height<<16.
+pub const SCREEN_INFO: u32 = 0xc600_0050;
+/// `H9screenset`: (pa, width, height, chan) gives the framebuffer at pa, and returns 0, -2 when
+/// it is not in the RAM, or -3 when the size or the channel is not that of the screen.
+pub const SCREEN_SET: u32 = 0xc600_0051;
+/// `H9screenflush`: (min, max) tells the monitor that the rectangle changed, with x | y<<16 for
+/// each point, and returns 0.
+pub const SCREEN_FLUSH: u32 = 0xc600_0052;
+
 /// The largest snarf, 1 MiB.
 pub const SNARF_MAX: u64 = 1 << 20;
 /// The largest request of `H9ctl`.

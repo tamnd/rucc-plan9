@@ -21,6 +21,9 @@ enum {
 	H9snarfget	= 0xC6000031,	/* (pa, n, off) copies at most n bytes from off, returns the count */
 	H9snarfput	= 0xC6000032,	/* (pa, n) sets the host clipboard, returns n */
 	H9ctl		= 0xC6000040,	/* (pa, n) gives a text request, returns n */
+	H9screeninfo	= 0xC6000050,	/* () returns width | height<<16, or -1 */
+	H9screenset	= 0xC6000051,	/* (pa, width, height, chan) gives the framebuffer, returns 0 */
+	H9screenflush	= 0xC6000052,	/* (min, max) the rectangle changed, x | y<<16 each, returns 0 */
 
 	H9sdsecsize	= 512,		/* bytes in a sector */
 	H9sdmax	= 128,		/* the most sectors of one call */

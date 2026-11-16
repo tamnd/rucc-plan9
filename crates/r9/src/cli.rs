@@ -53,7 +53,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             positional: true,
             values: &[
                 "tree", "records", "row", "kernel", "root", "disk", "hostfs", "cpus", "mem",
-                "bootargs", "run", "in", "collect", "timeout", "out", "monitor",
+                "bootargs", "run", "in", "collect", "timeout", "out", "monitor", "snap",
             ],
             switches: &["keep", "strict"],
         },
@@ -302,15 +302,16 @@ usage:
   r9 9h verify [--tree DIR] [--records FILE] [--row OBJTYPE]
       Check that the 9h kernel uses the pinned tree with no change (plan 10.2). DIR is the root
       of the pinned tree on the host. With no --tree, the command writes sys/src/9 of the first
-      tree of pins.toml from the history clone in the cache to work/9h/verify. No file in 9h/OBJTYPE may have the name of a file in port,
-      in the arch directory, or in pc for amd64, and no device of the tree may use #Z. With
+      tree of pins.toml from the history clone in the cache to work/9h/verify. No file in
+      9h/OBJTYPE may have the name of a file in port, in the arch directory, or in pc for amd64,
+      and no device of the tree may use #Z. With
       --records, FILE is the compile.jsonl of the build. Each source in /sys/src/9 must then be
       a file of the tree with the hash of the pin, a file of 9h/OBJTYPE with its hash, or a file
       that the build made, as $CONF.c is. Each C file of 9h/OBJTYPE must be in the records.
       OBJTYPE is arm64 by default.
   r9 9h boot --kernel FILE --root IMAGE [--disk FILE] [--hostfs DIR] [--cpus N] [--mem MIB]
           [--bootargs TEXT] [--run FILE] [--in DIR|TAR] [--collect MIB] [--timeout SECS]
-          [--out DIR] [--monitor PATH] [--keep] [--strict]
+          [--out DIR] [--monitor PATH] [--keep] [--strict] [--snap FILE]
       Boot the 9h kernel FILE in the 9h monitor (plan 10.8), with a copy of IMAGE as sdH0, and
       run each command of FILE (smoke/boot.rc by default) at the shell prompt, as r9 boot does.
       IMAGE is raw or qcow2, and is never written. --disk adds a disk and --hostfs serves DIR on
@@ -319,7 +320,9 @@ usage:
       release build in 9h/monitor, or 9h on the path. The limit is 3600 seconds by default. The
       work goes to DIR (work/9h/boot by default), and the copy of IMAGE is removed after the boot
       unless --keep is given. --strict makes an access to an address with no device stop the
-      session, so that the boot fails.
+      session, so that the boot fails. The machine has a screen only with --snap, which
+      writes the screen as a PNG file at the end. With the screen, the profile of the guest starts
+      rio, and the commands run in the console window of rio.
   r9 9h smoke --kernel FILE --root IMAGE [the options of r9 9h boot]
       Run the smoke suite of plan 09.5 on the 9h kernel: r9 9h boot with smoke/suite.rc and the
       guest directory as the input. The work goes to work/9h/smoke by default.
