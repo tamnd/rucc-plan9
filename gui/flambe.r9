@@ -1,0 +1,7 @@
+# flambe shows the profile of a program as a flame graph. The script compiles cat with the profile of 7l -p or 6l -p, runs it on the C files of /sys/src/cmd, and opens the profile that it wrote. The times change at each run, so the script is a smoke test. The q key stops flambe.
+class smoke
+window 600x400
+run O=7; if(~ $cputype amd64) O=6; cd /tmp; $O^c /sys/src/cmd/cat.c; $O^l -p -o cat.prof cat.$O; ./cat.prof /sys/src/cmd/*.c > /dev/null; flambe cat.prof prof.*
+pause 3
+snap open
+exit "q"
