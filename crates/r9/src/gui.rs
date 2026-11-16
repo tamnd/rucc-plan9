@@ -24,7 +24,7 @@
 //! - `mask X0 Y0 X1 Y1` adds a rectangle of the window that `r9 gui compare` does not compare in
 //!   the next snaps, and `mask none` removes all of them;
 //! - `exit KEY` types KEY (`Del`, `Esc` or a quoted string), and then the program must stop with
-//!   an empty status in 30 seconds. `exit none` types nothing, for a program that stops from a
+//!   an empty status in 60 seconds. `exit none` types nothing, for a program that stops from a
 //!   menu: the steps before it choose the item of the menu.
 //!
 //! The coordinates are in the window, with 0,0 at the top left of its border. The output
@@ -46,8 +46,13 @@ pub const SCREEN: (u32, u32) = (1024, 768);
 /// point only when it is wider than 924 and taller than 368 pixels.
 pub const CONSOLE_POINT: (u32, u32) = (100, 400);
 
-/// The file in the guest that has the status of the program.
-const STATUS_FILE: &str = "/tmp/r9gui.st";
+/// The text that the run file writes to the kernel console, with the status of the program after
+/// it. The run file writes it as `R9-GUI^-EXIT`, so that the line that the console window types
+/// does not have it.
+pub const EXIT_MARK: &str = "R9-GUI-EXIT";
+
+/// The time in seconds that the program can take to stop after `exit`.
+const EXIT_SECS: u32 = 60;
 
 /// The rc file in the guest that runs the program.
 const RUN_FILE: &str = "/tmp/r9gui.rc";
@@ -352,9 +357,9 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
     match step {
         Step::Run(cmd) => vec![send(
             format!(
-                "rm -f {STATUS_FILE}; echo {} > {RUN_FILE}; echo {} >> {RUN_FILE}; window -r {x0} {y0} {x1} {y1} rc {RUN_FILE}\n",
+                "echo {} > {RUN_FILE}; echo {} >> {RUN_FILE}; window -r {x0} {y0} {x1} {y1} rc {RUN_FILE}\n",
                 rc_quote(cmd),
-                rc_quote(&format!("echo $status > {STATUS_FILE}")),
+                rc_quote("echo R9-GUI^-EXIT $status > '#c/cons'"),
             )
             .as_bytes(),
         )],
@@ -387,13 +392,13 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
     }
 }
 
-/// The console command that checks the status of the program after `exit`: it waits for the
-/// status file for 30 seconds, prints it, and passes when the status is empty.
+/// The status of the program in the console output `console`: the text after the last
+/// [`EXIT_MARK`] on its line, or None when the console has no mark.
 #[must_use]
-pub fn exit_check() -> String {
-    format!(
-        "for(i in `{{seq 30}}) test -e {STATUS_FILE} || sleep 1; cat {STATUS_FILE}; ~ `{{wc -c < {STATUS_FILE}}} 1"
-    )
+pub fn exit_status(console: &str) -> Option<String> {
+    let at = console.rfind(EXIT_MARK)? + EXIT_MARK.len();
+    let rest = &console[at..];
+    Some(rest[..rest.find('\n').unwrap_or(rest.len())].trim().to_string())
 }
 
 /// An image of 8-bit RGB pixels.
@@ -641,6 +646,19 @@ fn run_steps(script: &Script, path: &Path, out: &Path) -> Result<Vec<Snap>, Stri
             });
         }
     }
+    if script.exits() {
+        // Rio drops the keys that come while the window of the program closes, so the console
+        // gets the click and the keys only after the run file wrote the mark.
+        give(
+            path,
+            &[
+                format!("timeout {EXIT_SECS}"),
+                format!("wait {EXIT_MARK}"),
+                "pause 1".into(),
+            ],
+        )
+        .map_err(|e| format!("the exit: {e}"))?;
+    }
     let (x, y) = CONSOLE_POINT;
     give(path, &[format!("click {x} {y}")]).map_err(|e| format!("the console click: {e}"))?;
     Ok(snaps)
@@ -652,29 +670,25 @@ pub fn run(req: &h9boot::Request, file: &Path) -> Result<Record, String> {
     let src = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
     let script = parse(&src).map_err(|e| format!("{}: {e}", file.display()))?;
     let mut req = req.clone();
-    req.commands = if script.exits() {
-        vec![exit_check()]
-    } else {
-        Vec::new()
-    };
+    req.commands = Vec::new();
     std::fs::create_dir_all(&req.work).map_err(|e| format!("{}: {e}", req.work.display()))?;
     let mut steps = Err("the guest gave no shell prompt".to_string());
     let outcome = h9boot::run_with(&req, |path| {
         steps = run_steps(&script, path, &req.work);
     })?;
-    let failure = match &steps {
-        Err(e) => Some(e.clone()),
-        Ok(_) if !outcome.passed => Some(
-            outcome
-                .steps
-                .iter()
-                .find(|s| s.status.as_deref() != Some(""))
-                .map_or_else(
-                    || "the boot did not pass".to_string(),
-                    |s| format!("the program did not stop well: {:?}", s.status),
-                ),
-        ),
-        Ok(_) => None,
+    let status = if script.exits() {
+        let f = req.work.join("console.log");
+        let console = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
+        exit_status(&console)
+    } else {
+        Some(String::new())
+    };
+    let failure = match (&steps, status) {
+        (Err(e), _) => Some(e.clone()),
+        (Ok(_), _) if !outcome.passed => Some("the boot did not pass".to_string()),
+        (Ok(_), None) => Some(format!("the console has no {EXIT_MARK} line")),
+        (Ok(_), Some(s)) if !s.is_empty() => Some(format!("the program did not stop well: {s}")),
+        (Ok(_), Some(_)) => None,
     };
     let record = Record {
         script: file.display().to_string(),
@@ -904,6 +918,19 @@ exit Del
     }
 
     #[test]
+    fn the_status_comes_from_the_last_mark() {
+        assert_eq!(exit_status("term% x\n"), None);
+        assert_eq!(
+            exit_status("R9-GUI-EXIT rc 12: x\nR9-GUI-EXIT \r\nterm% "),
+            Some(String::new())
+        );
+        assert_eq!(
+            exit_status("R9-GUI-EXIT \nR9-GUI-EXIT fplot 3: bad"),
+            Some("fplot 3: bad".into())
+        );
+    }
+
+    #[test]
     fn the_steps_become_monitor_lines() {
         let rect = [624, 468, 1024, 768];
         let snaps = Path::new("/w");
@@ -911,7 +938,7 @@ exit Del
         assert_eq!(
             l(Step::Run("demo -x 'a b'".into())),
             vec![
-                "send \"rm -f /tmp/r9gui.st; echo 'demo -x ''a b''' > /tmp/r9gui.rc; echo 'echo $status > /tmp/r9gui.st' >> /tmp/r9gui.rc; window -r 624 468 1024 768 rc /tmp/r9gui.rc\\n\""
+                "send \"echo 'demo -x ''a b''' > /tmp/r9gui.rc; echo 'echo R9-GUI^-EXIT $status > ''#c/cons''' >> /tmp/r9gui.rc; window -r 624 468 1024 768 rc /tmp/r9gui.rc\\n\""
             ]
         );
         assert_eq!(

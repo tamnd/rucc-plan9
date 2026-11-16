@@ -2,7 +2,7 @@
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use h9_dev::acpipm::{self, AcpiPm};
 use h9_dev::cmos::{self, Cmos};
@@ -62,7 +62,7 @@ const USAGE: &str = "usage:
       seconds with exit status 2. --script FILE drives the console with the steps of FILE: wait
       TEXT, send TEXT, timeout SECS, pause SECS, mouse X Y [BUTTONS], click X Y [BUTTON], quiet [MS] [SECS], snap FILE [X0 Y0 X1 Y1] and quit. The script owns the input, so the monitor does
       not read its own. The exit status is 0 when the script passes and 3 when it fails.
-      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click, pause, quiet and snap, one line each. The monitor answers each line with ok or error. --headless opens no window. On macOS on arm64, and on Linux when DISPLAY is set, a 9h
+      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click, pause, quiet, snap, wait and timeout, one line each. A wait looks at the console output after the text that the last wait found. The monitor answers each line with ok or error. --headless opens no window. On macOS on arm64, and on Linux when DISPLAY is set, a 9h
       session with a screen shows the screen in a window, which gives the keyboard and the mouse of the host to the machine. On
       Linux, the window is an X11 window. With no DISPLAY, a session on Linux is headless. The 9h machine has a screen of --screen WxH, 1024x768 by default, in the RAM of the
       guest. With --screen none, the machine has no screen, so the profile of the guest does not start rio. --snap FILE writes the screen as a PNG file at the end of the session.
@@ -427,7 +427,8 @@ fn run(o: &Options) -> Result<ExitCode, String> {
     };
     let mut bus = Bus::new();
     bus.strict = o.strict;
-    let log = o.script.as_ref().map(|_| Transcript::default());
+    // The control socket waits on the console output too.
+    let log = (o.script.is_some() || o.control.is_some()).then(Transcript::default);
     let console = || -> Box<dyn std::io::Write + Send> {
         match &log {
             Some(log) => Box::new(Tee {
@@ -444,6 +445,7 @@ fn run(o: &Options) -> Result<ExitCode, String> {
             bus.add_hyper(Box::new(H9Cons::new(irq, console())));
         }
     }
+    let script = o.script.clone().zip(log.clone());
     if !o.disks.is_empty() {
         let mut d = H9Disk::new();
         for (f, ro) in &o.disks {
@@ -496,9 +498,8 @@ fn run(o: &Options) -> Result<ExitCode, String> {
     } else {
         bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     }
-    let script = o.script.clone().zip(log);
     let control = match &o.control {
-        Some(p) => Some(Control::bind(p)?),
+        Some(p) => Some(Control::bind(p, log.clone())?),
         None => None,
     };
     if let (false, Machine::H9, Some((w, h)), true) =
@@ -669,21 +670,25 @@ fn snap(bus: &mut Bus, f: &str) -> Result<String, String> {
 }
 
 /// The socket of `--control PATH`, on which a program of the host drives the machine: the steps
-/// `send`, `mouse`, `click`, `pause`, `quiet` and `snap`, one line each. The monitor answers each line with
+/// `send`, `mouse`, `click`, `pause`, `quiet`, `snap`, `wait` and `timeout`, one line each. The monitor answers each line with
 /// `ok` or `error: ` and the reason, after it did the steps. `r9 9h boot --snap` uses it to click
 /// in the console window of rio. The socket file goes away at the end of the session.
 struct Control {
     listener: std::os::unix::net::UnixListener,
     path: String,
+    /// The console output for the `wait` steps. The connections share it, so that a `wait`
+    /// starts after the text that the last `wait` found.
+    watch: Option<Arc<Mutex<script::Watch>>>,
 }
 
 impl Control {
-    fn bind(path: &str) -> Result<Control, String> {
+    fn bind(path: &str, log: Option<Transcript>) -> Result<Control, String> {
         let listener = std::os::unix::net::UnixListener::bind(path)
             .map_err(|e| format!("--control {path}: {e}"))?;
         Ok(Control {
             listener,
             path: path.into(),
+            watch: log.map(|l| Arc::new(Mutex::new(script::Watch::new(l)))),
         })
     }
 
@@ -704,13 +709,16 @@ impl Control {
             eprintln!("9h: --control {}: the socket cannot be shared", self.path);
             return;
         };
+        let watch = self.watch.clone();
         std::thread::spawn(move || {
             for c in listener.incoming().flatten() {
                 let mut target = target.clone();
+                let watch = watch.clone();
                 std::thread::spawn(move || {
                     let Ok(mut out) = c.try_clone() else { return };
                     for line in std::io::BufReader::new(c).lines().map_while(Result::ok) {
-                        let reply = script::control(&line, &mut target);
+                        let mut w = watch.as_ref().map(|w| w.lock().unwrap());
+                        let reply = script::control(&line, &mut target, w.as_deref_mut());
                         if writeln!(out, "{reply}").is_err() {
                             break;
                         }
