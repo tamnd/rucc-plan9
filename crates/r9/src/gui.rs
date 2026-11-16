@@ -18,7 +18,9 @@
 //! - `mouse B at X,Y` clicks button B (1, 2 or 3) at X,Y in the window;
 //! - `mouse chord A+B at X,Y` pushes button A, then button B, at X,Y, and then lets go of both;
 //! - `move X,Y` moves the mouse to X,Y in the window;
-//! - `drag B X0,Y0 X1,Y1` pushes button B at X0,Y0, moves to X1,Y1 and lets go;
+//! - `drag B X0,Y0 X1,Y1` pushes button B at X0,Y0, moves to X1,Y1 and lets go. After the push
+//!   and after the move, it waits until the window did not change for 200 milliseconds, for no
+//!   more than 10 seconds;
 //! - `keys TEXT` types TEXT, a quoted string with the escapes `\n`, `\t`, `\\`, `\"` and `\xHH`;
 //! - `pause SECS` waits;
 //! - `mask X0 Y0 X1 Y1` adds a rectangle of the window that `r9 gui compare` does not compare in
@@ -370,6 +372,7 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
         let (x, y) = at(p);
         format!("mouse {x} {y} {b}")
     };
+    let still = format!("quiet 200 10 {x0} {y0} {x1} {y1}");
     match step {
         Step::Run(cmd) => vec![send(
             format!(
@@ -395,10 +398,17 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
             v
         }
         Step::Move(p) => vec![mouse(*p, 0)],
+        // A menu of libdraw takes the item that is lit when the button comes up, and lights an
+        // item only when it reads a move with the button down. The kernel and rio keep a change
+        // of the buttons in a queue, but only the last point of a move. Thus the drag waits until
+        // the window is still after the push and after the move, or a slow program reads the push
+        // and then the release, and takes the item under the push.
         Step::Drag(b, p, q) => vec![
             mouse(*p, 0),
             mouse(*p, *b),
+            still.clone(),
             mouse(*q, *b),
+            still,
             mouse(*q, 0),
         ],
         Step::Keys(k) | Step::Exit(k) if k.is_empty() => Vec::new(),
@@ -986,7 +996,9 @@ exit Del
             vec![
                 "mouse 624 468 0",
                 "mouse 624 468 4",
+                "quiet 200 10 624 468 1024 768",
                 "mouse 629 473 4",
+                "quiet 200 10 624 468 1024 768",
                 "mouse 629 473 0"
             ]
         );
