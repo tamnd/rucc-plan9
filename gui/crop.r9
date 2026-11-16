@@ -1,0 +1,10 @@
+# image/crop shows an image and the region to crop. The binaries of the base image do not have the image tools, so the script builds them from /sys/src/cmd/image first. Then it makes a Plan 9 image from a JPEG file with jpg -9. A drag of button 1 inside the image moves the image. The q key stops it.
+class exact
+window 500x400
+run @{cd /sys/src/cmd/image && mk install} > /dev/null >[2=1]; jpg -9 /sys/src/cmd/gs/jpeg/testprog.jpg > /tmp/r9gui.bit; image/crop /tmp/r9gui.bit
+quiet
+snap open
+drag 1 100,80 160,120
+quiet
+snap moved
+exit "q"
