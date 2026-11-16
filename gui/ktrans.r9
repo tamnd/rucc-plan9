@@ -1,0 +1,9 @@
+# ktrans changes typed Latin letters to the letters of another language. It reads the keyboard of rio from /dev/kbdtap and writes the result back to it. In Japanese, the window of ktrans shows the words of the dictionary for the kana that are typed. The script types "nihon", and the window shows the words for the kana of nihon. The Del key in the window of ktrans stops it.
+class exact
+window 400x200
+run ktrans -l jp </dev/kbdtap >/dev/kbdtap
+pause 2
+keys "nihon"
+quiet
+snap words
+exit "\x7f"

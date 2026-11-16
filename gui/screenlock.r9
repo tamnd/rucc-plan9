@@ -1,0 +1,8 @@
+# screenlock covers the screen with a new window and waits for the password of the user. It shows /lib/bunny.bit, the name of the user and the time. The script sets the clock of the machine to 2026-01-01 00:00 UTC first, so the time is the same each run. The machine has no auth server, thus factotum has no key, and a password of x unlocks the screen. The picture and the text are at the center of the screen, so the window is large.
+class exact
+window 800x600
+run echo 1767225600 > /dev/time; screenlock
+pause 2
+quiet
+snap locked
+exit "x\n"

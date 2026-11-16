@@ -1,0 +1,9 @@
+# abaco is a web browser. It gets the pages from webfs, and webfs gets them with HTTP. The machine has no network, so the script adds the loopback interface, writes a small HTML page, and serves it with aux/listen1 and an rc script on the port 8080 of the loopback address. Then it starts webfs and abaco with the URL of the page. A click with button 2 on the word Exit in the tag at the top stops abaco.
+class exact
+window 600x400
+run ip/ipconfig loopback /dev/null 127.1; echo '<html><head><title>r9</title></head><body><h1>Plan 9</h1><p>A page for the test of <b>abaco</b>.</p><ul><li>one<li>two</ul></body></html>' > /tmp/r9.html; echo 'awk ''/^\r?$/{exit}''; echo HTTP/1.0 200 OK; echo Content-Type: text/html; echo; cat /tmp/r9.html' > /tmp/httpd.rc; aux/listen1 -t tcp!127.0.0.1!8080 rc /tmp/httpd.rc >[2]/dev/null & webfs; abaco http://127.0.0.1:8080/
+pause 3
+quiet
+snap open
+mouse 2 at 140,11
+exit none

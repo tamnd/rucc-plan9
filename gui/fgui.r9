@@ -1,0 +1,11 @@
+# auth/fgui shows a window when factotum needs a key. It makes a new hidden window and reads the requests of factotum from /mnt/factotum/needkey. The script starts fgui, and then auth/userpasswd asks factotum for a password. fgui shows the window for the key. The window of fgui is not in the window under test, so the window under test is large. The script clicks the password field, types a password and clicks Done. Then factotum has the key, and auth/userpasswd stops.
+class exact
+window 920x700
+run auth/fgui & sleep 2; auth/userpasswd 'proto=pass service=r9 server=example.com'
+pause 3
+quiet
+snap open
+mouse 1 at 400,86
+keys "secret"
+mouse 1 at 85,238
+exit none
