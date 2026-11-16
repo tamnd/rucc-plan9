@@ -50,6 +50,9 @@ pub const SCREEN_SET: u32 = 0xc600_0051;
 /// `H9screenflush`: (min, max) tells the monitor that the rectangle changed, with x | y<<16 for
 /// each point, and returns 0.
 pub const SCREEN_FLUSH: u32 = 0xc600_0052;
+/// `H9mouseget`: () returns the next mouse event, x | y<<16 | buttons<<32, or -1 when no event
+/// waits.
+pub const MOUSE_GET: u32 = 0xc600_0060;
 
 /// The largest snarf, 1 MiB.
 pub const SNARF_MAX: u64 = 1 << 20;
@@ -71,6 +74,8 @@ pub const IO_ERROR: u64 = u64::MAX - 2;
 
 /// The interrupt of the console input, `IRQh9cons`: SPI 16, which is INTID 48.
 pub const CONS_SPI: u32 = 48;
+/// The interrupt of the mouse, `IRQh9mouse`: SPI 17, which is INTID 49.
+pub const MOUSE_SPI: u32 = 49;
 /// The interrupt of the console input on the amd64 machine: ISA IRQ 5, which no device of the
 /// machine uses.
 pub const CONS_IRQ: u32 = 5;

@@ -11,6 +11,7 @@ use h9_dev::h9cons::H9Cons;
 use h9_dev::h9ctl::H9Ctl;
 use h9_dev::h9disk::H9Disk;
 use h9_dev::h9fs::H9Fs;
+use h9_dev::h9mouse::{self, H9Mouse};
 use h9_dev::h9screen::{self, H9Screen};
 use h9_dev::h9snarf::{Clipboard, H9Snarf, Host, Memory};
 use h9_dev::pcinone::{self, PciNone};
@@ -40,7 +41,7 @@ const USAGE: &str = "usage:
   9h run --kernel FILE [--machine 9h|virt] [--mem MIB] [--cpus N] [--bootargs TEXT]
          [--disk FILE[,ro]]... [--hostfs DIR[,ro]] [--user NAME] [--snarf host|memory]
          [--ini FILE] [--strict] [--timeout SECS] [--script FILE] [--headless]
-         [--screen WxH|none] [--snap FILE]
+         [--screen WxH|none] [--snap FILE] [--control PATH]
       Run a kernel of the tree on the hypervisor of the host: an arm64 kernel on HVF on macOS
       on arm64 or on KVM on Linux on arm64, and an amd64 kernel on KVM on Linux on x86-64.
       KVM on arm64 needs Linux 6.4 or later, for the SMCCC filter. On arm64, FILE is a 7l a.out
@@ -59,9 +60,9 @@ const USAGE: &str = "usage:
       #Z/ctl takes the requests quit and title TEXT. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
       as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
       seconds with exit status 2. --script FILE drives the console with the steps of FILE: wait
-      TEXT, send TEXT, timeout SECS, pause SECS and quit. The script owns the input, so the monitor does
+      TEXT, send TEXT, timeout SECS, pause SECS, mouse X Y [BUTTONS], click X Y [BUTTON] and quit. The script owns the input, so the monitor does
       not read its own. The exit status is 0 when the script passes and 3 when it fails.
-      --headless opens no window. The monitor has no window yet, so each session is headless
+      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click and pause, one line each. The monitor answers each line with ok or error. --headless opens no window. The monitor has no window yet, so each session is headless
       now. The 9h machine has a screen of --screen WxH, 1024x768 by default, in the RAM of the
       guest. With --screen none, the machine has no screen, so the profile of the guest does not start rio. --snap FILE writes the screen as a PNG file at the end of the session.
       On amd64, FILE is a 6l kernel with a multiboot header (9pc64). The machine is a PC with
@@ -118,6 +119,7 @@ struct Options {
     /// The size of the screen, or None for no screen.
     screen: Option<(u32, u32)>,
     snap: Option<String>,
+    control: Option<String>,
 }
 
 /// A value with `,ro` at the end is read-only.
@@ -146,6 +148,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         headless: false,
         screen: Some((1024, 768)),
         snap: None,
+        control: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -186,6 +189,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--headless" => o.headless = true,
             "--screen" => o.screen = screen_size(&val()?)?,
             "--snap" => o.snap = Some(val()?),
+            "--control" => o.control = Some(val()?),
             "--script" => {
                 let f = val()?;
                 let src = std::fs::read_to_string(&f).map_err(|e| format!("{f}: {e}"))?;
@@ -201,6 +205,12 @@ fn parse(args: &[String]) -> Result<Options, String> {
             _ => return Err(format!("unknown option {a}")),
         }
     }
+    check(&o)?;
+    Ok(o)
+}
+
+/// The checks of the options together.
+fn check(o: &Options) -> Result<(), String> {
     if o.kernel.is_empty() {
         return Err("run needs --kernel".into());
     }
@@ -228,7 +238,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     {
         return Err(format!("--hostfs {d}: not a directory"));
     }
-    Ok(o)
+    Ok(())
 }
 
 /// The size of `--screen WxH`, or None for `--screen none`.
@@ -470,6 +480,10 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         // A screen of 0x0 tells the kernel that there is no screen.
         let (w, h) = o.screen.unwrap_or((0, 0));
         bus.add_hyper(Box::new(H9Screen::new(w, h)));
+        if !PC {
+            // The amd64 kernel has no h9mouse.c yet.
+            bus.add_hyper(Box::new(H9Mouse::new(h9::MOUSE_SPI)));
+        }
     }
     if PC {
         bus.add(PORTS + cmos::PORT, 2, Box::new(Cmos::new()));
@@ -483,7 +497,16 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         bus.add(RTC, 0x1000, Box::new(Pl031::new()));
     }
     let script = o.script.clone().zip(log);
-    backend::run(ram, bus, o.cpus as usize, entry, x0, script, o.snap.clone())
+    let control = match &o.control {
+        Some(p) => Some(Control::bind(p)?),
+        None => None,
+    };
+    let session = Session {
+        script,
+        snap: o.snap.clone(),
+        control,
+    };
+    backend::run(ram, bus, o.cpus as usize, entry, x0, session)
 }
 
 /// The lines of the report of the addresses with no device that the guest used, one line for
@@ -534,6 +557,28 @@ fn type_in(bus: &mut Bus, b: &[u8]) {
     }
 }
 
+/// Give the input of a script step to the machine.
+#[cfg_attr(
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    )),
+    allow(dead_code)
+)]
+fn give(bus: &mut Bus, i: &script::Input) {
+    match *i {
+        script::Input::Keys(b) => type_in(bus, b),
+        script::Input::Mouse(x, y, buttons) => {
+            if let Some(m) = bus.hyper_device::<H9Mouse>() {
+                m.push(h9mouse::Event { x, y, buttons });
+            }
+        }
+    }
+}
+
 /// Write the screen to the PNG file `f` at the end of a session, and give the line for the log.
 #[cfg_attr(
     not(any(
@@ -561,8 +606,77 @@ fn snap(bus: &mut Bus, f: &str) -> Result<String, String> {
     ))
 }
 
+/// The socket of `--control PATH`, on which a program of the host gives input to the machine: the
+/// steps `send`, `mouse`, `click` and `pause`, one line each. The monitor answers each line with
+/// `ok` or `error: ` and the reason, after it did the steps. `r9 9h boot --snap` uses it to click
+/// in the console window of rio. The socket file goes away at the end of the session.
+struct Control {
+    listener: std::os::unix::net::UnixListener,
+    path: String,
+}
+
+impl Control {
+    fn bind(path: &str) -> Result<Control, String> {
+        let listener = std::os::unix::net::UnixListener::bind(path)
+            .map_err(|e| format!("--control {path}: {e}"))?;
+        Ok(Control {
+            listener,
+            path: path.into(),
+        })
+    }
+
+    /// Answer each connection in a thread of its own.
+    #[cfg_attr(
+        not(any(
+            all(target_os = "macos", target_arch = "aarch64"),
+            all(
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            )
+        )),
+        allow(dead_code)
+    )]
+    fn serve(&self, give: impl Fn(script::Input) + Clone + Send + 'static) {
+        use std::io::{BufRead, Write};
+        let Ok(listener) = self.listener.try_clone() else {
+            eprintln!("9h: --control {}: the socket cannot be shared", self.path);
+            return;
+        };
+        std::thread::spawn(move || {
+            for c in listener.incoming().flatten() {
+                let give = give.clone();
+                std::thread::spawn(move || {
+                    let Ok(mut out) = c.try_clone() else { return };
+                    for line in std::io::BufReader::new(c).lines().map_while(Result::ok) {
+                        let reply = script::control(&line, &give);
+                        if writeln!(out, "{reply}").is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
+
+impl Drop for Control {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 /// A session script and the console output that it reads.
 type Script = (Vec<(usize, Step)>, Transcript);
+
+/// The parts of a session other than the machine.
+struct Session {
+    /// The script, which owns the input, or None for the standard input.
+    script: Option<Script>,
+    /// The PNG file for the screen at the end.
+    snap: Option<String>,
+    /// The socket of `--control`.
+    control: Option<Control>,
+}
 
 /// The back end of the host: HVF on macOS on arm64, KVM on Linux on x86-64 and arm64. The two
 /// have the same interface.
@@ -574,7 +688,7 @@ type Script = (Vec<(usize, Step)>, Transcript);
     )
 ))]
 mod backend {
-    use super::{Script, script, type_in, unknown_report};
+    use super::{Session, give, script, type_in, unknown_report};
     use h9_dev::Bus;
     #[cfg(target_os = "macos")]
     use h9_hvf::{Machine, Stop, Vm};
@@ -622,17 +736,25 @@ mod backend {
         ncpu: usize,
         entry: u64,
         x0: u64,
-        script: Option<Script>,
-        snap: Option<String>,
+        session: Session,
     ) -> Result<ExitCode, String> {
+        let Session {
+            script,
+            snap,
+            control,
+        } = session;
         let vm = Vm::new(ram, bus, ncpu)?;
         let m = vm.machine();
+        if let Some(c) = &control {
+            let m = vm.machine();
+            c.serve(move |i| m.with_bus(|bus| give(bus, &i)));
+        }
         let done = Arc::new(Mutex::new(None));
         let scripted = script.is_some();
         if let Some((steps, log)) = script {
             let done = done.clone();
             std::thread::spawn(move || {
-                let r = script::run(&steps, &log, |b| m.with_bus(|bus| type_in(bus, b)));
+                let r = script::run(&steps, &log, |i| m.with_bus(|bus| give(bus, &i)));
                 *done.lock().unwrap() = Some(r);
                 m.end(Stop::Off);
             });
@@ -703,8 +825,7 @@ mod backend {
         _: usize,
         _: u64,
         _: u64,
-        _: Option<super::Script>,
-        _: Option<String>,
+        _: super::Session,
     ) -> Result<ExitCode, String> {
         Err("this host has no back end: the monitor runs on macOS on arm64 (HVF) and on Linux on x86-64 and arm64 (KVM)".into())
     }

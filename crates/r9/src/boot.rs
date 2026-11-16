@@ -258,6 +258,7 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
                 resumed_at = Instant::now();
             }
         },
+        || {},
     )?;
     let _ = std::fs::remove_file(monitor(req));
     clean_up(req)?;
@@ -295,7 +296,7 @@ impl Driven {
 /// Drive the console of `child`, a virtual machine whose console is on its standard input and
 /// output: answer the boot prompts, run `commands` at the shell prompt, halt the guest, and stop
 /// the child. The console goes to `log`. `tick` runs about each 200 ms, for the work of the
-/// caller.
+/// caller. `at_shell` runs once, at the first shell prompt, before the first command.
 pub(crate) fn drive(
     child: &mut Child,
     log: &mut impl Write,
@@ -303,6 +304,7 @@ pub(crate) fn drive(
     commands: Vec<String>,
     timeout: Duration,
     mut tick: impl FnMut(),
+    mut at_shell: impl FnMut(),
 ) -> Result<Driven, String> {
     let mut stdin = child.stdin.take().ok_or("no stdin for the machine")?;
     let mut stdout = child.stdout.take().ok_or("no stdout for the machine")?;
@@ -321,6 +323,7 @@ pub(crate) fn drive(
     let mut lines = Lines::default();
     let mut timed_out = false;
     let mut halted_at: Option<Instant> = None;
+    let mut shell = false;
     let typed = loop {
         if start.elapsed() > timeout {
             timed_out = true;
@@ -349,6 +352,10 @@ pub(crate) fn drive(
             _ => {}
         }
         if let Action::Type(text) = session.prompt(&lines.partial()) {
+            if session.ready && !shell {
+                shell = true;
+                at_shell();
+            }
             lines.answered();
             if let Err(e) = type_text(&text, &mut stdin, &rx, log, &mut lines, &mut session) {
                 break Err(e);

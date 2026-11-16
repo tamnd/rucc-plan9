@@ -24,6 +24,7 @@ dev
 
 link
 	h9screen
+	h9mouse
 	ethersink
 	ethermedium
 	loopbackmedium

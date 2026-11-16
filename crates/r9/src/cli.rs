@@ -322,7 +322,8 @@ usage:
       unless --keep is given. --strict makes an access to an address with no device stop the
       session, so that the boot fails. The machine has a screen only with --snap, which
       writes the screen as a PNG file at the end. With the screen, the profile of the guest starts
-      rio, and the commands run in the console window of rio.
+      rio, and the commands run in the console window of rio. r9 clicks in that window before the
+      first command, so that the window has the keyboard focus.
   r9 9h smoke --kernel FILE --root IMAGE [the options of r9 9h boot]
       Run the smoke suite of plan 09.5 on the 9h kernel: r9 9h boot with smoke/suite.rc and the
       guest directory as the input. The work goes to work/9h/smoke by default.
