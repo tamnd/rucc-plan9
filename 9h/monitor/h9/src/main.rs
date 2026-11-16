@@ -480,10 +480,8 @@ fn run(o: &Options) -> Result<ExitCode, String> {
         // A screen of 0x0 tells the kernel that there is no screen.
         let (w, h) = o.screen.unwrap_or((0, 0));
         bus.add_hyper(Box::new(H9Screen::new(w, h)));
-        if !PC {
-            // The amd64 kernel has no h9mouse.c yet.
-            bus.add_hyper(Box::new(H9Mouse::new(h9::MOUSE_SPI)));
-        }
+        let irq = if PC { h9::MOUSE_IRQ } else { h9::MOUSE_SPI };
+        bus.add_hyper(Box::new(H9Mouse::new(irq)));
     }
     if PC {
         bus.add(PORTS + cmos::PORT, 2, Box::new(Cmos::new()));

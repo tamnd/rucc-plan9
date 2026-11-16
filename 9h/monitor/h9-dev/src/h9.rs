@@ -79,3 +79,6 @@ pub const MOUSE_SPI: u32 = 49;
 /// The interrupt of the console input on the amd64 machine: ISA IRQ 5, which no device of the
 /// machine uses.
 pub const CONS_IRQ: u32 = 5;
+/// The interrupt of the mouse on the amd64 machine: ISA IRQ 10, which no device of the machine
+/// uses.
+pub const MOUSE_IRQ: u32 = 10;
