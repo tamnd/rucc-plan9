@@ -134,16 +134,24 @@ pub fn commands(dir: &str, targets: &str, slot: &Slot) -> Vec<String> {
 /// see the files that mk did not write. The earlier build left its list of changed files in
 /// `/tmp/r9/changed`. The command removes each file in that list that is not installed, so that
 /// mk makes it again as in a new tree. It gives the date 0 to each installed file in
-/// `/$objtype/bin` and `/$objtype/lib`, so that `mk install` copies it again. With no list, the
-/// command does nothing. The last `echo` makes the status empty.
+/// `/$objtype/bin` and `/$objtype/lib`, so that `mk install` copies it again. `mk install` also
+/// writes to `/sys/lib`, `/rc/bin` and `/acme/bin`, which the walk does not see. The command
+/// gives the date 0 to each file in these directories that is newer than the start of the
+/// earlier build, in `/tmp/r9/t0`. Without this, mk takes an installed file such as
+/// `/sys/lib/tmac/tmac.pictures` as up to date, and does not make the file in `/sys/src` that it
+/// copies. With no list, the command does nothing. The last `echo` makes the status empty.
 #[must_use]
 pub fn reset_command() -> String {
     let w = "/tmp/r9";
     let inst = "'^/'$objtype'/(bin|lib)/'";
+    let more = RESET_DIRS.join(" ");
     format!(
-        "test -f {w}/changed && {{rm -f `{{grep -v {inst} {w}/changed}}; touch -c -t 0 `{{grep {inst} {w}/changed}}}}; echo r9-reset"
+        "test -f {w}/changed && {{rm -f `{{grep -v {inst} {w}/changed}}; touch -c -t 0 `{{grep {inst} {w}/changed}}; touch -c -t 0 `{{walk -f -e mp {more} | awk -v t=`{{cat {w}/t0}} '$1 >= t {{print $2}}'}}}}; echo r9-reset"
     )
 }
+
+/// The directories outside the walk that `mk install` writes to.
+pub const RESET_DIRS: [&str; 3] = ["/sys/lib", "/rc/bin", "/acme/bin"];
 
 /// A test that the guest runs after the build (plan 12.8).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -586,7 +594,7 @@ mod tests {
         assert!(c[1].starts_with("rm -rf /tmp/r9in /tmp/r9 && mkdir -p"));
         assert_eq!(
             c[0],
-            "test -f /tmp/r9/changed && {rm -f `{grep -v '^/'$objtype'/(bin|lib)/' /tmp/r9/changed}; touch -c -t 0 `{grep '^/'$objtype'/(bin|lib)/' /tmp/r9/changed}}; echo r9-reset"
+            "test -f /tmp/r9/changed && {rm -f `{grep -v '^/'$objtype'/(bin|lib)/' /tmp/r9/changed}; touch -c -t 0 `{grep '^/'$objtype'/(bin|lib)/' /tmp/r9/changed}; touch -c -t 0 `{walk -f -e mp /sys/lib /rc/bin /acme/bin | awk -v t=`{cat /tmp/r9/t0} '$1 >= t {print $2}'}}; echo r9-reset"
         );
         assert_eq!(commands("/sys/src", "install", &Slot::G).len() + 1, c.len());
     }
