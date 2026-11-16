@@ -17,6 +17,7 @@ dev
 	ip	arp chandial ip ipv6 ipaux iproute netlog nullmedium pktmedium inferno
 	draw	swcursor
 	mouse
+	h9kbd
 	sd
 	uart
 	rtc

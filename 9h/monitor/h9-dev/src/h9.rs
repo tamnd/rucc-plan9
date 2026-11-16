@@ -53,6 +53,12 @@ pub const SCREEN_FLUSH: u32 = 0xc600_0052;
 /// `H9mouseget`: () returns the next mouse event, x | y<<16 | buttons<<32, or -1 when no event
 /// waits.
 pub const MOUSE_GET: u32 = 0xc600_0060;
+/// `H9kbdget`: () returns the next keyboard event, the rune | down<<32, with down 1 for a key down
+/// and 0 for a key up, or -1 when no event waits.
+pub const KBD_GET: u32 = 0xc600_0061;
+/// `H9kbdopen`: (open) tells the monitor that the kernel opened `#b/kbd`, open 1, or closed it,
+/// open 0, and returns 0.
+pub const KBD_OPEN: u32 = 0xc600_0062;
 
 /// The largest snarf, 1 MiB.
 pub const SNARF_MAX: u64 = 1 << 20;
@@ -76,9 +82,14 @@ pub const IO_ERROR: u64 = u64::MAX - 2;
 pub const CONS_SPI: u32 = 48;
 /// The interrupt of the mouse, `IRQh9mouse`: SPI 17, which is INTID 49.
 pub const MOUSE_SPI: u32 = 49;
+/// The interrupt of the keyboard, `IRQh9kbd`: SPI 18, which is INTID 50.
+pub const KBD_SPI: u32 = 50;
 /// The interrupt of the console input on the amd64 machine: ISA IRQ 5, which no device of the
 /// machine uses.
 pub const CONS_IRQ: u32 = 5;
 /// The interrupt of the mouse on the amd64 machine: ISA IRQ 10, which no device of the machine
 /// uses.
 pub const MOUSE_IRQ: u32 = 10;
+/// The interrupt of the keyboard on the amd64 machine: ISA IRQ 11, which no device of the machine
+/// uses.
+pub const KBD_IRQ: u32 = 11;

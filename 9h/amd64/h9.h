@@ -26,6 +26,8 @@ enum {
 	H9screenset	= 0xC6000051,	/* (pa, width, height, chan) gives the framebuffer, returns 0 */
 	H9screenflush	= 0xC6000052,	/* (min, max) the rectangle changed, x | y<<16 each, returns 0 */
 	H9mouseget	= 0xC6000060,	/* () returns x | y<<16 | buttons<<32 of the next event, or -1 */
+	H9kbdget	= 0xC6000061,	/* () returns rune | down<<32 of the next key event, or -1 */
+	H9kbdopen	= 0xC6000062,	/* (open) #b/kbd is open, 1, or closed, 0, returns 0 */
 
 	H9sdsecsize	= 512,		/* bytes in a sector */
 	H9sdmax	= 128,		/* the most sectors of one call */
@@ -37,6 +39,7 @@ enum {
 
 	IRQh9cons	= 5,		/* ISA IRQ 5, high while console input waits */
 	IRQh9mouse	= 10,		/* ISA IRQ 10, high while a mouse event waits */
+	IRQh9kbd	= 11,		/* ISA IRQ 11, high while a key event waits */
 	H9port		= 0x509,	/* the port of the hypercall */
 };
 
