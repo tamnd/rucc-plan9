@@ -356,7 +356,10 @@ impl Machine {
         let mut bus = self.bus.lock().unwrap();
         let t = f(&mut bus);
         let now = bus.irqs();
-        drop(bus);
+        // The bus stays locked until KVM has the levels. Without this, a vCPU that read the last
+        // byte of the console could give KVM a low level after a device thread gave it the high
+        // level of a new byte, and the guest then waits for an interrupt that does not come
+        // (#117).
         let mut levels = self.levels.lock().unwrap();
         for (irq, level) in now {
             let changed = match levels.iter_mut().find(|(i, _)| *i == irq) {
@@ -374,6 +377,8 @@ impl Machine {
                 eprintln!("9h: KVM_IRQ_LINE {irq}: {e}");
             }
         }
+        drop(levels);
+        drop(bus);
         t
     }
 
