@@ -61,7 +61,10 @@ const CMD_FILE: &str = "/tmp/r9gui.cmd";
 
 /// The rc file in the guest that the window runs. It runs [`CMD_FILE`] in a new rc and then
 /// writes [`EXIT_MARK`] and the status. When the run line has a syntax error, the new rc stops
-/// with the status `syntax error`, and the line still comes.
+/// with the status `syntax error`, and the line still comes. The Del key of the window sends
+/// the interrupt note to all the processes of the window, and an rc that runs a file stops on an
+/// interrupt. Thus the run file sets an empty `sigint` function, so that the line comes after
+/// the exit key.
 const RUN_FILE: &str = "/tmp/r9gui.rc";
 
 /// The class of a script (plan 02.7).
@@ -388,7 +391,9 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
             format!(
                 "echo {} > {CMD_FILE}; echo {} > {RUN_FILE}; window -r {x0} {y0} {x1} {y1} rc {RUN_FILE}\n",
                 rc_quote(cmd),
-                rc_quote(&format!("rc {CMD_FILE}; echo R9-GUI^-EXIT $status > '#c/cons'")),
+                rc_quote(&format!(
+                    "fn sigint {{}}; rc {CMD_FILE}; echo R9-GUI^-EXIT $status > '#c/cons'"
+                )),
             )
             .as_bytes(),
         )
@@ -1034,7 +1039,7 @@ exit Del
             .collect();
         assert_eq!(
             typed,
-            "echo 'demo -x ''a b''' > /tmp/r9gui.cmd; echo 'rc /tmp/r9gui.cmd; echo R9-GUI^-EXIT $status > ''#c/cons''' > /tmp/r9gui.rc; window -r 624 468 1024 768 rc /tmp/r9gui.rc\n"
+            "echo 'demo -x ''a b''' > /tmp/r9gui.cmd; echo 'fn sigint {}; rc /tmp/r9gui.cmd; echo R9-GUI^-EXIT $status > ''#c/cons''' > /tmp/r9gui.rc; window -r 624 468 1024 768 rc /tmp/r9gui.rc\n"
         );
         assert_eq!(run.len(), typed.len());
         assert_eq!(
