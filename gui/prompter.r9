@@ -1,0 +1,8 @@
+# The bitsy prompter edits the lines of a file, with a keyboard on the screen under the lines. The script gives it a file of two lines. A click on the Esc key of the keyboard on the screen writes the file and stops prompter.
+class exact
+window 400x300
+run {echo first; echo second} > /tmp/r9gui.txt; bitsy/prompter -n /tmp/r9gui.txt
+quiet
+snap open
+mouse 1 at 385,290
+exit none

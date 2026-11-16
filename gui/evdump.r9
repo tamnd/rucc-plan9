@@ -1,0 +1,9 @@
+# evdump makes a new window of 256 by 256 pixels and prints the events of the keyboard, the mouse and the window. The new window goes at the top left, so the window under test shows the printed events, and the script is a smoke test. evdump has no quit key. A click makes the window under test current, and then the Del key sends the interrupt note to the window. The function sigint keeps rc alive, so that rc writes the mark after evdump stops. The echo -n command makes the status empty.
+class smoke
+window 400x300
+run fn sigint {}; evdump; echo -n
+pause 3
+mouse 1 at 200,150
+pause 1
+snap open
+exit "\x7f"

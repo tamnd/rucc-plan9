@@ -1,0 +1,7 @@
+# The bitsy keyboard shows keys on the screen and writes the key that the user clicks to /dev/kbdin. The script does not click a key, because the key goes to the window that is current. keyboard does not read the keyboard, so the Del key makes rio send the interrupt note to the window. The function sigint keeps rc alive, so that rc writes the mark after keyboard stops. The echo -n command makes the status empty.
+class smoke
+window 400x200
+run fn sigint {}; bitsy/keyboard -n; echo -n
+pause 3
+snap open
+exit "\x7f"

@@ -1,0 +1,7 @@
+# swar is a game of two space ships around a star. The ships and the missiles move with time, so the script is a smoke test. The key Q stops it.
+class smoke
+window 500x400
+run games/swar
+pause 3
+snap open
+exit "Q"

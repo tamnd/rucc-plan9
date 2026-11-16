@@ -1,0 +1,7 @@
+# catclock shows a cat clock with eyes and a tail that move each second, so the script is a smoke test. catclock has no quit key. The Del key sends the interrupt note to the window, and the function sigint keeps rc alive, so that rc writes the mark after catclock stops. The echo -n command makes the status empty.
+class smoke
+window 200x300
+run fn sigint {}; games/catclock; echo -n
+pause 3
+snap open
+exit "\x7f"
