@@ -302,7 +302,10 @@ impl Machine {
         let mut bus = self.bus.lock().unwrap();
         let t = f(&mut bus);
         let now = bus.irqs();
-        drop(bus);
+        // The bus stays locked until the GIC has the levels. Without this, a vCPU that read the
+        // last byte of the console could give the GIC a low level after a device thread gave it
+        // the high level of a new byte, and the guest then waits for an interrupt that does not
+        // come (#117).
         let mut levels = self.levels.lock().unwrap();
         let mut raised = false;
         for (spi, level) in now {
@@ -329,6 +332,7 @@ impl Machine {
             }
         }
         drop(levels);
+        drop(bus);
         if raised {
             self.kick();
         }
