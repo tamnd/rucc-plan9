@@ -5,12 +5,15 @@
 //! - `send TEXT` types TEXT on the console;
 //! - `timeout SECS` sets the time that each later `wait` can take, 60 seconds at the start;
 //! - `pause SECS` waits SECS seconds, such as for a program that does not write to the console;
+//! - `mouse X Y [BUTTONS]` moves the mouse to the pixel (X, Y) of the screen with BUTTONS down, 0
+//!   by default: 1 is the left button, 2 the middle, 4 the right, and 8 and 16 the wheel;
+//! - `click X Y [BUTTON]` moves the mouse to (X, Y), and pushes and releases BUTTON, 1 by default;
 //! - `quit` ends the session, and the script passes.
 //!
 //! TEXT is the rest of the line with the spaces at its two ends removed, or a string in double quotes with the escapes `\n`, `\r`, `\t`,
 //! `\\`, `\"` and `\xHH`. A line that starts with `#` is a comment. The script fails at the first
-//! `wait` that times out, and when the session ends before the script does. The steps of the GUI
-//! (`window`, `mouse`, `keys`, `snap`, `quiet`) come with the screen.
+//! `wait` that times out, and when the session ends before the script does. The other steps of the
+//! GUI (`window`, `keys`, `snap`, `quiet`) come later.
 
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -26,6 +29,8 @@ pub enum Step {
     Timeout(Duration),
     /// Wait for this time.
     Pause(Duration),
+    /// Move the mouse to (x, y) with these buttons down.
+    Mouse(u16, u16, u8),
     /// End the session.
     Quit,
 }
@@ -102,6 +107,28 @@ pub fn parse(src: &str) -> Result<Vec<(usize, Step)>, String> {
                     Step::Pause(d)
                 }
             }
+            "mouse" | "click" => {
+                let bad = || format!("line {n}: give {verb} X Y and a button number");
+                let nums: Vec<u32> = arg
+                    .split_whitespace()
+                    .map(str::parse)
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| bad())?;
+                let x = nums.first().and_then(|&v| u16::try_from(v).ok());
+                let y = nums.get(1).and_then(|&v| u16::try_from(v).ok());
+                let button = nums.get(2).copied().unwrap_or(u32::from(verb == "click"));
+                let (Some(x), Some(y), 2..=3, 0..=31) = (x, y, nums.len(), button) else {
+                    return Err(bad());
+                };
+                let b = button as u8;
+                if verb == "click" {
+                    steps.push((n, Step::Mouse(x, y, 0)));
+                    steps.push((n, Step::Mouse(x, y, b)));
+                    Step::Mouse(x, y, 0)
+                } else {
+                    Step::Mouse(x, y, b)
+                }
+            }
             "quit" if arg.is_empty() => Step::Quit,
             _ => return Err(format!("line {n}: the step {line:?} is not known")),
         };
@@ -161,12 +188,51 @@ impl<W: std::io::Write> std::io::Write for Tee<W> {
     }
 }
 
-/// Run the steps against the console. `send` types bytes on it. The result is Ok at `quit` or
+/// Do one line that a host program wrote on the socket of `--control`, and give the reply: `ok`,
+/// or `error: ` and the reason. The line has the steps `send`, `mouse`, `click` and `pause` only,
+/// because the console output does not go to the socket. The monitor does all the steps of the
+/// line before it replies, so a program that waits for the reply knows that the input is in the
+/// machine.
+pub fn control(line: &str, mut send: impl FnMut(Input)) -> String {
+    let steps = match parse(line) {
+        Ok(s) => s,
+        Err(e) => return format!("error: {}", e.trim_start_matches("line 1: ")),
+    };
+    if steps
+        .iter()
+        .any(|(_, s)| !matches!(s, Step::Send(_) | Step::Mouse(..) | Step::Pause(_)))
+    {
+        return format!(
+            "error: {:?} is not a step of the control socket",
+            line.trim()
+        );
+    }
+    for (_, s) in &steps {
+        match s {
+            Step::Send(t) => send(Input::Keys(t)),
+            Step::Mouse(x, y, b) => send(Input::Mouse(*x, *y, *b)),
+            Step::Pause(d) => std::thread::sleep(*d),
+            _ => {}
+        }
+    }
+    "ok".into()
+}
+
+/// The input that a step gives to the machine.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Input<'a> {
+    /// Bytes for the console.
+    Keys(&'a [u8]),
+    /// A mouse event: the point and the buttons.
+    Mouse(u16, u16, u8),
+}
+
+/// Run the steps against the console. `send` gives the input of the steps to the machine. The result is Ok at `quit` or
 /// at the end of the steps, and the reason of the failure otherwise.
 pub fn run(
     steps: &[(usize, Step)],
     log: &Transcript,
-    mut send: impl FnMut(&[u8]),
+    mut send: impl FnMut(Input),
 ) -> Result<(), String> {
     let mut timeout = TIMEOUT;
     let mut seen = 0;
@@ -181,7 +247,8 @@ pub fn run(
                     )
                 })?;
             }
-            Step::Send(t) => send(t),
+            Step::Send(t) => send(Input::Keys(t)),
+            Step::Mouse(x, y, b) => send(Input::Mouse(*x, *y, *b)),
             Step::Timeout(d) => timeout = *d,
             Step::Pause(d) => std::thread::sleep(*d),
             Step::Quit => break,
@@ -192,7 +259,7 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::{Step, Tee, Transcript, parse, run};
+    use super::{Input, Step, Tee, Transcript, control, parse, run};
     use std::io::Write;
     use std::time::Duration;
 
@@ -220,6 +287,30 @@ mod tests {
         assert!(parse("wait").unwrap_err().contains("needs a text"));
         assert!(parse("timeout soon").is_err());
         assert!(parse("pause").is_err());
+        assert_eq!(
+            parse("mouse 10 20\nmouse 10 20 4\nclick 5 6\nclick 5 6 2").unwrap(),
+            vec![
+                (1, Step::Mouse(10, 20, 0)),
+                (2, Step::Mouse(10, 20, 4)),
+                (3, Step::Mouse(5, 6, 0)),
+                (3, Step::Mouse(5, 6, 1)),
+                (3, Step::Mouse(5, 6, 0)),
+                (4, Step::Mouse(5, 6, 0)),
+                (4, Step::Mouse(5, 6, 2)),
+                (4, Step::Mouse(5, 6, 0)),
+            ]
+        );
+        for bad in [
+            "mouse",
+            "mouse 1",
+            "mouse 1 2 3 4",
+            "mouse 1 2 32",
+            "click -1 2",
+            "click a b",
+            "mouse 70000 1",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
         assert!(parse("snap open").unwrap_err().contains("not known"));
         assert!(parse("quit now").is_err());
     }
@@ -237,7 +328,10 @@ mod tests {
             let log = log.clone();
             move || {
                 let mut sent = Vec::new();
-                let r = run(&steps, &log, |b| sent.extend_from_slice(b));
+                let r = run(&steps, &log, |i| match i {
+                    Input::Keys(b) => sent.extend_from_slice(b),
+                    Input::Mouse(..) => panic!("no mouse step"),
+                });
                 (r, sent)
             }
         });
@@ -254,6 +348,35 @@ mod tests {
         assert!(
             r.unwrap_err().contains("line 4"),
             "each match is after the last one"
+        );
+    }
+
+    #[test]
+    fn a_control_line_gives_input_and_a_reply() {
+        let mut got = Vec::new();
+        let mut give = |i: Input| {
+            got.push(match i {
+                Input::Keys(b) => format!("keys {}", String::from_utf8_lossy(b)),
+                Input::Mouse(x, y, b) => format!("mouse {x} {y} {b}"),
+            });
+        };
+        assert_eq!(control("click 300 300", &mut give), "ok");
+        assert_eq!(control("send \"ls\\n\"", &mut give), "ok");
+        assert_eq!(control("pause 0", &mut give), "ok");
+        assert!(control("wait term%", &mut give).starts_with("error: "));
+        assert!(control("quit", &mut give).starts_with("error: "));
+        assert_eq!(
+            control("mouse 1", &mut give),
+            "error: give mouse X Y and a button number"
+        );
+        assert_eq!(
+            got,
+            [
+                "mouse 300 300 0",
+                "mouse 300 300 1",
+                "mouse 300 300 0",
+                "keys ls\n"
+            ]
         );
     }
 }

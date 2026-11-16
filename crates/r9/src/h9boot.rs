@@ -135,11 +135,56 @@ pub fn command(req: &Request, disks: &[PathBuf]) -> Vec<String> {
     if let Some(f) = &req.snap {
         c.push("--snap".into());
         c.push(f.display().to_string());
+        c.push("--control".into());
+        c.push(control_path(&req.work).display().to_string());
     } else {
         c.push("--screen".into());
         c.push("none".into());
     }
     c
+}
+
+/// The socket of `9h run --control` in the work directory.
+fn control_path(work: &Path) -> PathBuf {
+    work.join("9h.sock")
+}
+
+/// A point in the console window of rio. The `riostart` of 9front makes the `stats` window at
+/// 0,0 to 161,117 in the background, then a window with `-miny 130`, then the console window, so
+/// the console window is on top. rio puts a new window with no rectangle at 32, 48 or 64 pixels
+/// from the corner, 600 by 400 pixels on the 1024x768 screen. This point is in each of these
+/// places and not in `stats`.
+const CONSOLE_POINT: (u32, u32) = (300, 300);
+
+/// Click in the console window of rio, so that the commands go to it. `stats` can be the last
+/// new window on more than one processor, and then it has the keyboard focus. The click waits 2
+/// seconds first, because `stats` can come after the first prompt of the console.
+fn click_console(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+        let s = UnixStream::connect(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        s.set_read_timeout(Some(Duration::from_secs(15)))
+            .map_err(|e| e.to_string())?;
+        let (x, y) = CONSOLE_POINT;
+        (&s).write_all(format!("pause 2\nclick {x} {y}\n").as_bytes())
+            .map_err(|e| e.to_string())?;
+        let mut r = BufReader::new(&s);
+        for _ in 0..2 {
+            let mut line = String::new();
+            r.read_line(&mut line).map_err(|e| e.to_string())?;
+            if line.trim() != "ok" {
+                return Err(format!("the monitor answered {:?}", line.trim()));
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Err("the control socket needs a Unix host".into())
+    }
 }
 
 /// Boot the 9h kernel and run the commands.
@@ -173,6 +218,7 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
         .stderr(stderr)
         .spawn()
         .map_err(|e| format!("cannot run {}: {e}", mc[0]))?;
+    let control = req.snap.is_some().then(|| control_path(&req.work));
     let driven = boot::drive(
         &mut child,
         &mut log,
@@ -180,6 +226,13 @@ pub fn run(req: &Request) -> Result<Outcome, String> {
         commands,
         req.timeout,
         || {},
+        || {
+            if let Some(p) = &control
+                && let Err(e) = click_console(p)
+            {
+                eprintln!("r9: the click in the console window of rio failed: {e}");
+            }
+        },
     );
     let collected = match req.collect_mib {
         Some(_) => boot::collect(&req.work),
@@ -325,7 +378,7 @@ mod tests {
         assert!(
             command(&r, &[])
                 .join(" ")
-                .ends_with(" --snap /w/screen.png")
+                .ends_with(" --snap /w/screen.png --control /w/9h.sock")
         );
     }
 

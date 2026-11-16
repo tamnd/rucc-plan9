@@ -24,6 +24,7 @@ enum {
 	H9screeninfo	= 0xC6000050,	/* () returns width | height<<16, or -1 */
 	H9screenset	= 0xC6000051,	/* (pa, width, height, chan) gives the framebuffer, returns 0 */
 	H9screenflush	= 0xC6000052,	/* (min, max) the rectangle changed, x | y<<16 each, returns 0 */
+	H9mouseget	= 0xC6000060,	/* () returns x | y<<16 | buttons<<32 of the next event, or -1 */
 
 	H9sdsecsize	= 512,		/* bytes in a sector */
 	H9sdmax	= 128,		/* the most sectors of one call */
@@ -34,6 +35,7 @@ enum {
 	H9revision	= 1,
 
 	IRQh9cons	= SPI+16,	/* level, high while console input waits */
+	IRQh9mouse	= SPI+17,	/* level, high while a mouse event waits */
 };
 
 extern uvlong	h9call(uvlong, uvlong, uvlong, uvlong, uvlong);
