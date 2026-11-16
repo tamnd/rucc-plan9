@@ -94,6 +94,8 @@ exit Del                              # the program's quit, then check it exits 
 
 `r9 gui run` executes a script against a running session. It drives `rio`'s files from a helper process in the guest, and collects each `snap` as an image file plus its hash. `r9 gui compare` compares R's snaps with G's step by step. It applies the masks, which are rectangles in window coordinates declared by `mask` steps. Its output is a pass, or the first differing step with a picture of the difference: G, R, and the XOR.
 
+**Status.** On 9h, the input comes from the host and not from a helper process in the guest. A probe on the arm64 9h guest showed that text written to `/dev/kbdin` goes to the console window and not to the current window, and that the `/dev/kbdtap` of `rio` drops a write when the window is not the current one. The keys of the 9h console device and the 9h mouse go to the current window, as the keys and the mouse of a person do. Thus `r9 gui run` gives the steps of a script to the monitor on its control socket. The monitor has the steps `quiet` and `snap` for this (10). `quiet` watches the rectangle of the window under test, and `snap` writes that rectangle as a PNG file. `r9 gui` reads the pixels from the PNG file and records their SHA-256 hash.
+
 **Classes** (02.7):
 - **exact**, with no masks. There is no allowance: the bytes are equal or they are not.
 - **masked**, with masks covering less than half the window.

@@ -8,12 +8,17 @@
 //! - `mouse X Y [BUTTONS]` moves the mouse to the pixel (X, Y) of the screen with BUTTONS down, 0
 //!   by default: 1 is the left button, 2 the middle, 4 the right, and 8 and 16 the wheel;
 //! - `click X Y [BUTTON]` moves the mouse to (X, Y), and pushes and releases BUTTON, 1 by default;
+//! - `quiet [MS [SECS [X0 Y0 X1 Y1]]]` waits until the screen, or the rectangle of it from
+//!   (X0, Y0) to (X1, Y1), did not change for MS milliseconds, 500 by default, and fails when that
+//!   does not occur in SECS seconds, 30 by default;
+//! - `snap FILE [X0 Y0 X1 Y1]` writes the screen, or the rectangle of it from (X0, Y0) to
+//!   (X1, Y1), to FILE as a PNG file;
 //! - `quit` ends the session, and the script passes.
 //!
 //! TEXT is the rest of the line with the spaces at its two ends removed, or a string in double quotes with the escapes `\n`, `\r`, `\t`,
 //! `\\`, `\"` and `\xHH`. A line that starts with `#` is a comment. The script fails at the first
-//! `wait` that times out, and when the session ends before the script does. The other steps of the
-//! GUI (`window`, `keys`, `snap`, `quiet`) come later.
+//! `wait` that times out, at a `quiet` or a `snap` that fails, and when the session ends before
+//! the script does. `r9 gui run` makes the steps of a GUI script (plan 12.6) into these steps.
 
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -31,12 +36,117 @@ pub enum Step {
     Pause(Duration),
     /// Move the mouse to (x, y) with these buttons down.
     Mouse(u16, u16, u8),
+    /// Wait until the screen, or a rectangle of it, did not change for the first time, for no more
+    /// than the second.
+    Quiet(Duration, Duration, Option<[u16; 4]>),
+    /// Write the screen, or a rectangle of it, to a PNG file.
+    Snap(String, Option<[u16; 4]>),
     /// End the session.
     Quit,
 }
 
 /// The default time of a `wait`.
 pub const TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The time with no change of the screen of a `quiet` with no number.
+pub const STILL: Duration = Duration::from_millis(500);
+
+/// The limit of a `quiet` with one number or none.
+pub const QUIET_LIMIT: Duration = Duration::from_secs(30);
+
+/// The machine that the steps drive.
+pub trait Target {
+    /// Give input to the machine.
+    fn give(&mut self, i: Input);
+    /// A number that changes each time the screen, or the rectangle `rect` of it, changes.
+    fn look(&mut self, rect: Option<[u16; 4]>) -> Result<u64, String> {
+        let _ = rect;
+        Err("the machine has no screen".into())
+    }
+    /// Write the screen, or the rectangle `rect` (x0, y0, x1, y1) of it, to the PNG file `file`.
+    fn snap(&mut self, file: &str, rect: Option<[u16; 4]>) -> Result<(), String> {
+        let _ = (file, rect);
+        Err("the machine has no screen".into())
+    }
+}
+
+impl<F: FnMut(Input)> Target for F {
+    fn give(&mut self, i: Input) {
+        self(i);
+    }
+}
+
+/// The rectangle of the numbers `x0 y0 x1 y1`, or None when it is empty or a number is too large.
+fn rect(x0: u64, y0: u64, x1: u64, y1: u64) -> Option<[u16; 4]> {
+    let r = [x0, y0, x1, y1].map(u16::try_from);
+    let [Ok(x0), Ok(y0), Ok(x1), Ok(y1)] = r else {
+        return None;
+    };
+    (x0 < x1 && y0 < y1).then_some([x0, y0, x1, y1])
+}
+
+/// The `quiet` step of the words after `quiet`.
+fn quiet_step(arg: &str) -> Option<Step> {
+    let nums: Vec<u64> = arg
+        .split_whitespace()
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    Some(match nums[..] {
+        [] => Step::Quiet(STILL, QUIET_LIMIT, None),
+        [ms] => Step::Quiet(Duration::from_millis(ms), QUIET_LIMIT, None),
+        [ms, secs] => Step::Quiet(Duration::from_millis(ms), Duration::from_secs(secs), None),
+        [ms, secs, x0, y0, x1, y1] => Step::Quiet(
+            Duration::from_millis(ms),
+            Duration::from_secs(secs),
+            Some(rect(x0, y0, x1, y1)?),
+        ),
+        _ => return None,
+    })
+}
+
+/// The `snap` step of the words after `snap`.
+fn snap_step(arg: &str) -> Option<Step> {
+    let mut words = arg.split_whitespace();
+    let file = words.next()?.to_string();
+    let nums: Vec<u64> = words.map(str::parse).collect::<Result<_, _>>().ok()?;
+    match nums[..] {
+        [] => Some(Step::Snap(file, None)),
+        [x0, y0, x1, y1] => Some(Step::Snap(file, Some(rect(x0, y0, x1, y1)?))),
+        _ => None,
+    }
+}
+
+/// Wait until the screen, or the rectangle `rect` of it, did not change for `still`, for no more
+/// than `limit`.
+fn quiet(
+    t: &mut impl Target,
+    still: Duration,
+    limit: Duration,
+    rect: Option<[u16; 4]>,
+) -> Result<(), String> {
+    let start = Instant::now();
+    let mut g = t.look(rect)?;
+    let mut since = start;
+    loop {
+        std::thread::sleep(Duration::from_millis(10).min(still));
+        let now = Instant::now();
+        let n = t.look(rect)?;
+        if n != g {
+            g = n;
+            since = now;
+        } else if now - since >= still {
+            return Ok(());
+        }
+        if now - start >= limit {
+            return Err(format!(
+                "the screen did not stay the same for {} ms in {} s",
+                still.as_millis(),
+                limit.as_secs()
+            ));
+        }
+    }
+}
 
 fn text(s: &str) -> Result<Vec<u8>, String> {
     let Some(q) = s.strip_prefix('"') else {
@@ -129,6 +239,13 @@ pub fn parse(src: &str) -> Result<Vec<(usize, Step)>, String> {
                     Step::Mouse(x, y, b)
                 }
             }
+            "quiet" => quiet_step(arg).ok_or_else(|| {
+                format!(
+                    "line {n}: give quiet, quiet MS, quiet MS SECS or quiet MS SECS X0 Y0 X1 Y1"
+                )
+            })?,
+            "snap" => snap_step(arg)
+                .ok_or_else(|| format!("line {n}: give snap FILE or snap FILE X0 Y0 X1 Y1"))?,
             "quit" if arg.is_empty() => Step::Quit,
             _ => return Err(format!("line {n}: the step {line:?} is not known")),
         };
@@ -189,18 +306,18 @@ impl<W: std::io::Write> std::io::Write for Tee<W> {
 }
 
 /// Do one line that a host program wrote on the socket of `--control`, and give the reply: `ok`,
-/// or `error: ` and the reason. The line has the steps `send`, `mouse`, `click` and `pause` only,
-/// because the console output does not go to the socket. The monitor does all the steps of the
+/// or `error: ` and the reason. The line has the steps `send`, `mouse`, `click`, `pause`, `quiet`
+/// and `snap` only, because the console output does not go to the socket. The monitor does all the steps of the
 /// line before it replies, so a program that waits for the reply knows that the input is in the
 /// machine.
-pub fn control(line: &str, mut send: impl FnMut(Input)) -> String {
+pub fn control(line: &str, t: &mut impl Target) -> String {
     let steps = match parse(line) {
         Ok(s) => s,
         Err(e) => return format!("error: {}", e.trim_start_matches("line 1: ")),
     };
     if steps
         .iter()
-        .any(|(_, s)| !matches!(s, Step::Send(_) | Step::Mouse(..) | Step::Pause(_)))
+        .any(|(_, s)| matches!(s, Step::Wait(_) | Step::Timeout(_) | Step::Quit))
     {
         return format!(
             "error: {:?} is not a step of the control socket",
@@ -208,11 +325,25 @@ pub fn control(line: &str, mut send: impl FnMut(Input)) -> String {
         );
     }
     for (_, s) in &steps {
-        match s {
-            Step::Send(t) => send(Input::Keys(t)),
-            Step::Mouse(x, y, b) => send(Input::Mouse(*x, *y, *b)),
-            Step::Pause(d) => std::thread::sleep(*d),
-            _ => {}
+        let r = match s {
+            Step::Send(b) => {
+                t.give(Input::Keys(b));
+                Ok(())
+            }
+            Step::Mouse(x, y, b) => {
+                t.give(Input::Mouse(*x, *y, *b));
+                Ok(())
+            }
+            Step::Pause(d) => {
+                std::thread::sleep(*d);
+                Ok(())
+            }
+            Step::Quiet(still, limit, r) => quiet(t, *still, *limit, *r),
+            Step::Snap(f, r) => t.snap(f, *r),
+            Step::Wait(_) | Step::Timeout(_) | Step::Quit => Ok(()),
+        };
+        if let Err(e) = r {
+            return format!("error: {e}");
         }
     }
     "ok".into()
@@ -229,11 +360,7 @@ pub enum Input<'a> {
 
 /// Run the steps against the console. `send` gives the input of the steps to the machine. The result is Ok at `quit` or
 /// at the end of the steps, and the reason of the failure otherwise.
-pub fn run(
-    steps: &[(usize, Step)],
-    log: &Transcript,
-    mut send: impl FnMut(Input),
-) -> Result<(), String> {
+pub fn run(steps: &[(usize, Step)], log: &Transcript, t: &mut impl Target) -> Result<(), String> {
     let mut timeout = TIMEOUT;
     let mut seen = 0;
     for (n, step) in steps {
@@ -247,10 +374,14 @@ pub fn run(
                     )
                 })?;
             }
-            Step::Send(t) => send(Input::Keys(t)),
-            Step::Mouse(x, y, b) => send(Input::Mouse(*x, *y, *b)),
+            Step::Send(b) => t.give(Input::Keys(b)),
+            Step::Mouse(x, y, b) => t.give(Input::Mouse(*x, *y, *b)),
             Step::Timeout(d) => timeout = *d,
             Step::Pause(d) => std::thread::sleep(*d),
+            Step::Quiet(still, limit, r) => {
+                quiet(t, *still, *limit, *r).map_err(|e| format!("line {n}: {e}"))?;
+            }
+            Step::Snap(f, r) => t.snap(f, *r).map_err(|e| format!("line {n}: {f}: {e}"))?,
             Step::Quit => break,
         }
     }
@@ -259,7 +390,7 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::{Input, Step, Tee, Transcript, control, parse, run};
+    use super::{Input, Step, Target, Tee, Transcript, control, parse, run};
     use std::io::Write;
     use std::time::Duration;
 
@@ -311,7 +442,49 @@ mod tests {
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
-        assert!(parse("snap open").unwrap_err().contains("not known"));
+        assert!(parse("window 1024x768").unwrap_err().contains("not known"));
+        assert_eq!(
+            parse("quiet\nquiet 200\nquiet 200 5\nsnap a.png\nsnap b.png 1 2 30 40").unwrap(),
+            vec![
+                (
+                    1,
+                    Step::Quiet(Duration::from_millis(500), Duration::from_secs(30), None)
+                ),
+                (
+                    2,
+                    Step::Quiet(Duration::from_millis(200), Duration::from_secs(30), None)
+                ),
+                (
+                    3,
+                    Step::Quiet(Duration::from_millis(200), Duration::from_secs(5), None)
+                ),
+                (4, Step::Snap("a.png".into(), None)),
+                (5, Step::Snap("b.png".into(), Some([1, 2, 30, 40]))),
+            ]
+        );
+        assert_eq!(
+            parse("quiet 100 2 0 0 10 10").unwrap(),
+            vec![(
+                1,
+                Step::Quiet(
+                    Duration::from_millis(100),
+                    Duration::from_secs(2),
+                    Some([0, 0, 10, 10])
+                )
+            )]
+        );
+        for bad in [
+            "quiet a",
+            "quiet 1 2 3",
+            "quiet 1 2 3 4 5 6 7",
+            "quiet 1 2 5 5 5 9",
+            "quiet 1 2 0 0 70000 1",
+            "snap",
+            "snap a 1 2 3",
+            "snap a 5 5 5 9",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
         assert!(parse("quit now").is_err());
     }
 
@@ -328,7 +501,7 @@ mod tests {
             let log = log.clone();
             move || {
                 let mut sent = Vec::new();
-                let r = run(&steps, &log, |i| match i {
+                let r = run(&steps, &log, &mut |i: Input<'_>| match i {
                     Input::Keys(b) => sent.extend_from_slice(b),
                     Input::Mouse(..) => panic!("no mouse step"),
                 });
@@ -344,11 +517,57 @@ mod tests {
         assert_eq!(tee.out, b"boot\nterm% ls\nbin\nterm% ");
 
         let steps = parse("timeout 0\nwait \"term% \"\nwait \"term% \"\nwait \"term% \"").unwrap();
-        let r = run(&steps, &log, |_| {});
+        let r = run(&steps, &log, &mut |_: Input| {});
         assert!(
             r.unwrap_err().contains("line 4"),
             "each match is after the last one"
         );
+    }
+
+    /// A screen that changes at each of the first `busy` reads of the generation.
+    struct Screen {
+        busy: u64,
+        reads: u64,
+        snaps: Vec<(String, Option<[u16; 4]>)>,
+    }
+
+    impl Target for Screen {
+        fn give(&mut self, _: Input) {}
+
+        fn look(&mut self, _: Option<[u16; 4]>) -> Result<u64, String> {
+            self.reads += 1;
+            Ok(self.reads.min(self.busy))
+        }
+
+        fn snap(&mut self, file: &str, rect: Option<[u16; 4]>) -> Result<(), String> {
+            self.snaps.push((file.into(), rect));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn quiet_waits_for_the_screen_and_snap_writes_it() {
+        let mut s = Screen {
+            busy: 5,
+            reads: 0,
+            snaps: Vec::new(),
+        };
+        assert_eq!(control("quiet 30 5", &mut s), "ok");
+        assert!(s.reads > 5, "quiet reads until the screen stops");
+        assert_eq!(control("snap a.png 0 0 8 8", &mut s), "ok");
+        assert_eq!(s.snaps, vec![("a.png".to_string(), Some([0, 0, 8, 8]))]);
+
+        let mut busy = Screen {
+            busy: u64::MAX,
+            reads: 0,
+            snaps: Vec::new(),
+        };
+        let r = control("quiet 50 0", &mut busy);
+        assert!(r.contains("did not stay the same"), "{r}");
+
+        let mut none = |_: Input| {};
+        assert!(control("quiet", &mut none).contains("no screen"));
+        assert!(control("snap a.png", &mut none).contains("no screen"));
     }
 
     #[test]
