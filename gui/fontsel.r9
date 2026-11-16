@@ -1,0 +1,7 @@
+# fontsel shows the fonts of /lib/font. The key q stops it.
+class exact
+window 600x360
+run fontsel
+quiet
+snap fonts
+exit "q"

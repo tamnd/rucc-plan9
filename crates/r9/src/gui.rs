@@ -24,7 +24,8 @@
 //! - `mask X0 Y0 X1 Y1` adds a rectangle of the window that `r9 gui compare` does not compare in
 //!   the next snaps, and `mask none` removes all of them;
 //! - `exit KEY` types KEY (`Del`, `Esc` or a quoted string), and then the program must stop with
-//!   an empty status in 30 seconds.
+//!   an empty status in 30 seconds. `exit none` types nothing, for a program that stops from a
+//!   menu: the steps before it choose the item of the menu.
 //!
 //! The coordinates are in the window, with 0,0 at the top left of its border. The output
 //! directory has a PNG file for each snap, the screen at the end in `screen.png`, and `gui.json`,
@@ -151,6 +152,7 @@ fn key(s: &str) -> Option<Vec<u8>> {
     match s {
         "Del" => Some(vec![0x7f]),
         "Esc" => Some(vec![0x1b]),
+        "none" => Some(Vec::new()),
         _ => quoted(s),
     }
 }
@@ -378,6 +380,7 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
             mouse(*q, *b),
             mouse(*q, 0),
         ],
+        Step::Keys(k) | Step::Exit(k) if k.is_empty() => Vec::new(),
         Step::Keys(k) | Step::Exit(k) => vec![send(k)],
         Step::Pause(s) => vec![format!("pause {s}")],
         Step::Mask(_) => Vec::new(),
@@ -942,6 +945,11 @@ exit Del
             vec!["send \"a\\\"\\\\\\n\\x7f\""]
         );
         assert!(l(Step::Mask(None)).is_empty());
+        assert!(l(Step::Exit(Vec::new())).is_empty());
+        assert_eq!(
+            parse("run a\nexit none").unwrap().steps[1].1,
+            Step::Exit(Vec::new())
+        );
     }
 
     #[test]

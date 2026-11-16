@@ -1,0 +1,11 @@
+# colors shows the 256 colours of the colour map. A click with button 1 on a colour shows its values at the top left. The exit item of the menu of button 3 stops it.
+class exact
+window 400x400
+run colors
+quiet
+snap map
+mouse 1 at 200,200
+quiet
+snap value
+mouse 3 at 200,200
+exit none

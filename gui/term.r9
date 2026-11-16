@@ -7,4 +7,7 @@ snap text
 drag 1 20,8 60,50
 quiet
 snap select
+# Typed text goes to the selection, and the selection is before the output point. Thus a click below the text puts the selection at the end, and then the newline gets to read.
+mouse 1 at 300,250
+quiet
 exit "\n"
