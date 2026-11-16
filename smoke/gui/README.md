@@ -31,3 +31,14 @@ The sources are the `front` tree at 2859ae04e800, and the image is release 11554
 
 - The hands of clock and catclock, and the graph of stats, which change with time.
 - catclock, which is in `/bin/games` and not in `/bin` on the image. The G picture has no catclock window, and winwatch shows one name less.
+
+## On the screen of the 9h machine
+
+`9h.rc` and `9h.start` run the same programs on the screen of the 9h machine (plan 10), with no `vncs`. `r9 9h boot --snap` boots the 9h kernel to rio and types each line of `9h.rc` in the console window. `9h.rc` builds the programs as `run.rc` does. Then `9h.start` moves the console window, opens a window for each program, and gives the keyboard focus back to the console window. A new window of rio has the name space of rio, not that of the console window, so each command has the full path of the program in `/tmp/r/bin`. The monitor writes the picture of the screen at the end of the session.
+
+```sh
+python3 -I smoke/gui/gather.py PATH/TO/rucc PATH/TO/TREE arm64 /tmp/gui/in
+r9 9h boot --kernel 99h.u --root g-base.arm64.qcow2 --cpus 4 --snap /tmp/gui/screen.png --in /tmp/gui/in --collect 64 --run smoke/gui/9h.rc --timeout 600 --out /tmp/gui/9h
+```
+
+With rucc 0.30.15 and the 9h arm64 kernel of the pinned tree on an M4 with 4 processors, all 604 files compile in 7 seconds on the host. In the guest, all 10 programs link. clock, catclock, colors, acme, stats and winwatch run in their windows, and each standard error file is empty. The session takes 45 seconds.

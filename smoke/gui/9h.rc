@@ -1,0 +1,13 @@
+# The GUI smoke test on the screen of the 9h machine. r9 9h boot --snap boots to rio and types
+# each line in the console window. The input disk is the output of gather.py. The guest puts the
+# objects of rucc into a copy of each library of the image and links the programs with the
+# loader of the image. 9h.start then opens a window for each program on the screen of rio.
+cd /tmp && mkdir r && cd r && tar xf $r9in && mkdir L bin
+O=`{sed -n 's/^O=//p' /$objtype/mkfile}; echo O $O
+for(l in `{ls lib | sed 's,.*/,,'}) { cp /$objtype/lib/$l.a L/$l.a; cd lib/$l; ar r ../../L/$l.a *.$O; echo lib $l `{ls | wc -l}; cd /tmp/r }
+bind -b /tmp/r/L /$objtype/lib
+for(p in `{ls cmd | sed 's,.*/,,'}) { cd cmd/$p; $O^l -o /tmp/r/bin/$p *.$O && echo linked $p; cd /tmp/r }
+for(f in one/*.$O) { $O^l -o bin/`{basename $f .$O} $f && echo linked $f }
+ls bin | wc -l
+rc /tmp/r/9h.start
+ps > ps.txt; tar cf $r9collect ps.txt `{ls *.err}

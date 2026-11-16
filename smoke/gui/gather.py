@@ -9,7 +9,7 @@ of rucc and the CFLAGS of its mkfile, and writes:
 - OUT/lib/LIB/*.O, the objects of each library that the mkfile builds.
 - OUT/cmd/PROG/*.O, the objects of each program of more than one file.
 - OUT/one/PROG.O, the object of each program of one file.
-- OUT/gui.rc and OUT/start, the guest scripts of this directory.
+- OUT/gui.rc, OUT/start, OUT/9h.rc and OUT/9h.start, the guest scripts of this directory.
 
 Then give OUT to r9 boot with --in, and smoke/gui/run.rc with --run.
 """
@@ -173,7 +173,7 @@ jobs += [(os.path.dirname(p), os.path.basename(p), os.path.join(out, "one")) for
 with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 4) as pool:
     errors = [e for e in pool.map(lambda j: compile_one(*j), jobs) if e]
 here = os.path.dirname(os.path.abspath(__file__))
-for f in ("gui.rc", "start"):
+for f in ("gui.rc", "start", "9h.rc", "9h.start"):
     shutil.copy(os.path.join(here, f), os.path.join(out, f))
 for name, why in KEEP.items():
     print(f"keep {name}: it needs {why}")
