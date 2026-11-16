@@ -32,6 +32,8 @@ pub struct H9Screen {
     pixels: Vec<u32>,
     /// The number of flushes.
     pub flushes: u64,
+    /// A number that changes each time the copy of the screen changes, for a host window.
+    generation: u64,
 }
 
 impl H9Screen {
@@ -44,6 +46,7 @@ impl H9Screen {
             frame: None,
             pixels: vec![0; width as usize * height as usize],
             flushes: 0,
+            generation: 0,
         }
     }
 
@@ -57,6 +60,19 @@ impl H9Screen {
     #[must_use]
     pub fn on(&self) -> bool {
         self.frame.is_some()
+    }
+
+    /// A number that changes each time the copy of the screen changes. A host window compares it
+    /// with the number of its last frame.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The copy of the screen, one 0x00RRGGBB word for each pixel, row by row.
+    #[must_use]
+    pub fn pixels(&self) -> &[u32] {
+        &self.pixels
     }
 
     /// The pixel at (x, y), 0x00RRGGBB.
@@ -104,6 +120,7 @@ impl H9Screen {
         if x0 >= x1 || y0 >= y1 {
             return;
         }
+        self.generation += 1;
         let n = (x1 - x0) as usize;
         let mut row = vec![0u8; n * 4];
         for y in y0..y1 {
@@ -187,6 +204,9 @@ mod tests {
         assert_eq!(s.pixel(9, 5), 0x0006_0504);
         assert_eq!(s.colours(), 4);
         assert_eq!(s.flushes, 2);
+        // The set and the two flushes each changed the copy.
+        assert_eq!(s.generation(), 3);
+        assert_eq!(s.pixels().len(), 16 * 8);
         let png = s.png();
         assert!(png.starts_with(b"\x89PNG"));
     }

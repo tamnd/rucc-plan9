@@ -21,6 +21,8 @@ All of this lives in the `9h` monitor's `h9-gui` crate (10.8). Nothing here runs
 | Linux, X11 | Xlib with MIT-SHM | drawterm `gui-x11` | `XShmPutImage` per flushed rectangle |
 | any | headless | none | no window; the framebuffer is read only by the test hooks (10.8) |
 
+**Status.** The AppKit back end is in `h9-gui/src/cocoa.rs`. It calls the Objective-C runtime directly and needs no crate. The first version copies the screen into a `CGImage` once for each frame that changed, at most 60 times a second, and sets the image as the contents of the layer of the view. The layer scales the image with the nearest pixel, so on a 2x display each Plan 9 pixel is 2x2 device pixels. The window does not resize the Plan 9 screen yet. The `IOSurface`, the resize and the key-up events come later. The Wayland and X11 back ends are not written yet.
+
 drawterm is MIT licensed. Where `h9-gui` ports its logic from C to Rust, as for the key tables, the modifier handling and the Wayland clipboard dance, the module says so. The monitor links no drawterm code, because drawterm's back ends call into its own kernel (`absmousetrack`, `kbdkey`, `screenputs`). `9h` has the real kernel in the guest and only needs the host half.
 
 **Choice at run time.** `9h` uses Wayland if `WAYLAND_DISPLAY` is set and X11 if `DISPLAY` is set, and headless otherwise or with `--headless`. Both Linux back ends are built into one binary, and the Wayland and X11 libraries are loaded with `dlopen` so the binary runs on a host with neither.
