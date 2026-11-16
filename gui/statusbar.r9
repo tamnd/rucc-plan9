@@ -1,0 +1,8 @@
+# aux/statusbar shows a bar for the progress of a job. It reads lines of two numbers, the part that is done and the full size, from its standard input. It makes a new window, so the script gives it the rectangle of the window under test, 724,688,1024,768. The bar shows 3 of 4, and statusbar stops when the input ends after 15 seconds.
+class exact
+window 300x80
+run {echo 3 4; sleep 15} | aux/statusbar -w 724,688,1024,768 copy
+pause 2
+quiet
+snap open
+exit none

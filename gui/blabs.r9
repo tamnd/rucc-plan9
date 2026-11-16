@@ -1,0 +1,7 @@
+# blabs shows the faces of the people of Bell Labs, which bounce in the window. The faces move with time, so the script is a smoke test. blabs has no quit key. The Del key sends the interrupt note to the window, and the function sigint keeps rc alive, so that rc writes the mark after blabs stops. The echo -n command makes the status empty.
+class smoke
+window 400x400
+run fn sigint {}; games/blabs; echo -n
+pause 3
+snap open
+exit "\x7f"

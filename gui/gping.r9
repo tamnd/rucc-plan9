@@ -1,0 +1,7 @@
+# gping shows a graph of the round trip time of ping messages to a machine. The machine has no network card, so the script adds the loopback interface with ipconfig, as termrc does, and pings the loopback address. The graph changes with time, so the script is a smoke test. The key q stops gping.
+class smoke
+window 400x200
+run ip/ipconfig loopback /dev/null 127.1; ip/gping -i 1000 127.1
+pause 3
+snap open
+exit "q"

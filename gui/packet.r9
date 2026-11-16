@@ -1,0 +1,7 @@
+# packet shows a network of nodes that send packets to each other. The packets move with time, so the script is a smoke test. packet has no quit key. The Del key sends the interrupt note to the window, and the function sigint keeps rc alive, so that rc writes the mark after packet stops. The echo -n command makes the status empty.
+class smoke
+window 400x400
+run fn sigint {}; games/packet; echo -n
+pause 3
+snap open
+exit "\x7f"

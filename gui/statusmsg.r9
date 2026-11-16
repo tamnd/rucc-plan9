@@ -1,0 +1,8 @@
+# aux/statusmsg shows the last line of its standard input under a title. It makes a new window, so the script gives it the rectangle of the window under test, 724,688,1024,768. statusmsg stops when the input ends after 15 seconds.
+class exact
+window 300x80
+run {echo first line; echo second line; sleep 15} | aux/statusmsg -w 724,688,1024,768 status
+pause 2
+quiet
+snap open
+exit none

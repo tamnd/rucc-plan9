@@ -1,0 +1,7 @@
+# juggle shows a juggler that throws balls in the site swap pattern 3. The balls move with time, so the script is a smoke test. juggle has no quit key. The Del key sends the interrupt note to the window, and the function sigint keeps rc alive, so that rc writes the mark after juggle stops. The echo -n command makes the status empty.
+class smoke
+window 300x300
+run fn sigint {}; games/juggle 3; echo -n
+pause 3
+snap open
+exit "\x7f"
