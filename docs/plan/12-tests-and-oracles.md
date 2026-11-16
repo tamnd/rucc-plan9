@@ -38,6 +38,8 @@ The test:
 
 kencc's output depends only on its input, and G is kencc built by kencc. So Rk equals G unless rucc miscompiled kencc. A difference names a unit whose object differs. `r9 objdiff` then shows the first differing record, which usually points at the kencc function R got wrong. `r9 mix` (12.8) bisects kencc's own objects to find which.
 
+Both builds run `mk clean install`, but `mk clean` does not remove each output. An archive such as `libplot.a6`, a generated file such as `enam.c` and an installed rc script stay in R's image, and mk does not make them again. A link in Rk then uses objects that rucc compiled, and the comparison does not see the files that mk did not write. In the first runs, this gave 67 files that only G wrote and a different `plot` on both rows. Thus a build with the target `clean` first reads the list of changed files that the earlier build left in `/tmp/r9/changed`. It removes each file in the list that is not in `/$objtype/bin` or `/$objtype/lib`, and it gives the date 0 to each installed file. mk then makes each of them again, as in a new tree.
+
 On arm64, the same test uses `7c`/`7l`/`7a` from P4. The fixed point is a full build, but it runs natively in the guest, so it is as fast as G's build (04.5).
 
 ## 12.5 `diffrun`
