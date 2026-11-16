@@ -14,6 +14,8 @@
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod cocoa;
 #[cfg(unix)]
+pub mod vinput;
+#[cfg(unix)]
 mod wayland;
 #[cfg(unix)]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
