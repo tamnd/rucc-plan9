@@ -2,6 +2,8 @@
 //! console of a session with no person at it, as `r9 9h boot` and `r9 9h smoke` do. Each line is
 //! one step:
 //! - `wait TEXT` waits until the console writes TEXT after the last match;
+//! - `absent TEXT` fails when the console wrote TEXT after the last match, such as the exit line
+//!   of a program that must still run;
 //! - `send TEXT` types TEXT on the console;
 //! - `timeout SECS` sets the time that each later `wait` can take, 60 seconds at the start;
 //! - `pause SECS` waits SECS seconds, such as for a program that does not write to the console;
@@ -28,6 +30,8 @@ use std::time::{Duration, Instant};
 pub enum Step {
     /// Wait for these bytes on the console.
     Wait(Vec<u8>),
+    /// Fail when the console wrote these bytes.
+    Absent(Vec<u8>),
     /// Type these bytes on the console.
     Send(Vec<u8>),
     /// The time that each later `wait` can take.
@@ -195,15 +199,15 @@ pub fn parse(src: &str) -> Result<Vec<(usize, Step)>, String> {
         let (verb, arg) = line.split_once(' ').unwrap_or((line, ""));
         let arg = arg.trim_start();
         let step = match verb {
-            "wait" | "send" => {
+            "wait" | "send" | "absent" => {
                 let t = text(arg).map_err(|e| format!("line {n}: {e}"))?;
                 if t.is_empty() {
                     return Err(format!("line {n}: {verb} needs a text"));
                 }
-                if verb == "wait" {
-                    Step::Wait(t)
-                } else {
-                    Step::Send(t)
+                match verb {
+                    "wait" => Step::Wait(t),
+                    "absent" => Step::Absent(t),
+                    _ => Step::Send(t),
                 }
             }
             "timeout" | "pause" => {
@@ -283,6 +287,17 @@ impl Transcript {
             t = self.0.1.wait_timeout(t, deadline - now).unwrap().0;
         }
     }
+
+    /// Fail when `needle` is in the transcript after `from`.
+    fn absent(&self, needle: &[u8], from: usize) -> Result<(), String> {
+        match self.find(needle, from, Instant::now()) {
+            Some(_) => Err(format!(
+                "the console wrote {:?}",
+                String::from_utf8_lossy(needle)
+            )),
+            None => Ok(()),
+        }
+    }
 }
 
 /// A writer that gives each byte to `out` and to the transcript.
@@ -327,7 +342,7 @@ impl Watch {
 
 /// Do one line that a host program wrote on the socket of `--control`, and give the reply: `ok`,
 /// or `error: ` and the reason. The line has the steps `send`, `mouse`, `click`, `pause`, `quiet`
-/// and `snap`, and `wait` and `timeout` when `watch` has the console output. The monitor does all
+/// and `snap`, and `wait`, `absent` and `timeout` when `watch` has the console output. The monitor does all
 /// the steps of the line before it replies, so a program that waits for the reply knows that the
 /// input is in the machine.
 pub fn control(line: &str, t: &mut impl Target, mut watch: Option<&mut Watch>) -> String {
@@ -337,7 +352,8 @@ pub fn control(line: &str, t: &mut impl Target, mut watch: Option<&mut Watch>) -
     };
     let console = watch.is_some();
     if steps.iter().any(|(_, s)| {
-        matches!(s, Step::Quit) || !console && matches!(s, Step::Wait(_) | Step::Timeout(_))
+        matches!(s, Step::Quit)
+            || !console && matches!(s, Step::Wait(_) | Step::Absent(_) | Step::Timeout(_))
     }) {
         return format!(
             "error: {:?} is not a step of the control socket",
@@ -372,6 +388,10 @@ pub fn control(line: &str, t: &mut impl Target, mut watch: Option<&mut Watch>) -
                         w.timeout.as_secs()
                     )),
                 },
+                None => Ok(()),
+            },
+            Step::Absent(text) => match watch.as_deref() {
+                Some(w) => w.log.absent(text, w.seen),
                 None => Ok(()),
             },
             Step::Timeout(d) => {
@@ -414,6 +434,7 @@ pub fn run(steps: &[(usize, Step)], log: &Transcript, t: &mut impl Target) -> Re
                     )
                 })?;
             }
+            Step::Absent(t) => log.absent(t, seen).map_err(|e| format!("line {n}: {e}"))?,
             Step::Send(b) => t.give(Input::Keys(b)),
             Step::Mouse(x, y, b) => t.give(Input::Mouse(*x, *y, *b)),
             Step::Timeout(d) => timeout = *d,
@@ -628,6 +649,12 @@ mod tests {
         let mut w = super::Watch::new(log.clone());
         log.add(b"R9-GUI-EXIT 1\nR9-GUI-EXIT \n");
         assert_eq!(control("wait R9-GUI-EXIT", &mut give, Some(&mut w)), "ok");
+        assert_eq!(control("wait R9-GUI-EXIT", &mut give, Some(&mut w)), "ok");
+        assert_eq!(control("absent R9-GUI-EXIT", &mut give, Some(&mut w)), "ok");
+        log.add(b"R9-GUI-EXIT 2\n");
+        let r = control("absent R9-GUI-EXIT", &mut give, Some(&mut w));
+        assert!(r.contains("the console wrote"), "{r}");
+        assert!(control("absent X", &mut give, None).starts_with("error: "));
         assert_eq!(control("wait R9-GUI-EXIT", &mut give, Some(&mut w)), "ok");
         assert_eq!(control("timeout 0", &mut give, Some(&mut w)), "ok");
         let r = control("wait R9-GUI-EXIT", &mut give, Some(&mut w));

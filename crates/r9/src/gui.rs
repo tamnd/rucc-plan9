@@ -7,7 +7,7 @@
 //! comes from the host and not from a process in the guest, because the keys and the mouse of the
 //! 9h machine go to the current window, as the keys and the mouse of a person do.
 //!
-//! The steps, one on each line, with `#` for a comment:
+//! The steps, one on each line, with `#` for a comment. A run line has no comment, because rc uses `#`:
 //!
 //! - `class exact|masked|smoke` is the class of the script (plan 02.7), `exact` by default;
 //! - `window WxH` is the size of the window, 640x480 by default, with its border;
@@ -239,17 +239,21 @@ pub fn parse(src: &str) -> Result<Script, String> {
     for (i, line) in src.lines().enumerate() {
         let n = i + 1;
         let line = line.trim();
-        // A comment starts at a # that is not in a quoted string.
+        // A comment starts at a # that is not in a quoted string. The command of a run line is
+        // rc text, in which # is part of a name such as '#c/cons', so a run line has no comment.
         let mut quote = false;
-        let end = line
-            .char_indices()
-            .find(|&(_, c)| {
-                if c == '"' {
-                    quote = !quote;
-                }
-                c == '#' && !quote
-            })
-            .map_or(line.len(), |(at, _)| at);
+        let end = if line.starts_with("run ") {
+            line.len()
+        } else {
+            line.char_indices()
+                .find(|&(_, c)| {
+                    if c == '"' {
+                        quote = !quote;
+                    }
+                    c == '#' && !quote
+                })
+                .map_or(line.len(), |(at, _)| at)
+        };
         let line = line[..end].trim();
         if line.is_empty() {
             continue;
@@ -418,7 +422,12 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
         // A program such as samterm reads /dev/kbd and keeps only the last key until its loop
         // takes it, so a burst of keys loses keys. One key on each line makes the monitor wait
         // after each key.
-        Step::Keys(k) | Step::Exit(k) => keys(k).map(send).collect(),
+        Step::Keys(k) => keys(k).map(send).collect(),
+        // A program that stopped before the exit key already wrote the exit line, and the exit
+        // key then goes to the next window. The absent step makes this an error.
+        Step::Exit(k) => std::iter::once(format!("absent {EXIT_MARK}"))
+            .chain(keys(k).map(send))
+            .collect(),
         Step::Pause(s) => vec![format!("pause {s}")],
         Step::Mask(_) => Vec::new(),
     }
@@ -889,7 +898,7 @@ mod tests {
     const DEMO: &str = r#"# gui/demo.r9
 class masked
 window 400x300
-run demo -x 'a b'   # the program
+run demo -x 'a b'
 quiet
 snap open
 mouse 3 at 200,40
@@ -929,6 +938,10 @@ exit Del
             ]
         );
         assert_eq!(s.steps[0].0, 4);
+        assert_eq!(
+            parse("run echo x > '#c/cons'").unwrap().steps[0].1,
+            Step::Run("echo x > '#c/cons'".into())
+        );
     }
 
     #[test]
@@ -1029,6 +1042,10 @@ exit Del
         );
         assert!(l(Step::Mask(None)).is_empty());
         assert!(l(Step::Exit(Vec::new())).is_empty());
+        assert_eq!(
+            l(Step::Exit(vec![0x7f])),
+            vec!["absent R9-GUI-EXIT", "send \"\\x7f\""]
+        );
         assert_eq!(
             parse("run a\nexit none").unwrap().steps[1].1,
             Step::Exit(Vec::new())
