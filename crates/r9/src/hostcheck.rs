@@ -11,9 +11,13 @@
 //!
 //! - `x11` gives the input with `XTest` through `xdotool`, and uses the clipboard with `xclip`.
 //!   It needs `DISPLAY`, and it is the check of the X11 back end on Linux;
+//! - `wayland` gives the input with a virtual keyboard and a virtual pointer through `9h vinput`,
+//!   finds the window with `swaymsg`, and uses the clipboard with `wl-copy` and `wl-paste`. It
+//!   needs `WAYLAND_DISPLAY` and sway, and it is the check of the Wayland back end on Linux;
 //! - `control` gives the input on the control socket of the monitor. It does not go through the
 //!   window of the host, so it checks only the probe, the guest and this command. It uses the
-//!   clipboard with `pbcopy` and `pbpaste` on macOS and with `xclip` on Linux.
+//!   clipboard with `pbcopy` and `pbpaste` on macOS, and on Linux with `wl-copy` and
+//!   `wl-paste` when `WAYLAND_DISPLAY` is set and with `xclip` when it is not.
 //!
 //! The checks, in order:
 //!
@@ -522,6 +526,8 @@ fn program(name: &str, args: &[&str], input: Option<&str>) -> Result<String, Str
 fn clipboard() -> (Vec<&'static str>, Vec<&'static str>) {
     if cfg!(target_os = "macos") {
         (vec!["pbcopy"], vec!["pbpaste"])
+    } else if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty()) {
+        (vec!["wl-copy"], vec!["wl-paste", "--no-newline"])
     } else {
         (
             vec!["xclip", "-selection", "clipboard", "-i"],
@@ -620,6 +626,244 @@ impl Driver for X11 {
         }
         pause(80);
         Ok(())
+    }
+}
+
+/// The Linux key code of the key with the X keysym name `sym`, on a US keyboard.
+#[must_use]
+pub fn key_code(sym: &str) -> Option<u32> {
+    const ROWS: &[(u32, &str)] = &[
+        (16, "qwertyuiop"),
+        (30, "asdfghjkl"),
+        (44, "zxcvbnm"),
+        (2, "1234567890"),
+    ];
+    let mut chars = sym.chars();
+    if let (Some(c), None) = (chars.next(), chars.next()) {
+        for &(first, row) in ROWS {
+            if let Some(i) = row.find(c) {
+                return u32::try_from(i).ok().map(|i| first + i);
+            }
+        }
+    }
+    Some(match sym {
+        "Escape" => 1,
+        "minus" => 12,
+        "equal" => 13,
+        "BackSpace" => 14,
+        "Tab" => 15,
+        "bracketleft" => 26,
+        "bracketright" => 27,
+        "Return" => 28,
+        "Control" => 29,
+        "semicolon" => 39,
+        "apostrophe" => 40,
+        "grave" => 41,
+        "Shift" => 42,
+        "backslash" => 43,
+        "comma" => 51,
+        "period" => 52,
+        "slash" => 53,
+        "space" => 57,
+        _ => return None,
+    })
+}
+
+/// The modifier bits of the Wayland keyboard: Shift and Control.
+const MOD_SHIFT: u32 = 1;
+const MOD_CONTROL: u32 = 4;
+
+/// The Linux button codes of the left, middle and right buttons.
+const BUTTON_CODES: [u32; 3] = [0x110, 0x112, 0x111];
+
+/// The driver of a Wayland session of sway. `9h vinput` gives the input with a virtual
+/// keyboard and a virtual pointer, `swaymsg` finds the window and gives it the focus, and
+/// `wl-copy` and `wl-paste` use the clipboard.
+#[derive(Debug)]
+pub struct Wayland {
+    monitor: std::path::PathBuf,
+    child: Option<std::process::Child>,
+    answers: Option<std::io::BufReader<std::process::ChildStdout>>,
+    /// The corner of the window in the layout.
+    corner: (i64, i64),
+    /// The size of the layout.
+    layout: (i64, i64),
+    mods: u32,
+}
+
+impl Wayland {
+    /// The driver that runs `vinput` of the monitor `monitor`.
+    #[must_use]
+    pub fn new(monitor: &Path) -> Wayland {
+        Wayland {
+            monitor: monitor.to_path_buf(),
+            child: None,
+            answers: None,
+            corner: (0, 0),
+            layout: (0, 0),
+            mods: 0,
+        }
+    }
+
+    /// Give one step to `vinput`, and wait for its answer.
+    fn step(&mut self, line: &str) -> Result<(), String> {
+        use std::io::BufRead;
+        let (Some(child), Some(answers)) = (&mut self.child, &mut self.answers) else {
+            return Err("vinput does not run".into());
+        };
+        let stdin = child.stdin.as_mut().ok_or("no input for vinput")?;
+        writeln!(stdin, "{line}")
+            .and_then(|()| stdin.flush())
+            .map_err(|e| format!("vinput: {e}"))?;
+        let mut answer = String::new();
+        answers
+            .read_line(&mut answer)
+            .map_err(|e| format!("vinput: {e}"))?;
+        match answer.trim() {
+            "ok" => Ok(()),
+            "" => Err("vinput stopped".into()),
+            a => Err(format!("vinput: {line}: {a}")),
+        }
+    }
+
+    fn key(&mut self, code: u32, down: bool) -> Result<(), String> {
+        self.step(&format!("key {code} {}", u8::from(down)))
+    }
+
+    /// Push or release a modifier key, and give the new modifiers.
+    fn modifier(&mut self, code: u32, bit: u32, down: bool) -> Result<(), String> {
+        self.key(code, down)?;
+        if down {
+            self.mods |= bit;
+        } else {
+            self.mods &= !bit;
+        }
+        self.step(&format!("mods {}", self.mods))
+    }
+
+    fn code(sym: &str) -> Result<u32, String> {
+        key_code(sym).ok_or_else(|| format!("no key code for {sym}"))
+    }
+}
+
+/// The corner of the content of the window with the app ID `9h` in the tree of sway, and the
+/// size of the layout. A node has `rect` in the layout, and `window_rect` in the node.
+#[must_use]
+pub fn sway_window(tree: &serde_json::Value) -> Option<((i64, i64), (i64, i64))> {
+    fn find(n: &serde_json::Value) -> Option<(i64, i64)> {
+        if n["app_id"] == "9h" {
+            let at = |r: &serde_json::Value, k: &str| r[k].as_i64().unwrap_or(0);
+            let (r, w) = (&n["rect"], &n["window_rect"]);
+            return Some((at(r, "x") + at(w, "x"), at(r, "y") + at(w, "y")));
+        }
+        ["nodes", "floating_nodes"]
+            .iter()
+            .filter_map(|k| n[*k].as_array())
+            .flatten()
+            .find_map(find)
+    }
+    let r = &tree["rect"];
+    let layout = (r["width"].as_i64()?, r["height"].as_i64()?);
+    find(tree).map(|corner| (corner, layout))
+}
+
+impl Driver for Wayland {
+    fn name(&self) -> &'static str {
+        "wayland"
+    }
+
+    fn start(&mut self, _: &Path) -> Result<(), String> {
+        let start = Instant::now();
+        loop {
+            let tree = program("swaymsg", &["-t", "get_tree", "-r"], None)
+                .ok()
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+            if let Some((corner, layout)) = tree.as_ref().and_then(sway_window) {
+                (self.corner, self.layout) = (corner, layout);
+                break;
+            }
+            if start.elapsed() > Duration::from_secs(30) {
+                return Err("swaymsg found no window with the app ID 9h".into());
+            }
+            pause(500);
+        }
+        let mut child = Command::new(&self.monitor)
+            .arg("vinput")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot run {} vinput: {e}", self.monitor.display()))?;
+        let out = child.stdout.take().ok_or("no output of vinput")?;
+        let mut answers = std::io::BufReader::new(out);
+        let mut ready = String::new();
+        std::io::BufRead::read_line(&mut answers, &mut ready)
+            .map_err(|e| format!("vinput: {e}"))?;
+        self.child = Some(child);
+        self.answers = Some(answers);
+        if ready.trim() != "ok" {
+            return Err(format!("vinput did not start: {:?}", ready.trim()));
+        }
+        // The keyboard came after the window, so the window gets the focus again.
+        program("swaymsg", &["[app_id=\"9h\"]", "focus"], None)?;
+        let (x, y) = (self.corner.0 + 300, self.corner.1 + 300);
+        self.step(&format!("move {x} {y} {} {}", self.layout.0, self.layout.1))?;
+        pause(500);
+        Ok(())
+    }
+
+    fn act(&mut self, act: &Act, _: &Path) -> Result<(), String> {
+        match act {
+            Act::Tap { sym, shift, ctrl } => {
+                let code = Wayland::code(sym)?;
+                if *ctrl {
+                    self.modifier(29, MOD_CONTROL, true)?;
+                }
+                if *shift {
+                    self.modifier(42, MOD_SHIFT, true)?;
+                }
+                self.key(code, true)?;
+                self.key(code, false)?;
+                if *shift {
+                    self.modifier(42, MOD_SHIFT, false)?;
+                }
+                if *ctrl {
+                    self.modifier(29, MOD_CONTROL, false)?;
+                }
+            }
+            Act::Down(sym) if sym == "Shift" => self.modifier(42, MOD_SHIFT, true)?,
+            Act::Up(sym) if sym == "Shift" => self.modifier(42, MOD_SHIFT, false)?,
+            Act::Down(sym) => self.key(Wayland::code(sym)?, true)?,
+            Act::Up(sym) => self.key(Wayland::code(sym)?, false)?,
+            Act::Click(x, y, b) => {
+                let (x, y) = (self.corner.0 + i64::from(*x), self.corner.1 + i64::from(*y));
+                self.step(&format!("move {x} {y} {} {}", self.layout.0, self.layout.1))?;
+                pause(100);
+                match b {
+                    1..=3 => {
+                        let code = BUTTON_CODES[usize::from(b - 1)];
+                        self.step(&format!("button {code} 1"))?;
+                        pause(50);
+                        self.step(&format!("button {code} 0"))?;
+                    }
+                    4 => self.step("wheel -1")?,
+                    _ => self.step("wheel 1")?,
+                }
+            }
+            Act::Copy(text) => copy(text)?,
+            Act::Wait(_) | Act::Paste => {}
+        }
+        pause(80);
+        Ok(())
+    }
+}
+
+impl Drop for Wayland {
+    fn drop(&mut self) {
+        if let Some(mut c) = self.child.take() {
+            drop(c.stdin.take());
+            let _ = c.kill();
+            let _ = c.wait();
+        }
     }
 }
 
@@ -953,6 +1197,39 @@ mod tests {
         assert_eq!(
             b.detail,
             "item 1 of 4 is buttons 0 at 512,384, and it must be buttons 2 at 512,384"
+        );
+    }
+
+    #[test]
+    fn each_key_of_the_plan_has_a_key_code() {
+        for k in keys() {
+            assert!(key_code(&k.sym).is_some(), "{}", k.sym);
+        }
+        assert_eq!(key_code("a"), Some(30));
+        assert_eq!(key_code("m"), Some(50));
+        assert_eq!(key_code("0"), Some(11));
+        assert_eq!(key_code("slash"), Some(53));
+        assert_eq!(key_code("F13"), None);
+    }
+
+    #[test]
+    fn the_window_of_9h_is_found_in_the_tree_of_sway() {
+        let tree = serde_json::json!({
+            "rect": {"x": 0, "y": 0, "width": 1280, "height": 1024},
+            "nodes": [{
+                "rect": {"x": 0, "y": 0, "width": 1280, "height": 1024},
+                "nodes": [],
+                "floating_nodes": [{
+                    "app_id": "9h",
+                    "rect": {"x": 10, "y": 20, "width": 1028, "height": 772},
+                    "window_rect": {"x": 2, "y": 2, "width": 1024, "height": 768}
+                }]
+            }]
+        });
+        assert_eq!(sway_window(&tree), Some(((12, 22), (1280, 1024))));
+        assert_eq!(
+            sway_window(&serde_json::json!({"rect": {"width": 1, "height": 1}})),
+            None
         );
     }
 

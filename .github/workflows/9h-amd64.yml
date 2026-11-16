@@ -8,8 +8,10 @@
 # with --strict stops the machine at the first such access. r9 9h smoke --snap boots the kernel with
 # a screen on 4 processors, starts rio, and runs the smoke suite in the console window. r9 hostcheck
 # boots the kernel in a window of Xvfb, gives keys, clicks and clipboard text to the window with
-# xdotool and xclip, and checks what a probe in the guest gets. The console logs, the steps, the
-# logs of the monitor, the screen, the compile records and the kernel go to an artifact.
+# xdotool and xclip, and checks what a probe in the guest gets. A second r9 hostcheck does the same
+# checks in a window of sway on a headless output, with the virtual keyboard and pointer of 9h vinput
+# and with wl-clipboard. The console logs, the steps, the logs of the monitor, the screen, the
+# compile records and the kernel go to an artifact.
 
 name: 9h amd64
 
@@ -23,6 +25,7 @@ on:
       - crates/r9/src/boot.rs
       - crates/r9/src/image.rs
       - crates/r9/src/hostcheck.rs
+      - crates/r9/src/main.rs
       - guest/probe/**
       - smoke/boot.rc
       - .github/workflows/9h-amd64.yml
@@ -98,16 +101,36 @@ jobs:
           export DISPLAY=:99
           root=$(ls /mnt/r9/images/g-base-*.amd64.qcow2 | head -1)
           target/release/r9 hostcheck --kernel "$RUNNER_TEMP/k/collected/9h/amd64/99h" --root "$root" --host x11 --out "$RUNNER_TEMP/hc"
+      # sway runs on a headless output with no input devices. 9h vinput gives a virtual keyboard
+      # and a virtual pointer, and the config puts the window of 9h at 0,0 with no border.
+      - name: r9 hostcheck on sway
+        run: |
+          sudo apt-get install -qy --no-install-recommends sway wl-clipboard
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          printf '%s\n' 'xwayland disable' 'output HEADLESS-1 resolution 1280x1024 position 0 0' 'default_border none' 'default_floating_border none' 'for_window [app_id="9h"] floating enable, move position 0 0' > "$RUNNER_TEMP/sway.config"
+          WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman sway -c "$RUNNER_TEMP/sway.config" > "$RUNNER_TEMP/sway.log" 2>&1 &
+          s=
+          for i in $(seq 100); do
+            s=$(ls "$XDG_RUNTIME_DIR" | grep -E '^wayland-[0-9]+$' | head -1)
+            [ -n "$s" ] && break
+            sleep 0.1
+          done
+          [ -n "$s" ] || { cat "$RUNNER_TEMP/sway.log"; exit 1; }
+          export WAYLAND_DISPLAY=$s SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock | head -1)
+          root=$(ls /mnt/r9/images/g-base-*.amd64.qcow2 | head -1)
+          target/release/r9 hostcheck --kernel "$RUNNER_TEMP/k/collected/9h/amd64/99h" --root "$root" --host wayland --out "$RUNNER_TEMP/hcw" || { cat "$RUNNER_TEMP/sway.log"; exit 1; }
       - name: gather the results
         if: always()
         run: |
-          mkdir -p "$RUNNER_TEMP/out/k" "$RUNNER_TEMP/out/boot" "$RUNNER_TEMP/out/strict" "$RUNNER_TEMP/out/rio" "$RUNNER_TEMP/out/hc"
+          mkdir -p "$RUNNER_TEMP/out/k" "$RUNNER_TEMP/out/boot" "$RUNNER_TEMP/out/strict" "$RUNNER_TEMP/out/rio" "$RUNNER_TEMP/out/hc" "$RUNNER_TEMP/out/hcw"
           cp "$RUNNER_TEMP/k"/*.toml "$RUNNER_TEMP/k"/console.log "$RUNNER_TEMP/out/k/" || true
           cp "$RUNNER_TEMP/k/collected/mk.log" "$RUNNER_TEMP/k/collected/compile.jsonl" "$RUNNER_TEMP/out/k/" || true
           cp -r "$RUNNER_TEMP/k/collected/9h" "$RUNNER_TEMP/out/k/" || true
           cp "$RUNNER_TEMP/rio/screen.png" "$RUNNER_TEMP/out/rio/" || true
           cp "$RUNNER_TEMP/hc/hostcheck.json" "$RUNNER_TEMP/hc/screen.png" "$RUNNER_TEMP/out/hc/" || true
-          for d in boot strict rio hc; do
+          cp "$RUNNER_TEMP/hcw/hostcheck.json" "$RUNNER_TEMP/hcw/screen.png" "$RUNNER_TEMP/sway.log" "$RUNNER_TEMP/out/hcw/" || true
+          for d in boot strict rio hc hcw; do
             cp "$RUNNER_TEMP/$d"/console.log "$RUNNER_TEMP/$d"/steps.json "$RUNNER_TEMP/$d"/9h.cmd "$RUNNER_TEMP/$d"/9h.stderr "$RUNNER_TEMP/out/$d/" || true
           done
       - uses: actions/upload-artifact@v7.0.1

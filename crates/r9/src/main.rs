@@ -407,10 +407,16 @@ fn run_hostcheck(args: &Args) -> Result<ExitCode, String> {
     }
     let mut x11 = r9::hostcheck::X11::default();
     let mut control = r9::hostcheck::Control::default();
+    let mut wayland = r9::hostcheck::Wayland::new(&req.monitor);
     let driver: &mut dyn r9::hostcheck::Driver = match args.get("host").unwrap_or("x11") {
         "x11" => &mut x11,
+        "wayland" => &mut wayland,
         "control" => &mut control,
-        h => return Err(format!("--host {h}: the hosts are x11 and control")),
+        h => {
+            return Err(format!(
+                "--host {h}: the hosts are x11, wayland and control"
+            ));
+        }
     };
     let record = r9::hostcheck::run(&req, driver)?;
     print!("{}", r9::hostcheck::report(&record));

@@ -362,20 +362,20 @@ pub fn button_bit(code: u32) -> u8 {
 
 /// A request to the compositor: the arguments, then the header when it is done.
 #[derive(Debug, Default)]
-struct Args(Vec<u8>);
+pub(crate) struct Args(Vec<u8>);
 
 impl Args {
-    fn u(mut self, v: u32) -> Args {
+    pub(crate) fn u(mut self, v: u32) -> Args {
         self.0.extend_from_slice(&v.to_le_bytes());
         self
     }
 
-    fn i(self, v: i32) -> Args {
+    pub(crate) fn i(self, v: i32) -> Args {
         self.u(v.cast_unsigned())
     }
 
     /// A string: its length with the NUL, the bytes, the NUL, and the padding to 4 bytes.
-    fn s(mut self, v: &str) -> Args {
+    pub(crate) fn s(mut self, v: &str) -> Args {
         let n = u32::try_from(v.len() + 1).unwrap_or(u32::MAX);
         self.0.extend_from_slice(&n.to_le_bytes());
         self.0.extend_from_slice(v.as_bytes());
@@ -387,7 +387,7 @@ impl Args {
     }
 
     /// The message of the request `op` on the object `id`.
-    fn on(self, id: u32, op: u16) -> Vec<u8> {
+    pub(crate) fn on(self, id: u32, op: u16) -> Vec<u8> {
         let size = u32::try_from(8 + self.0.len()).unwrap_or(0);
         let mut m = Vec::with_capacity(8 + self.0.len());
         m.extend_from_slice(&id.to_le_bytes());
@@ -409,13 +409,13 @@ pub struct Event {
 }
 
 /// A reader of the arguments of an event. A read past the end gives 0 or an empty value.
-struct Reader<'a> {
+pub(crate) struct Reader<'a> {
     b: &'a [u8],
     at: usize,
 }
 
 impl Reader<'_> {
-    fn u(&mut self) -> u32 {
+    pub(crate) fn u(&mut self) -> u32 {
         let v = self
             .b
             .get(self.at..self.at + 4)
@@ -442,7 +442,7 @@ impl Reader<'_> {
         &self.b[start..end]
     }
 
-    fn s(&mut self) -> String {
+    pub(crate) fn s(&mut self) -> String {
         let b = self.bytes();
         let b = b.strip_suffix(&[0]).unwrap_or(b);
         String::from_utf8_lossy(b).into_owned()
@@ -450,7 +450,7 @@ impl Reader<'_> {
 }
 
 impl Event {
-    fn reader(&self) -> Reader<'_> {
+    pub(crate) fn reader(&self) -> Reader<'_> {
         Reader {
             b: &self.args,
             at: 0,
@@ -459,7 +459,7 @@ impl Event {
 }
 
 /// Take the whole events from the front of `buf`.
-fn split(buf: &mut Vec<u8>) -> Vec<Event> {
+pub(crate) fn split(buf: &mut Vec<u8>) -> Vec<Event> {
     let mut events = Vec::new();
     let mut at = 0;
     while let Some(h) = buf.get(at..at + 8) {
@@ -495,6 +495,8 @@ pub fn socket_path(display: Option<&str>, runtime: Option<&str>) -> Option<std::
 
 #[cfg(target_os = "linux")]
 pub use conn::run;
+#[cfg(target_os = "linux")]
+pub(crate) use conn::send_fd;
 
 #[cfg(target_os = "linux")]
 mod conn {
@@ -570,7 +572,7 @@ mod conn {
     }
 
     /// Send `data` with the file descriptor `fd`.
-    fn send_fd(sock: &UnixStream, data: &[u8], fd: RawFd) -> Result<(), String> {
+    pub(crate) fn send_fd(sock: &UnixStream, data: &[u8], fd: RawFd) -> Result<(), String> {
         let mut iov = libc::iovec {
             iov_base: data.as_ptr().cast_mut().cast(),
             iov_len: data.len(),

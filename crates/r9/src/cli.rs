@@ -370,14 +370,16 @@ usage:
       the masks, and smoke compares nothing. The --got run must pass. For the first snap that is
       different, the images want.png, got.png and xor.png go to DIR (the diff directory in the
       --got directory by default).
-  r9 hostcheck --kernel FILE --root IMAGE [--host x11|control] [--cpus N] [--mem MIB]
-          [--timeout SECS] [--out DIR] [--monitor PATH] [--keep]
+  r9 hostcheck --kernel FILE --root IMAGE [--host x11|wayland|control] [--cpus N]
+          [--mem MIB] [--timeout SECS] [--out DIR] [--monitor PATH] [--keep]
       Run the host checks of plan 11.9. The 9h kernel boots with its screen in a window of the
       host and with the host clipboard. A probe in a window of rio writes each message of
       /dev/kbd and /dev/mouse to the console. Then r9 gives keys, clicks and clipboard text to
       the window of the host, and compares the lines of the probe with them. With --host x11 (the
       default), the input goes through the X server of DISPLAY with xdotool, and the clipboard
-      uses xclip. With --host control, the input goes on the control socket of the monitor, and
+      uses xclip. With --host wayland, the input goes through the sway compositor of
+      WAYLAND_DISPLAY with the virtual keyboard and pointer of 9h vinput, and the clipboard uses
+      wl-copy and wl-paste. With --host control, the input goes on the control socket of the monitor, and
       only the guest and r9 are checked. The work goes to DIR (work/hostcheck by default), with
       console.log and hostcheck.json. The command keeps the text of the host clipboard, and puts
       it back at the end.

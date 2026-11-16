@@ -77,7 +77,12 @@ const USAGE: &str = "usage:
       configuration ports with no device on the bus, and ACPI tables for --cpus processors.
       The kernel gets *nocga=1 and --bootargs as its multiboot command line and the --ini file
       as its first module. Its console is the 9h hypercall console with IRQ 5.
-      --machine virt is for arm64 only. The machine needs /dev/kvm.";
+      --machine virt is for arm64 only. The machine needs /dev/kvm.
+  9h vinput
+      Make a virtual keyboard and a virtual pointer on the Wayland compositor of
+      WAYLAND_DISPLAY, and do the steps of the standard input: key CODE 0|1, mods MASK,
+      move X Y W H, button CODE 0|1 and wheel N. Each step gets ok. r9 hostcheck --host
+      wayland uses it. It needs Linux.";
 
 const RAM_BASE: u64 = 0x4000_0000;
 const DTB: u64 = RAM_BASE;
@@ -1151,10 +1156,26 @@ mod backend {
     }
 }
 
+/// `9h vinput`: the virtual keyboard and pointer of `r9 hostcheck` on Wayland.
+fn vinput() -> ExitCode {
+    #[cfg(target_os = "linux")]
+    let r = h9_gui::vinput::run(std::io::stdin().lock(), std::io::stdout());
+    #[cfg(not(target_os = "linux"))]
+    let r: Result<(), String> = Err("vinput needs Linux and a Wayland compositor".into());
+    match r {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("9h: vinput: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let o = match args.first().map(String::as_str) {
         Some("run") => parse(&args[1..]),
+        Some("vinput") => return vinput(),
         Some("help" | "-h" | "--help") => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
