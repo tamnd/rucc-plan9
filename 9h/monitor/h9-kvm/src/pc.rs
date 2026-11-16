@@ -144,3 +144,14 @@ pub fn call_result(cpu: &VcpuFd, v: u64) -> Result<(), String> {
 pub const fn irq_line(irq: u32) -> u32 {
     irq
 }
+
+/// The registers of a vCPU on one line, for `Machine::dump_regs`.
+pub fn regs_line(cpu: &VcpuFd) -> String {
+    match cpu.get_regs() {
+        Ok(r) => format!(
+            "rip {:#x} rflags {:#x} rsp {:#x} rbp {:#x} rax {:#x} rbx {:#x} rcx {:#x} rdx {:#x} rsi {:#x} rdi {:#x}",
+            r.rip, r.rflags, r.rsp, r.rbp, r.rax, r.rbx, r.rcx, r.rdx, r.rsi, r.rdi
+        ),
+        Err(e) => format!("KVM_GET_REGS: {e}"),
+    }
+}

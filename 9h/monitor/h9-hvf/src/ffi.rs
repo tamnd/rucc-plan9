@@ -31,6 +31,8 @@ pub const HV_SYS_REG_ESR_EL1: u16 = 0xc290;
 pub const HV_SYS_REG_FAR_EL1: u16 = 0xc300;
 pub const HV_SYS_REG_ELR_EL1: u16 = 0xc201;
 pub const HV_SYS_REG_VBAR_EL1: u16 = 0xc600;
+pub const HV_SYS_REG_SP_EL0: u16 = 0xc208;
+pub const HV_SYS_REG_SP_EL1: u16 = 0xe208;
 pub const HV_SYS_REG_CNTV_CTL_EL0: u16 = 0xdf19;
 pub const HV_SYS_REG_CNTV_CVAL_EL0: u16 = 0xdf1a;
 

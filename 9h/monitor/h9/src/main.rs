@@ -850,6 +850,11 @@ mod backend {
             })?;
             std::fs::write(file, png).map_err(|e| e.to_string())
         }
+
+        fn regs(&mut self) -> Result<(), String> {
+            self.0.dump_regs();
+            Ok(())
+        }
     }
 
     /// The host of the window (`h9-gui`): the screen, the keyboard and the mouse of the machine.

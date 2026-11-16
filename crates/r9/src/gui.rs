@@ -723,6 +723,11 @@ pub fn run(req: &h9boot::Request, file: &Path) -> Result<Record, String> {
     let mut steps = Err("the guest gave no shell prompt".to_string());
     let outcome = h9boot::run_with(&req, |path| {
         steps = run_steps(&script, path, &req.work);
+        if steps.is_err() {
+            // The registers of each vCPU go to 9h.stderr, so that a hang of the guest has a
+            // record. An old 9h does not know the step, so the answer is ignored.
+            let _ = give(path, &["regs".into()]);
+        }
     })?;
     let status = if script.exits() {
         let f = req.work.join("console.log");

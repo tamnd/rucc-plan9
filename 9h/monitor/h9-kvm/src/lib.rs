@@ -29,7 +29,7 @@
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -78,6 +78,8 @@ pub struct Machine {
     stopping: AtomicBool,
     /// The thread of each vCPU while it runs. A thread clears its slot before it ends.
     threads: Mutex<Vec<Option<libc::pthread_t>>>,
+    /// The count of the requests to write the registers of each vCPU (`dump_regs`).
+    regs: AtomicU64,
     end: (Mutex<Option<Result<Stop, String>>>, Condvar),
 }
 
@@ -125,6 +127,7 @@ impl Vm {
             levels: Mutex::new(Vec::new()),
             stopping: AtomicBool::new(false),
             threads: Mutex::new(vec![None; vcpus.len()]),
+            regs: AtomicU64::new(0),
             end: (Mutex::new(None), Condvar::new()),
         };
         Ok(Vm {
@@ -159,7 +162,7 @@ impl Vm {
                 m.threads.lock().unwrap()[n] = Some(unsafe { libc::pthread_self() });
                 let _ = tx.send(());
                 let mut cpu = cpu;
-                let r = run_vcpu(&m, &mut cpu);
+                let r = run_vcpu(&m, &mut cpu, n);
                 m.threads.lock().unwrap()[n] = None;
                 match r {
                     Ok(Some(stop)) => m.finish(Ok(stop)),
@@ -241,10 +244,16 @@ enum Next {
 }
 
 /// Run the vCPU until the session ends, which gives `Some`, or until another vCPU ends it.
-fn run_vcpu(m: &Machine, cpu: &mut VcpuFd) -> Result<Option<Stop>, String> {
+fn run_vcpu(m: &Machine, cpu: &mut VcpuFd, n: usize) -> Result<Option<Stop>, String> {
+    let mut regs_done = 0;
     loop {
         if m.stopping.load(Ordering::SeqCst) {
             return Ok(None);
+        }
+        let r = m.regs.load(Ordering::SeqCst);
+        if r != regs_done {
+            regs_done = r;
+            eprintln!("9h: vcpu {n} {}", arch::regs_line(cpu));
         }
         let next = match cpu.run() {
             #[cfg(target_arch = "x86_64")]
@@ -380,6 +389,18 @@ impl Machine {
         drop(levels);
         drop(bus);
         t
+    }
+
+    /// Make each vCPU write its registers to the standard error, for a guest that stops. Each
+    /// vCPU writes them when it next leaves `KVM_RUN`, which the kick makes occur.
+    pub fn dump_regs(&self) {
+        self.regs.fetch_add(1, Ordering::SeqCst);
+        let threads = self.threads.lock().unwrap();
+        for t in threads.iter().flatten() {
+            // SAFETY: the thread is alive, because it clears its slot under this lock before it
+            // ends. The signal has a handler that does nothing.
+            unsafe { libc::pthread_kill(*t, KICK) };
+        }
     }
 
     /// End the session with `stop`, as the guest does with `SYSTEM_OFF`. A thread of the monitor

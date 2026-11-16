@@ -10,7 +10,7 @@
 
 pub mod ffi;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -83,6 +83,8 @@ pub struct Machine {
     /// Signals a change of `cpus`.
     cpu_change: Condvar,
     stopping: AtomicBool,
+    /// The count of the requests to write the registers of each vCPU (`dump_regs`).
+    regs: AtomicU64,
     end: (Mutex<Option<Result<Stop, String>>>, Condvar),
 }
 
@@ -120,6 +122,7 @@ impl Vm {
             ]),
             cpu_change: Condvar::new(),
             stopping: AtomicBool::new(false),
+            regs: AtomicU64::new(0),
             end: (Mutex::new(None), Condvar::new()),
         };
         Ok(Vm {
@@ -409,6 +412,14 @@ impl Machine {
         }
     }
 
+    /// Make each vCPU write its registers to the standard error, for a guest that stops. Each
+    /// vCPU writes them when it next leaves `hv_vcpu_run` or `WFI`, which this makes occur.
+    pub fn dump_regs(&self) {
+        self.regs.fetch_add(1, Ordering::SeqCst);
+        self.exit_all();
+        self.kick();
+    }
+
     /// Wake a vCPU that waits in `WFI`.
     pub fn kick(&self) {
         *self.wake.0.lock().unwrap() = true;
@@ -430,6 +441,8 @@ struct Vcpu {
     id: ffi::hv_vcpu_t,
     exit: *const ffi::hv_vcpu_exit_t,
     sysregs: Vec<u64>,
+    /// The last request of `Machine::dump_regs` that this vCPU did.
+    regs_done: u64,
 }
 
 impl Vcpu {
@@ -444,6 +457,7 @@ impl Vcpu {
             id,
             exit,
             sysregs: Vec::new(),
+            regs_done: 0,
         };
         cpu.set_sys(ffi::HV_SYS_REG_MPIDR_EL1, mpidr)?;
         Ok(cpu)
@@ -524,6 +538,24 @@ impl Vcpu {
 
     fn xreg(&self, r: u8) -> u64 {
         if r == 31 { 0 } else { self.reg(u32::from(r)) }
+    }
+
+    /// Write the registers to the standard error: the PC, the PSTATE, the stack pointers, the
+    /// exception registers of EL1, and X0 to X30.
+    fn write_regs(&self) {
+        let x: Vec<String> = (0..31).map(|r| format!("{:x}", self.reg(r))).collect();
+        eprintln!(
+            "9h: vcpu {} pc {:#x} cpsr {:#x} sp_el1 {:#x} sp_el0 {:#x} elr {:#x} esr {:#x} far {:#x}",
+            self.id,
+            self.reg(ffi::HV_REG_PC),
+            self.reg(ffi::HV_REG_CPSR),
+            self.sys(ffi::HV_SYS_REG_SP_EL1),
+            self.sys(ffi::HV_SYS_REG_SP_EL0),
+            self.sys(ffi::HV_SYS_REG_ELR_EL1),
+            self.sys(ffi::HV_SYS_REG_ESR_EL1),
+            self.sys(ffi::HV_SYS_REG_FAR_EL1),
+        );
+        eprintln!("9h: vcpu {} x0-x30 {}", self.id, x.join(" "));
     }
 
     /// Unmask the timer when the guest no longer has its interrupt asserted.
@@ -639,6 +671,11 @@ impl Vcpu {
         loop {
             if m.stopping.load(Ordering::SeqCst) {
                 return Ok(None);
+            }
+            let r = m.regs.load(Ordering::SeqCst);
+            if r != self.regs_done {
+                self.regs_done = r;
+                self.write_regs();
             }
             self.timer_rearm();
             match self.step()? {
