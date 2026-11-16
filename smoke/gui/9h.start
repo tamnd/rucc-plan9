@@ -1,0 +1,15 @@
+#!/bin/rc
+# The windows of the GUI smoke test on the screen of the 9h machine. The programs are those
+# that run.rc linked. A new window of rio has the name space of rio, not that of the console
+# window, so each command has the full path of the program. A new window gets the keyboard
+# focus, so the script gives it back to the console window at the end.
+echo resize -r 0 520 512 768 > /dev/wctl
+window -r 170 0 400 260 '/tmp/r/bin/clock >[2]/tmp/r/clock.err'
+window -r 400 0 620 260 '/tmp/r/bin/catclock >[2]/tmp/r/catclock.err'
+window -r 620 0 1024 260 '/tmp/r/bin/colors >[2]/tmp/r/colors.err'
+window -r 0 260 600 520 '/tmp/r/bin/acme -c 1 /tmp/r/9h.start /sys/src/cmd/clock.c >[2]/tmp/r/acme.err'
+window -r 600 260 1024 520 '/tmp/r/bin/stats -lmc >[2]/tmp/r/stats.err'
+window -r 512 520 1024 768 '/tmp/r/bin/winwatch >[2]/tmp/r/winwatch.err'
+sleep 5
+echo current > /dev/wctl
+sleep 20
