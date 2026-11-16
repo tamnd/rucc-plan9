@@ -206,7 +206,7 @@ const CONSOLE_POINT: (u32, u32) = (300, 300);
 /// Click in the console window of rio, so that the commands go to it. `stats` can be the last
 /// new window on more than one processor, and then it has the keyboard focus. The click waits 2
 /// seconds first, because `stats` can come after the first prompt of the console.
-fn click_console(path: &Path) -> Result<(), String> {
+pub(crate) fn click_console(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::io::{BufRead, BufReader, Write};

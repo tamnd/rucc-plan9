@@ -720,14 +720,37 @@ fn run_steps(script: &Script, path: &Path, out: &Path) -> Result<Vec<Snap>, Stri
 /// Run the script at `file` on the 9h machine of `req`. `req.snap` must be set, so that the
 /// machine has a screen and a control socket. The output goes to `req.work`.
 pub fn run(req: &h9boot::Request, file: &Path) -> Result<Record, String> {
-    let src = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
-    let script = parse(&src).map_err(|e| format!("{}: {e}", file.display()))?;
     let mut req = req.clone();
     req.commands = Vec::new();
-    std::fs::create_dir_all(&req.work).map_err(|e| format!("{}: {e}", req.work.display()))?;
+    let work = req.work.clone();
+    run_on(file, &work, |at_shell| h9boot::run_with(&req, at_shell))
+}
+
+/// Run the script at `file` on QEMU (G/Q), with the request `req` of `r9 boot`. `req.base` must be
+/// a base of [`crate::qgui::prepare`], which has a screen. The output goes to `req.work`.
+#[cfg(unix)]
+pub fn run_q(req: &crate::boot::Request, file: &Path) -> Result<Record, String> {
+    let mut req = req.clone();
+    req.commands = Vec::new();
+    let work = req.work.clone();
+    run_on(file, &work, |at_shell| {
+        crate::qgui::run_with(&req, at_shell)
+    })
+}
+
+/// Run the script at `file` with `boot`, which boots a machine and calls its argument with the
+/// path of the control socket at the first shell prompt. The output goes to `work`.
+fn run_on(
+    file: &Path,
+    work: &Path,
+    boot: impl FnOnce(&mut dyn FnMut(&Path)) -> Result<crate::boot::Outcome, String>,
+) -> Result<Record, String> {
+    let src = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let script = parse(&src).map_err(|e| format!("{}: {e}", file.display()))?;
+    std::fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
     let mut steps = Err("the guest gave no shell prompt".to_string());
-    let outcome = h9boot::run_with(&req, |path| {
-        steps = run_steps(&script, path, &req.work);
+    let outcome = boot(&mut |path| {
+        steps = run_steps(&script, path, work);
         if steps.is_err() {
             // The registers of each vCPU go to 9h.stderr, so that a hang of the guest has a
             // record. An old 9h does not know the step, so the answer is ignored.
@@ -735,7 +758,7 @@ pub fn run(req: &h9boot::Request, file: &Path) -> Result<Record, String> {
         }
     })?;
     let status = if script.exits() {
-        let f = req.work.join("console.log");
+        let f = work.join("console.log");
         let console = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
         exit_status(&console)
     } else {
@@ -757,7 +780,7 @@ pub fn run(req: &h9boot::Request, file: &Path) -> Result<Record, String> {
         failure,
     };
     let json = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
-    let f = req.work.join("gui.json");
+    let f = work.join("gui.json");
     std::fs::write(&f, json + "\n").map_err(|e| format!("{}: {e}", f.display()))?;
     Ok(record)
 }

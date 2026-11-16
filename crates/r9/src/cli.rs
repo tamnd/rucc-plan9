@@ -61,7 +61,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             positional: true,
             values: &[
                 "kernel", "root", "script", "cpus", "mem", "timeout", "out", "monitor", "want",
-                "got", "diff", "hostfs", "audio",
+                "got", "diff", "hostfs", "audio", "on", "accel", "row",
             ],
             switches: &["keep"],
         },
@@ -355,6 +355,15 @@ usage:
       serves DIR on #Z/hostfs, which the guest can only read. Without --hostfs, it serves the
       directory data next to FILE, if there is one. A script mounts it with
       mount -c '#Z/hostfs' /mnt/term. --audio is as for r9 9h boot.
+  r9 gui run --on qemu --root IMAGE --script FILE [--accel kvm|hvf|tcg] [--timeout SECS]
+          [--out DIR] [--keep]
+      Run the GUI script FILE on a 9front kernel under QEMU (G/Q), for amd64 only. IMAGE is the
+      qcow2 root image. The first run of an image boots it one time to set the screen to
+      1024x768 in plan9.ini and to put the data files of the scripts in /lib/r9data. The
+      overlay of that boot goes to work/gq and is the base of the next runs. r9 then serves
+      the same steps as the control socket of 9h, with the keys, the mouse and the screen
+      dumps of QMP. The output is as for the run on 9h, so r9 gui compare can compare G/Q
+      with G/H.
   r9 gui compare --want DIR --got DIR [--diff DIR]
       Compare the snaps of two runs of a script, in order. The class of the script in the
       --want run tells how: exact compares all the pixels, masked compares the pixels outside
