@@ -153,7 +153,14 @@ impl Session {
             if !before.is_empty() {
                 step.output.push(before.to_string());
             }
-            step.status = Some(rest[STATUS.len()..].trim().to_string());
+            let status = rest[STATUS.len()..].trim();
+            // When rc writes an error in the middle of the echo of the line, as for a syntax
+            // error, the end of the echo comes on a line of its own, and rc does not run the line.
+            step.status = Some(if status == "$status" {
+                NOT_RUN.to_string()
+            } else {
+                status.to_string()
+            });
         } else {
             step.output.push(line.to_string());
         }
@@ -210,6 +217,9 @@ fn is_shell_prompt(text: &str) -> bool {
 }
 
 /// Whether a line is the echo of the command as typed.
+/// The status of a command that rc did not run.
+pub const NOT_RUN: &str = "rc did not run the line";
+
 fn is_echo(line: &str, command: &str) -> bool {
     line.contains(&format!("{command}; echo {STATUS}"))
 }
@@ -260,6 +270,21 @@ mod tests {
         assert_eq!(s.phase, Phase::Halted);
         assert_eq!(s.steps[0].output, vec!["cirno"]);
         assert_eq!(s.steps[1].status.as_deref(), Some("6c 1234: usage"));
+        assert!(!s.passed());
+    }
+
+    #[test]
+    fn a_line_that_rc_does_not_run_fails() {
+        let mut s = Session::new("", vec!["awk -v t=1 x".into()]);
+        let mut l = Lines::default();
+        assert_eq!(feed(&mut s, &mut l, "term% ").len(), 1);
+        let t = feed(
+            &mut s,
+            &mut l,
+            "term% awk -v t/fd/0:4: token '=': syntax error\r\n=1 x; echo R9-STATUS $status\r\nterm% ",
+        );
+        assert_eq!(t, vec!["fshalt\n"]);
+        assert_eq!(s.steps[0].status.as_deref(), Some(NOT_RUN));
         assert!(!s.passed());
     }
 
