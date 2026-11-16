@@ -25,8 +25,12 @@ dev
 	vmx
 	dtracy
 	host
+	draw	swcursor
+	mouse
 
 link
+	h9screen
+	h9mouse
 	ethersink
 	ethermedium
 	loopbackmedium

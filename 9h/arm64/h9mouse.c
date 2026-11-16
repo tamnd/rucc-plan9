@@ -1,10 +1,10 @@
 /*
  * The mouse of the 9h machine (rucc-plan9, plan 10.5). The
  * monitor keeps the mouse events of the host window and of
- * the session script. Its interrupt is a level interrupt that
- * stays high while an event waits. Each event is absolute, in
- * the pixels of the screen, so it goes to absmousetrack of
- * port's devmouse.
+ * the session script. Its interrupt stays high while an event
+ * waits. Each event is absolute, in the pixels of the screen,
+ * so it goes to absmousetrack of port's devmouse.
+ * The file is the same for arm64 and amd64.
  */
 #include "u.h"
 #include "../port/lib.h"
@@ -15,11 +15,8 @@
 #include "io.h"
 #include "h9.h"
 
-#define	Image	IMAGE
-#include <draw.h>
-#include <memdraw.h>
-#include <cursor.h>
-#include "screen.h"
+/* devmouse.c, from screen.h, which is not the same file on the two machines */
+extern void absmousetrack(int, int, int, ulong);
 
 static void
 interrupt(Ureg*, void*)
