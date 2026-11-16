@@ -334,7 +334,7 @@ pub fn parse(src: &str) -> Result<Script, String> {
 
 /// Text for the `send` step of the monitor, in double quotes with escapes.
 /// The keys of `k`: each UTF-8 sequence, or each byte that does not start one.
-fn keys(k: &[u8]) -> impl Iterator<Item = &[u8]> {
+pub(crate) fn keys(k: &[u8]) -> impl Iterator<Item = &[u8]> {
     let mut rest = k;
     std::iter::from_fn(move || {
         let n = match *rest.first()? {
@@ -349,7 +349,7 @@ fn keys(k: &[u8]) -> impl Iterator<Item = &[u8]> {
     })
 }
 
-fn send(bytes: &[u8]) -> String {
+pub(crate) fn send(bytes: &[u8]) -> String {
     let mut s = String::from("send \"");
     for &b in bytes {
         match b {
@@ -645,7 +645,7 @@ pub struct Record {
 /// Give the lines to the control socket at `path`, one at a time, and fail at the first answer
 /// that is not `ok`.
 #[cfg(unix)]
-fn give(path: &Path, lines: &[String]) -> Result<(), String> {
+pub(crate) fn give(path: &Path, lines: &[String]) -> Result<(), String> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
     let s = UnixStream::connect(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -665,7 +665,7 @@ fn give(path: &Path, lines: &[String]) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-fn give(_: &Path, _: &[String]) -> Result<(), String> {
+pub(crate) fn give(_: &Path, _: &[String]) -> Result<(), String> {
     Err("the control socket needs a Unix host".into())
 }
 

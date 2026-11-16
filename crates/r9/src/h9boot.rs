@@ -53,6 +53,10 @@ pub struct Request {
     /// The WAV file for the samples that the guest writes to `/dev/audio`. With none, the monitor
     /// drops them.
     pub audio: Option<PathBuf>,
+    /// Show the screen in a window of the host, and give the host clipboard to the guest, as
+    /// `r9 hostcheck` needs. With false, the session is headless and the snarf buffer is in the
+    /// monitor.
+    pub window: bool,
 }
 
 /// The bootargs of the kernel: the console is the uart of 9h, which is `/dev/eia0`.
@@ -126,10 +130,10 @@ fn copy_root(root: &Path, copy: &Path) -> Result<(), String> {
 }
 
 /// The command of the monitor. `disks` are the raw tar disks, after the root disk and `disk`.
-/// The snarf buffer is in the monitor, so a boot does not change the host clipboard, and the
-/// audio goes to a file or nowhere, so a boot does not play on the host. The kernel
-/// gets `console=0` as its bootargs, because `bootrc` starts `kbdfs` on `/dev/eia$console`, and
-/// with no `console` the console has no input.
+/// The snarf buffer is in the monitor, so a boot does not change the host clipboard, unless
+/// `req.window` is set. The audio goes to a file or nowhere, so a boot does not play on the
+/// host. The kernel gets `console=0` as its bootargs, because `bootrc` starts `kbdfs` on
+/// `/dev/eia$console`, and with no `console` the console has no input.
 #[must_use]
 pub fn command(req: &Request, disks: &[PathBuf]) -> Vec<String> {
     let mut c = vec![
@@ -142,17 +146,21 @@ pub fn command(req: &Request, disks: &[PathBuf]) -> Vec<String> {
         "--mem".into(),
         req.mem.to_string(),
         "--snarf".into(),
-        "memory".into(),
+        if req.window { "host" } else { "memory" }.into(),
         "--audio".into(),
         req.audio
             .as_ref()
             .map_or_else(|| "none".into(), |a| a.display().to_string()),
-        "--headless".into(),
+    ];
+    if !req.window {
+        c.push("--headless".into());
+    }
+    c.extend([
         "--bootargs".into(),
         CONSOLE.into(),
         "--disk".into(),
         root_copy(&req.work).display().to_string(),
-    ];
+    ]);
     if req.strict {
         c.push("--strict".into());
     }
@@ -383,6 +391,7 @@ pub fn request_from(
         strict: args.has("strict"),
         snap: args.get("snap").map(PathBuf::from),
         audio: args.get("audio").map(PathBuf::from),
+        window: false,
     })
 }
 
@@ -410,6 +419,7 @@ mod tests {
             strict: true,
             snap: None,
             audio: None,
+            window: false,
         }
     }
 

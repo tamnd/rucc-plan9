@@ -1,0 +1,21 @@
+#!/bin/rc
+# The run file of the probe of r9 hostcheck (plan 11.9). The window
+# of the probe runs it from /mnt/term. It builds the probe with the
+# compiler and the loader of $objtype, and runs it.
+cd /tmp
+cp /mnt/term/probe.c r9probe.c
+switch($objtype){
+case amd64
+	c=6
+case arm64
+	c=7
+case *
+	echo R9-PROBE error objtype $objtype > '#c/cons'
+	exit objtype
+}
+if(! {$c^c -w r9probe.c && $c^l -o r9probe r9probe.$c} >r9probe.err >[2=1]){
+	sed 's/^/R9-PROBE error build: /' r9probe.err > '#c/cons'
+	echo R9-PROBE error build > '#c/cons'
+	exit build
+}
+./r9probe
