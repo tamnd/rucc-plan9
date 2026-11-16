@@ -1,0 +1,10 @@
+# tweak edits Plan 9 images and fonts. The script makes a Plan 9 image from a JPEG file with jpg -9. The eighth item of the menu of button 3, exit, changes the cursor to a skull, and a click with button 3 then stops it. The menu opens with the first item under the mouse, so the drag goes down seven items. An item is the height of the font and 2 pixels, 18 pixels in all.
+class exact
+window 600x500
+run jpg -9 /sys/src/cmd/gs/jpeg/testprog.jpg > /tmp/r9gui.bit; tweak /tmp/r9gui.bit
+quiet
+snap open
+drag 3 300,250 300,377
+pause 1
+mouse 3 at 300,377
+exit none

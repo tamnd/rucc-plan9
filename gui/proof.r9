@@ -1,0 +1,7 @@
+# proof shows the output of troff on the screen. The script gives it one page of text. At the end of the last page, proof waits for a command, and an empty command, the key Enter, stops it.
+class exact
+window 640x480
+run {echo .ps 14; echo Plan 9 from Bell Labs; echo .sp; echo The quick brown fox jumps over the lazy dog.} | troff | proof
+quiet
+snap open
+exit "\n"

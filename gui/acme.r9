@@ -1,0 +1,8 @@
+# acme starts with two columns and a directory window of the home directory. A click with button 2 on the word Exit in the tag at the top runs the command Exit, which stops acme, because no window has changes.
+class exact
+window 800x600
+run acme
+quiet
+snap open
+mouse 2 at 228,11
+exit none

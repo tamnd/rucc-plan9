@@ -1,0 +1,7 @@
+# games/galaxy simulates the gravity of bodies. With no file, it starts with no bodies, so the window does not change. The key q stops it.
+class exact
+window 500x400
+run games/galaxy
+quiet
+snap open
+exit "q"

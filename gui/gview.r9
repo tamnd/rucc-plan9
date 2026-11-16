@@ -1,0 +1,8 @@
+# gview shows polylines from a text file, with one x y pair on each line and a label after each polyline. The script makes a square and a triangle. The twelfth item of the menu of button 3, exit, stops it. The menu opens with the first item under the mouse, so the drag goes down eleven items. An item is the height of the font and 2 pixels, 18 pixels in all.
+class exact
+window 500x500
+run {echo 0 0; echo 4 0; echo 4 4; echo 0 4; echo 0 0; echo red; echo 1 1; echo 3 1; echo 2 3; echo 1 1; echo blue} > /tmp/r9gui.g; gview /tmp/r9gui.g
+quiet
+snap open
+drag 3 250,100 250,299
+exit none

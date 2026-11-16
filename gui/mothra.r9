@@ -1,0 +1,7 @@
+# mothra is a web browser. The script starts webfs in the window and gives mothra a page in a file. The text that the keyboard types goes to the command entry of mothra, and the command q stops it.
+class exact
+window 640x480
+run {echo '<title>r9</title>'; echo '<h1>Plan 9</h1>'; echo '<p>A page for the <b>r9 gui</b> script.'; echo '<ul><li>one<li>two</ul>'} > /tmp/r9gui.html; webfs; mothra file:///tmp/r9gui.html
+quiet
+snap open
+exit "q\n"

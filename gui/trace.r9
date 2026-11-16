@@ -1,0 +1,7 @@
+# trace shows the scheduling of processes over time. The script starts seq in the background and gives its pid to trace. The picture moves with time, so the script is a smoke test that checks that trace opens its window and draws its clock. The key q stops it.
+class smoke
+window 640x400
+run {seq 1 3000000 > /dev/null} & trace $apid
+pause 3
+snap open
+exit "q"
