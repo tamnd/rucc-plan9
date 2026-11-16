@@ -1,0 +1,7 @@
+# c64 runs the Commodore 64 system ROMs in /sys/lib/c64. The ROMs start BASIC and show a cursor that blinks, so the script is a smoke test. The End key stops c64.
+class smoke
+window 500x400
+run games/c64
+pause 5
+snap open
+exit "\xef\x80\x98"

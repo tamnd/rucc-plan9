@@ -1,0 +1,8 @@
+# The SNES emulator runs a LoROM test ROM of 32 KB. The ROM is bands.sfc in gui/data/rom, which gui/data/mkroms.py makes. It draws a fixed picture and then loops, so the script is an exact test. BG1 in mode 0 shows diagonal bands of 4 colours. The Del key stops the emulator.
+class exact
+window 500x400
+run mount -nc '#Z/hostfs' /mnt/term; games/snes /mnt/term/rom/bands.sfc
+pause 3
+quiet
+snap rom
+exit "\x7f"

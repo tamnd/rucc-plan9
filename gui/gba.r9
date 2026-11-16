@@ -1,0 +1,8 @@
+# The GBA emulator runs a test ROM with a BIOS of one instruction, gbabios.bin, which jumps to the ROM. The ROM is bands.gba in gui/data/rom, which gui/data/mkroms.py makes. It draws a fixed picture and then loops, so the script is an exact test. Mode 3 shows a colour gradient. The Del key stops the emulator.
+class exact
+window 500x400
+run mount -nc '#Z/hostfs' /mnt/term; games/gba -b /mnt/term/rom/gbabios.bin /mnt/term/rom/bands.gba
+pause 3
+quiet
+snap rom
+exit "\x7f"

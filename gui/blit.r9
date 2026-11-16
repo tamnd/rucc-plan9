@@ -1,0 +1,7 @@
+# blit runs the ROMs of the Blit terminal in /sys/lib/blit. No host is connected, so the terminal shows the screen of the ROMs only. The script is a smoke test. The End key stops blit.
+class smoke
+window 600x500
+run games/blit
+pause 5
+snap open
+exit "\xef\x80\x98"
