@@ -1,0 +1,8 @@
+# The c64 emulator runs test ROMs instead of the system ROMs, with the option -d. The ROMs are in the dir c64 of gui/data/rom, which gui/data/mkroms.py makes. The kernal draws a fixed picture and then loops, so the script is an exact test. The kernal fills the screen with 8 characters in 8 colours. The End key stops the emulator.
+class exact
+window 500x400
+run mount -nc '#Z/hostfs' /mnt/term; games/c64 -d /mnt/term/rom/c64
+pause 3
+quiet
+snap rom
+exit "\xef\x80\x98"

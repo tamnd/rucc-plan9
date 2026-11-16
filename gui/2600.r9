@@ -1,0 +1,8 @@
+# The Atari 2600 emulator runs a test ROM of 4 KB. The ROM is bands.a26 in gui/data/rom, which gui/data/mkroms.py makes. It draws a fixed picture and then loops, so the script is an exact test. The background colour changes each 16 lines. The Del key stops the emulator.
+class exact
+window 500x400
+run mount -nc '#Z/hostfs' /mnt/term; games/2600 /mnt/term/rom/bands.a26
+pause 3
+quiet
+snap rom
+exit "\x7f"
