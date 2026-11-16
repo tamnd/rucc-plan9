@@ -414,6 +414,14 @@ fn run_gui(args: &Args) -> Result<ExitCode, String> {
             let mut req = r9::h9boot::request_from(&repo, args, false)?;
             req.work.clone_from(&out);
             req.snap = Some(out.join("screen.png"));
+            if req.hostfs.is_none() {
+                // The data files of the scripts, such as images and ROMs, are in the directory
+                // data next to the script.
+                let data = script.parent().unwrap_or(Path::new(".")).join("data");
+                if data.is_dir() {
+                    req.hostfs = Some(data.canonicalize().unwrap_or(data));
+                }
+            }
             if args.get("timeout").is_none() {
                 req.timeout = std::time::Duration::from_secs(600);
             }

@@ -61,7 +61,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             positional: true,
             values: &[
                 "kernel", "root", "script", "cpus", "mem", "timeout", "out", "monitor", "want",
-                "got", "diff",
+                "got", "diff", "hostfs",
             ],
             switches: &["keep"],
         },
@@ -336,13 +336,16 @@ usage:
       Run the smoke suite of plan 09.5 on the 9h kernel: r9 9h boot with smoke/suite.rc and the
       guest directory as the input. The work goes to work/9h/smoke by default.
   r9 gui run --kernel FILE --root IMAGE --script FILE [--cpus N] [--mem MIB] [--timeout SECS]
-          [--out DIR] [--monitor PATH] [--keep]
+          [--hostfs DIR] [--out DIR] [--monitor PATH] [--keep]
       Run the GUI script FILE (plan 12.6) on the 9h kernel, as r9 9h boot --snap does. At the
       first shell prompt of the console window of rio, r9 gives the steps of the script to the
       monitor on its control socket. The program runs in a window at the bottom right of the
       screen. The work goes to DIR (work/gui/NAME by default): a PNG file for each snap,
       screen.png, and gui.json, with the hash of each snap. The command fails when a step fails,
-      or when the program does not stop with an empty status after its exit step.
+      or when the program does not stop with an empty status after its exit step. The monitor
+      serves DIR on #Z/hostfs, which the guest can only read. Without --hostfs, it serves the
+      directory data next to FILE, if there is one. A script mounts it with
+      mount -c '#Z/hostfs' /mnt/term.
   r9 gui compare --want DIR --got DIR [--diff DIR]
       Compare the snaps of two runs of a script, in order. The class of the script in the
       --want run tells how: exact compares all the pixels, masked compares the pixels outside
