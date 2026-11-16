@@ -6,7 +6,9 @@
  * and H9screenflush tells the monitor which rectangle changed.
  * The cursor is the software cursor of port/swcursor.c.
  * This is the file of arm64 with the screen.h of pc and with
- * vgascreen, which ishwimage of that screen.h uses.
+ * vgascreen, which ishwimage of that screen.h uses. The init
+ * function is h9screeninit, because screeninit is the CGA
+ * text screen of pc/cga.c, which pc64 main.c calls first.
  */
 
 #include "u.h"
@@ -171,8 +173,8 @@ screensize(void)
 	return 0;
 }
 
-void
-screeninit(void)
+static void
+h9screeninit(void)
 {
 	uchar *fb;
 	ulong n;
@@ -218,7 +220,7 @@ screeninit(void)
 void
 h9screenlink(void)
 {
-	screeninit();
+	h9screeninit();
 }
 
 void
