@@ -60,9 +60,9 @@ const USAGE: &str = "usage:
       #Z/ctl takes the requests quit and title TEXT. --ini FILE is the plan9.ini, which goes at 0x40010000 as U-Boot puts it. An access to an address with no device reads
       as all ones, and --strict makes it stop the session. --timeout ends the session after SECS
       seconds with exit status 2. --script FILE drives the console with the steps of FILE: wait
-      TEXT, send TEXT, timeout SECS, pause SECS, mouse X Y [BUTTONS], click X Y [BUTTON] and quit. The script owns the input, so the monitor does
+      TEXT, send TEXT, timeout SECS, pause SECS, mouse X Y [BUTTONS], click X Y [BUTTON], quiet [MS] [SECS], snap FILE [X0 Y0 X1 Y1] and quit. The script owns the input, so the monitor does
       not read its own. The exit status is 0 when the script passes and 3 when it fails.
-      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click and pause, one line each. The monitor answers each line with ok or error. --headless opens no window. On macOS on arm64, a 9h session with a screen shows the screen
+      --control PATH makes a Unix socket at PATH, on which a program of the host gives the steps send, mouse, click, pause, quiet and snap, one line each. The monitor answers each line with ok or error. --headless opens no window. On macOS on arm64, a 9h session with a screen shows the screen
       in a window, which gives the keyboard and the mouse of the host to the machine. On other
       hosts, each session is headless. The 9h machine has a screen of --screen WxH, 1024x768 by default, in the RAM of the
       guest. With --screen none, the machine has no screen, so the profile of the guest does not start rio. --snap FILE writes the screen as a PNG file at the end of the session.
@@ -633,8 +633,8 @@ fn snap(bus: &mut Bus, f: &str) -> Result<String, String> {
     ))
 }
 
-/// The socket of `--control PATH`, on which a program of the host gives input to the machine: the
-/// steps `send`, `mouse`, `click` and `pause`, one line each. The monitor answers each line with
+/// The socket of `--control PATH`, on which a program of the host drives the machine: the steps
+/// `send`, `mouse`, `click`, `pause`, `quiet` and `snap`, one line each. The monitor answers each line with
 /// `ok` or `error: ` and the reason, after it did the steps. `r9 9h boot --snap` uses it to click
 /// in the console window of rio. The socket file goes away at the end of the session.
 struct Control {
@@ -663,7 +663,7 @@ impl Control {
         )),
         allow(dead_code)
     )]
-    fn serve(&self, give: impl Fn(script::Input) + Clone + Send + 'static) {
+    fn serve(&self, target: impl script::Target + Clone + Send + 'static) {
         use std::io::{BufRead, Write};
         let Ok(listener) = self.listener.try_clone() else {
             eprintln!("9h: --control {}: the socket cannot be shared", self.path);
@@ -671,11 +671,11 @@ impl Control {
         };
         std::thread::spawn(move || {
             for c in listener.incoming().flatten() {
-                let give = give.clone();
+                let mut target = target.clone();
                 std::thread::spawn(move || {
                     let Ok(mut out) = c.try_clone() else { return };
                     for line in std::io::BufReader::new(c).lines().map_while(Result::ok) {
-                        let reply = script::control(&line, &give);
+                        let reply = script::control(&line, &mut target);
                         if writeln!(out, "{reply}").is_err() {
                             break;
                         }
@@ -718,7 +718,7 @@ struct Session {
     )
 ))]
 mod backend {
-    use super::{Session, give, script, type_in, unknown_report};
+    use super::{H9Screen, Session, give, script, type_in, unknown_report};
     use h9_dev::Bus;
     #[cfg(target_os = "macos")]
     use h9_hvf::{Machine, Stop, Vm};
@@ -729,6 +729,56 @@ mod backend {
     use std::process::ExitCode;
     use std::sync::atomic::{AtomicI32, Ordering};
     use std::sync::{Arc, Mutex};
+
+    fn off_screen(s: &H9Screen) -> String {
+        let (w, h) = s.size();
+        format!("the rectangle is not all on the screen of {w}x{h}")
+    }
+
+    /// The machine as the target of the steps of a script or of the control socket.
+    #[derive(Clone)]
+    struct Drive(Arc<Machine>);
+
+    impl script::Target for Drive {
+        fn give(&mut self, i: script::Input) {
+            self.0.with_bus(|bus| give(bus, &i));
+        }
+
+        fn look(&mut self, rect: Option<[u16; 4]>) -> Result<u64, String> {
+            self.0.with_bus(|bus| {
+                let s = bus
+                    .hyper_device::<H9Screen>()
+                    .ok_or("the machine has no screen")?;
+                if !s.on() {
+                    return Err("the kernel did not give a framebuffer".to_string());
+                }
+                match rect {
+                    None => Ok(s.generation()),
+                    Some([x0, y0, x1, y1]) => s
+                        .digest(x0.into(), y0.into(), x1.into(), y1.into())
+                        .ok_or_else(|| off_screen(s)),
+                }
+            })
+        }
+
+        fn snap(&mut self, file: &str, rect: Option<[u16; 4]>) -> Result<(), String> {
+            let png = self.0.with_bus(|bus| {
+                let s = bus
+                    .hyper_device::<H9Screen>()
+                    .ok_or("the machine has no screen")?;
+                if !s.on() {
+                    return Err("the kernel did not give a framebuffer".to_string());
+                }
+                match rect {
+                    None => Ok(s.png()),
+                    Some([x0, y0, x1, y1]) => s
+                        .png_rect(x0.into(), y0.into(), x1.into(), y1.into())
+                        .ok_or_else(|| off_screen(s)),
+                }
+            })?;
+            std::fs::write(file, png).map_err(|e| e.to_string())
+        }
+    }
 
     /// The host of the window (`h9-gui`): the screen, the keyboard and the mouse of the machine.
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -843,14 +893,14 @@ mod backend {
         }
         if let Some(c) = &control {
             let m = vm.machine();
-            c.serve(move |i| m.with_bus(|bus| give(bus, &i)));
+            c.serve(Drive(m));
         }
         let done = Arc::new(Mutex::new(None));
         let scripted = script.is_some();
         if let Some((steps, log)) = script {
             let done = done.clone();
             std::thread::spawn(move || {
-                let r = script::run(&steps, &log, |i| m.with_bus(|bus| give(bus, &i)));
+                let r = script::run(&steps, &log, &mut Drive(m.clone()));
                 *done.lock().unwrap() = Some(r);
                 m.end(Stop::Off);
             });

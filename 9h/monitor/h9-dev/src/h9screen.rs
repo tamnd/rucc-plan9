@@ -93,11 +93,43 @@ impl H9Screen {
     /// The screen as a PNG file.
     #[must_use]
     pub fn png(&self) -> Vec<u8> {
-        let mut rgb = Vec::with_capacity(self.pixels.len() * 3);
-        for &p in &self.pixels {
-            rgb.extend_from_slice(&p.to_be_bytes()[1..]);
+        self.png_rect(0, 0, self.width, self.height)
+            .unwrap_or_default()
+    }
+
+    /// A hash of the pixels of the rectangle from (x0, y0) to (x1, y1) of the screen, or None when
+    /// the rectangle is empty or not all on the screen.
+    #[must_use]
+    pub fn digest(&self, x0: u32, y0: u32, x1: u32, y1: u32) -> Option<u64> {
+        if x0 >= x1 || y0 >= y1 || x1 > self.width || y1 > self.height {
+            return None;
         }
-        crate::png::rgb(self.width, self.height, &rgb)
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        for y in y0..y1 {
+            let row = (y * self.width) as usize;
+            for &p in &self.pixels[row + x0 as usize..row + x1 as usize] {
+                h = (h ^ u64::from(p)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        Some(h)
+    }
+
+    /// The rectangle from (x0, y0) to (x1, y1) of the screen as a PNG file, or None when the
+    /// rectangle is empty or not all on the screen.
+    #[must_use]
+    pub fn png_rect(&self, x0: u32, y0: u32, x1: u32, y1: u32) -> Option<Vec<u8>> {
+        if x0 >= x1 || y0 >= y1 || x1 > self.width || y1 > self.height {
+            return None;
+        }
+        let (w, h) = (x1 - x0, y1 - y0);
+        let mut rgb = Vec::with_capacity(w as usize * h as usize * 3);
+        for y in y0..y1 {
+            let row = (y * self.width) as usize;
+            for &p in &self.pixels[row + x0 as usize..row + x1 as usize] {
+                rgb.extend_from_slice(&p.to_be_bytes()[1..]);
+            }
+        }
+        Some(crate::png::rgb(w, h, &rgb))
     }
 
     fn set(&mut self, x: &[u64; 6], ram: &Ram) -> u64 {
@@ -209,6 +241,14 @@ mod tests {
         assert_eq!(s.pixels().len(), 16 * 8);
         let png = s.png();
         assert!(png.starts_with(b"\x89PNG"));
+        // A rectangle has its own hash and PNG, and one off the screen has none.
+        let (a, b) = (s.digest(2, 2, 5, 4), s.digest(10, 6, 16, 8));
+        assert!(a.is_some() && b.is_some() && a != b);
+        assert_eq!(s.digest(0, 0, 17, 1), None);
+        assert_eq!(s.digest(3, 3, 3, 4), None);
+        let part = s.png_rect(3, 2, 5, 3).unwrap();
+        assert_eq!(&part[16..24], &[0, 0, 0, 2, 0, 0, 0, 1]);
+        assert!(s.png_rect(0, 0, 16, 9).is_none());
     }
 
     #[test]
