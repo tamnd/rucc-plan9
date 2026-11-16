@@ -594,6 +594,30 @@ fn type_in(bus: &mut Bus, b: &[u8]) {
     }
 }
 
+/// A key down or a key up of the rune `r` from the host window: on the keyboard h9kbd while the
+/// kernel has `#b/kbd` open. At other times, a key down types the rune on the console, and a key
+/// up and a modifier key do nothing.
+#[cfg_attr(
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    )),
+    allow(dead_code)
+)]
+fn key_event(bus: &mut Bus, r: u32, down: bool) {
+    let Some(c) = char::from_u32(r) else { return };
+    if let Some(k) = bus.hyper_device::<H9Kbd>()
+        && k.is_open()
+    {
+        k.push(c, down);
+    } else if down && !h9_gui::is_modifier(r) {
+        type_in(bus, c.encode_utf8(&mut [0; 4]).as_bytes());
+    }
+}
+
 /// The number of typed bytes that the guest did not read yet.
 #[cfg_attr(
     not(any(
@@ -770,7 +794,8 @@ struct Session {
 ))]
 mod backend {
     use super::{
-        H9Screen, Session, give, keys_pending, mouse_pending, script, type_in, unknown_report,
+        H9Screen, Session, give, key_event, keys_pending, mouse_pending, script, type_in,
+        unknown_report,
     };
     use h9_dev::Bus;
     #[cfg(target_os = "macos")]
@@ -903,6 +928,12 @@ mod backend {
         fn keys(&self, utf8: &[u8]) {
             if let Some(m) = self.machine.get() {
                 m.with_bus(|bus| type_in(bus, utf8));
+            }
+        }
+
+        fn key(&self, r: u32, down: bool) {
+            if let Some(m) = self.machine.get() {
+                m.with_bus(|bus| key_event(bus, r, down));
             }
         }
 

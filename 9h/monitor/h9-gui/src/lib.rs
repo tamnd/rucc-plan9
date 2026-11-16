@@ -24,8 +24,15 @@ pub trait Host: Send + Sync {
     fn frame(&self, generation: &mut u64, pixels: &mut Vec<u32>) -> Option<(u32, u32)>;
     /// The mouse is at (x, y) in the pixels of the screen, with the buttons of `/dev/mouse`.
     fn mouse(&self, x: u16, y: u16, buttons: u8);
-    /// The keys typed, as UTF-8.
+    /// The keys typed, as UTF-8: a key down and a key up for each rune.
     fn keys(&self, utf8: &[u8]);
+    /// A key down, `down` true, or a key up of the rune `r` of `keyboard.h`. A host that has no
+    /// key up events types the rune on its key down.
+    fn key(&self, r: u32, down: bool) {
+        if down && !is_modifier(r) {
+            self.keys(&rune_utf8(r));
+        }
+    }
     /// The person closed the window or typed Command-Q.
     fn quit(&self);
     /// True when the session ended. Then the window closes and `run` returns.
@@ -85,7 +92,116 @@ mod k {
     pub const PGDOWN: u32 = KF | 0x13;
     pub const INS: u32 = KF | 0x14;
     pub const END: u32 = KF | 0x18;
+    pub const ALT: u32 = KF | 0x15;
+    pub const SHIFT: u32 = KF | 0x16;
+    pub const CTL: u32 = KF | 0x17;
     pub const DEL: u32 = 0x7F;
+    pub const SPEC: u32 = 0xF800;
+    pub const CAPS: u32 = SPEC | 0x64;
+    pub const NUM: u32 = SPEC | 0x65;
+    pub const ALTGR: u32 = SPEC | 0x67;
+    pub const MOD4: u32 = SPEC | 0x68;
+}
+
+/// True for the runes of the modifier keys, which `kbdfs` uses for its state and which do not
+/// type a character.
+#[must_use]
+pub fn is_modifier(r: u32) -> bool {
+    matches!(
+        r,
+        k::ALT | k::SHIFT | k::CTL | k::CAPS | k::NUM | k::ALTGR | k::MOD4
+    )
+}
+
+/// The keys that are down in a host window, for the key up events of `#b/kbd` (plan 11.4).
+/// For each key, it keeps the rune that the key gave when it went down. The key up is for that
+/// rune, so no key up is lost when a modifier changes while the key is down. The codes of the
+/// keys are the codes of the host: the `keyCode` of `AppKit` or the keycode of X11.
+#[derive(Debug, Default)]
+pub struct Held {
+    keys: Vec<(u32, u32)>,
+    /// The modifier flags of `AppKit` that are down.
+    flags: u64,
+    /// True from an Option down until the next key, while Option can still be a tap.
+    option_alone: bool,
+}
+
+/// The modifier flags of `AppKit` and their runes. Option is not in the list: alone it is
+/// `Kalt`, and with a key it goes to the input method of macOS.
+const FLAG_RUNES: [(u64, u32); 3] = [(SHIFT, k::SHIFT), (CONTROL, k::CTL), (COMMAND, k::MOD4)];
+
+/// A key event: the rune, and true for a key down or false for a key up.
+pub type KeyEvent = (u32, bool);
+
+impl Held {
+    /// The key `code` went down and gives the rune `r`, or 0 for a key that types nothing of its
+    /// own. A key that is down already is a repeat of the host, which gives one more key down of
+    /// the first rune.
+    pub fn press(&mut self, code: u32, r: u32) -> Vec<KeyEvent> {
+        self.option_alone = false;
+        if r == 0 {
+            return vec![];
+        }
+        if let Some(&(_, first)) = self.keys.iter().find(|(c, _)| *c == code) {
+            return vec![(first, true)];
+        }
+        self.keys.push((code, r));
+        vec![(r, true)]
+    }
+
+    /// The key `code` went up.
+    pub fn release(&mut self, code: u32) -> Vec<KeyEvent> {
+        match self.keys.iter().position(|(c, _)| *c == code) {
+            Some(i) => vec![(self.keys.remove(i).1, false)],
+            None => vec![],
+        }
+    }
+
+    /// The modifier flags of `AppKit` are now `flags`. Shift, Control and Command give `Kshift`,
+    /// `Kctl` and `Kmod4`. Option gives a `Kalt` down and up when it goes up with no key after
+    /// its down, as in drawterm, so that a tap of Option starts a compose of Plan 9.
+    pub fn modifiers(&mut self, flags: u64) -> Vec<KeyEvent> {
+        let mut v = vec![];
+        let changed = flags ^ self.flags;
+        for (bit, r) in FLAG_RUNES {
+            if changed & bit != 0 {
+                v.push((r, flags & bit != 0));
+            }
+        }
+        if changed & OPTION != 0 {
+            if flags & OPTION != 0 {
+                self.option_alone = true;
+            } else if std::mem::take(&mut self.option_alone) {
+                v.extend([(k::ALT, true), (k::ALT, false)]);
+            }
+        }
+        if flags & OPTION != 0 && flags & (SHIFT | CONTROL | COMMAND) != 0 {
+            self.option_alone = false;
+        }
+        self.flags = flags & (SHIFT | CONTROL | OPTION | COMMAND);
+        v
+    }
+
+    /// A button of the mouse went down. Then Option is not a tap: Option-click is button 2.
+    pub fn mouse_down(&mut self) {
+        self.option_alone = false;
+    }
+
+    /// The window lost the keyboard: a key up for each key and modifier that is down.
+    pub fn release_all(&mut self) -> Vec<KeyEvent> {
+        let mut v: Vec<KeyEvent> = std::mem::take(&mut self.keys)
+            .into_iter()
+            .map(|(_, r)| (r, false))
+            .collect();
+        for (bit, r) in FLAG_RUNES {
+            if self.flags & bit != 0 {
+                v.push((r, false));
+            }
+        }
+        self.flags = 0;
+        self.option_alone = false;
+        v
+    }
 }
 
 /// The rune of `keyboard.h` for the first UTF-16 unit `c` of the characters of a key of
@@ -122,7 +238,11 @@ pub fn rune_utf8(r: u32) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-/// The modifier flags of `AppKit` that the mouse rules use.
+/// The Shift key of `NSEventModifierFlagShift`.
+pub const SHIFT: u64 = 1 << 17;
+/// The Control key of `NSEventModifierFlagControl`.
+pub const CONTROL: u64 = 1 << 18;
+/// The Option key of `NSEventModifierFlagOption`. The mouse rules use it too.
 pub const OPTION: u64 = 1 << 19;
 /// The Command key of `NSEventModifierFlagCommand`.
 pub const COMMAND: u64 = 1 << 20;
@@ -207,7 +327,67 @@ impl Scroll {
 
 #[cfg(test)]
 mod tests {
-    use super::{COMMAND, OPTION, Scroll, buttons, key_rune, rune_utf8, screen_point};
+    use super::{
+        COMMAND, CONTROL, Held, OPTION, SHIFT, Scroll, buttons, is_modifier, k, key_rune,
+        rune_utf8, screen_point,
+    };
+
+    #[test]
+    fn a_key_up_is_for_the_rune_of_the_key_down() {
+        let mut h = Held::default();
+        let a = u32::from(b'A');
+        assert_eq!(h.modifiers(SHIFT), [(k::SHIFT, true)]);
+        assert_eq!(h.press(4, a), [(a, true)]);
+        assert_eq!(h.modifiers(0), [(k::SHIFT, false)]);
+        assert_eq!(h.release(4), [(a, false)]);
+        assert_eq!(h.release(4), []);
+    }
+
+    #[test]
+    fn a_repeat_of_the_host_is_one_more_key_down() {
+        let mut h = Held::default();
+        assert_eq!(h.press(7, k::UP), [(k::UP, true)]);
+        assert_eq!(h.press(7, k::UP), [(k::UP, true)]);
+        assert_eq!(h.press(8, 0), []);
+        assert_eq!(h.release(8), []);
+        assert_eq!(h.release(7), [(k::UP, false)]);
+    }
+
+    #[test]
+    fn a_tap_of_option_is_kalt() {
+        let mut h = Held::default();
+        assert_eq!(h.modifiers(OPTION), []);
+        assert_eq!(h.modifiers(0), [(k::ALT, true), (k::ALT, false)]);
+        h.modifiers(OPTION);
+        assert_eq!(h.press(1, 0xe9), [(0xe9, true)]);
+        h.release(1);
+        assert_eq!(h.modifiers(0), []);
+        h.modifiers(OPTION);
+        h.mouse_down();
+        assert_eq!(h.modifiers(0), []);
+        h.modifiers(OPTION);
+        h.modifiers(OPTION | SHIFT);
+        assert_eq!(h.modifiers(0), [(k::SHIFT, false)]);
+    }
+
+    #[test]
+    fn the_keys_go_up_when_the_window_loses_the_keyboard() {
+        let mut h = Held::default();
+        let x = u32::from(b'x');
+        assert_eq!(
+            h.modifiers(CONTROL | COMMAND),
+            [(k::CTL, true), (k::MOD4, true)]
+        );
+        h.press(2, x);
+        assert_eq!(
+            h.release_all(),
+            [(x, false), (k::CTL, false), (k::MOD4, false)]
+        );
+        assert_eq!(h.release(2), []);
+        assert_eq!(h.modifiers(0), []);
+        assert!(is_modifier(k::ALTGR));
+        assert!(!is_modifier(x));
+    }
 
     #[test]
     fn the_keys_of_the_host_give_the_runes_of_plan_9() {
