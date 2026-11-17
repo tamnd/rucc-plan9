@@ -1,7 +1,7 @@
-# winwatch shows the labels of the windows of rio. The q key stops it.
+# winwatch shows the labels of the windows of rio. The q key stops it. The order of the labels is the order of /dev/wsys, and that order is not the same in each run, so -e removes the label of the stats window and only the label of the console window stays.
 class exact
 window 400x200
-run winwatch
+run winwatch -e '^stats$'
 quiet
 snap labels
 exit "q"

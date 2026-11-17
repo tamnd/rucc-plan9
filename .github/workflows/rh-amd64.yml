@@ -1,0 +1,215 @@
+# R/H against G/Q on amd64 with KVM (plan 11.9 and the exit criteria of P8). The hosted runners
+# have KVM.
+#
+# The job rh builds rucc at the pin below, makes the g-base image, and builds the 9h kernel with
+# r9 build --side G and the target 9h.amd64. r9 build --side R --keep then builds the amd64 user
+# space with rucc and -O2, and the root image of that build is the R root. The job runs each GUI
+# script on 9h with the 9h kernel and the R root. The job gq runs each GUI script on the 9front
+# kernel under QEMU with the g-base image. The job compare compares the snaps of the two runs of
+# each script with r9 gui compare. It fails when a run fails, when two runs are different, or when
+# fewer than 60 scripts of the class exact or masked are the same. The summary of the job has the
+# result of each script.
+
+name: rh amd64
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/rh-amd64.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  R9_CACHE: /mnt/r9
+  # The commit of tamnd/rucc that builds the R user space.
+  RUCC_PIN: ead210602789e45bc5593fc42265d048efefef55
+
+jobs:
+  rh:
+    name: R/H amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: tamnd/rucc
+          ref: ${{ env.RUCC_PIN }}
+          path: rucc
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: |
+            . -> target
+            9h/monitor -> target
+            rucc -> target
+      - name: let the runner user open /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -qy --no-install-recommends qemu-utils qemu-system-x86
+          sudo mkdir -p /mnt/r9 && sudo chown "$USER" /mnt/r9
+      - name: cargo build
+        run: |
+          cargo build --release --locked -p r9
+          (cd 9h/monitor && cargo build --release --locked)
+          (cd rucc && cargo build --release --locked -p rucc)
+      - uses: actions/cache@v6.1.0
+        with:
+          path: /mnt/r9/images
+          key: r9-images-amd64-${{ hashFiles('pins.toml') }}
+          restore-keys: r9-images-amd64-
+      - name: r9 fetch
+        run: target/release/r9 fetch --row amd64
+      - name: r9 image build
+        run: target/release/r9 image build --row amd64 --accel kvm --out "$RUNNER_TEMP/image"
+      - name: r9 build, the target 9h.amd64
+        run: target/release/r9 build --side G --row amd64 --accel kvm --targets 9h.amd64 --out "$RUNNER_TEMP/k"
+      - name: r9 build --side R
+        env:
+          R9_RUCC: ${{ github.workspace }}/rucc/target/release/rucc
+          R9_OPT: -O2
+        run: |
+          # Each minute, show the number of calls, the rucc processes that run for more than 30
+          # seconds, and the TCP connections of r9 with bytes in a queue.
+          (
+            while sleep 60; do
+              echo "progress: $(wc -l < /mnt/r9/r/ccd.log 2>/dev/null || echo 0) calls; last: $(tail -1 /mnt/r9/r/ccd.log 2>/dev/null)"
+              ps -o etimes=,args= -C rucc | awk '$1 > 30' | cut -c1-300
+              ss -tnp 2>/dev/null | awk '/"r9"/ && ($2 > 0 || $3 > 0)'
+            done
+          ) &
+          target/release/r9 build --side R --row amd64 --accel kvm --keep --timeout 5400 --out /mnt/r9/r
+          echo "calls sent again: $(grep -c '; try ' /mnt/r9/r/collected/rucc.err || true)"
+          grep '; try ' /mnt/r9/r/collected/rucc.err | head -20 || true
+          grep -E '^(passed|calls|failed_calls|rucc_calls|kencc_calls) ' /mnt/r9/r/build.toml
+          grep -qx 'kencc_calls = 0' /mnt/r9/r/build.toml
+      - name: r9 gui run on 9h
+        run: |
+          mkdir -p "$RUNNER_TEMP/rh"
+          for s in gui/*.r9; do
+            n=$(basename "$s" .r9)
+            if target/release/r9 gui run --kernel "$RUNNER_TEMP/k/collected/9h/amd64/99h" --root /mnt/r9/r/root.qcow2 --cpus 4 --mem 2048 --script "$s" --timeout 300 --out "$RUNNER_TEMP/rh/$n" > "$RUNNER_TEMP/rh/$n.log" 2>&1; then
+              echo "$n PASS"
+            else
+              echo "$n FAIL $(tail -1 "$RUNNER_TEMP/rh/$n.log")"
+            fi
+          done | tee "$RUNNER_TEMP/rh/runs.txt"
+      - name: gather the results
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/out/r" "$RUNNER_TEMP/rh"
+          cp /mnt/r9/r/build.toml /mnt/r9/r/console.log /mnt/r9/r/ccd.log /mnt/r9/r/steps.json "$RUNNER_TEMP/out/r/" || true
+          cp /mnt/r9/r/collected/compile.jsonl /mnt/r9/r/collected/mk.log /mnt/r9/r/collected/rucc.err "$RUNNER_TEMP/out/r/" || true
+          cp "$RUNNER_TEMP/k/collected/9h/amd64/99h" "$RUNNER_TEMP/out/" || true
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: rh-amd64-build
+          path: ${{ runner.temp }}/out
+          retention-days: 30
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: rh-amd64-runs
+          path: ${{ runner.temp }}/rh
+          retention-days: 30
+
+  gq:
+    name: G/Q amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: Swatinem/rust-cache@v2.9.2
+      - name: let the runner user open /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -qy --no-install-recommends qemu-utils qemu-system-x86
+          sudo mkdir -p /mnt/r9 && sudo chown "$USER" /mnt/r9
+      - name: cargo build
+        run: cargo build --release --locked -p r9
+      - uses: actions/cache@v6.1.0
+        with:
+          path: /mnt/r9/images
+          key: r9-images-amd64-${{ hashFiles('pins.toml') }}
+          restore-keys: r9-images-amd64-
+      - name: r9 fetch
+        run: target/release/r9 fetch --row amd64
+      - name: r9 image build
+        run: target/release/r9 image build --row amd64 --accel kvm --out "$RUNNER_TEMP/image"
+      - name: r9 gui run --on qemu
+        run: |
+          mkdir -p "$RUNNER_TEMP/gq"
+          root=$(ls /mnt/r9/images/g-base-*.amd64.qcow2 | head -1)
+          for s in gui/*.r9; do
+            n=$(basename "$s" .r9)
+            if target/release/r9 gui run --on qemu --root "$root" --accel kvm --script "$s" --timeout 300 --out "$RUNNER_TEMP/gq/$n" > "$RUNNER_TEMP/gq/$n.log" 2>&1; then
+              echo "$n PASS"
+            else
+              echo "$n FAIL $(tail -1 "$RUNNER_TEMP/gq/$n.log")"
+            fi
+          done | tee "$RUNNER_TEMP/gq/runs.txt"
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: gq-amd64-runs
+          path: ${{ runner.temp }}/gq
+          retention-days: 30
+
+  compare:
+    name: R/H against G/Q
+    needs: [rh, gq]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: Swatinem/rust-cache@v2.9.2
+      - name: cargo build
+        run: cargo build --release --locked -p r9
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: rh-amd64-runs
+          path: ${{ runner.temp }}/rh
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: gq-amd64-runs
+          path: ${{ runner.temp }}/gq
+      - name: r9 gui compare
+        run: |
+          same=0; exact=0; bad=0
+          for s in gui/*.r9; do
+            n=$(basename "$s" .r9)
+            class=$(sed -n 's/^class *//p' "$s" | head -1)
+            if r=$(target/release/r9 gui compare --want "$RUNNER_TEMP/gq/$n" --got "$RUNNER_TEMP/rh/$n" 2>&1); then
+              same=$((same + 1))
+              case "$class" in exact*|masked*) exact=$((exact + 1)) ;; esac
+              echo "| $n | $class | SAME |"
+            else
+              bad=$((bad + 1))
+              echo "| $n | $class | $(echo "$r" | tail -1) |"
+            fi
+          done > rows.md
+          {
+            echo "R/H against G/Q on amd64: $same SAME, $bad not the same, $exact SAME of the class exact or masked."
+            echo
+            echo "| script | class | result |"
+            echo "| --- | --- | --- |"
+            cat rows.md
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$same SAME, $bad not the same, $exact exact or masked"
+          [ "$bad" -eq 0 ] && [ "$exact" -ge 60 ]
