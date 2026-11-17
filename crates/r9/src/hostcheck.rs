@@ -37,7 +37,11 @@
 //! - `buttons`: buttons 2 and 3 give the bits 2 and 4 of `/dev/mouse`;
 //! - `wheel`: the wheel up and down give the bits 8 and 16;
 //! - `snarf in`: a text on the host clipboard is the text of `/dev/snarf` in `rio`;
-//! - `snarf out`: a text that the probe writes to `/dev/snarf` goes to the host clipboard.
+//! - `snarf out`: a text that the probe writes to `/dev/snarf` goes to the host clipboard;
+//! - `audio`: the samples that the probe writes to `/dev/audio` are in the WAV file of the
+//!   monitor, in order and with no change. The monitor writes the file in place of the audio
+//!   output of the host, so the check makes no sound. It checks the audio driver of the guest,
+//!   the device of the monitor and its timing, but not the audio output of the host.
 //!
 //! The command keeps the text on the host clipboard before the checks, and puts it back after
 //! them. The output directory has `console.log`, the logs of the monitor and `hostcheck.json`,
@@ -269,6 +273,8 @@ pub enum Event {
     Snarf(Vec<u8>),
     /// The probe wrote [`PROBE_SNARF`] to `/dev/snarf`.
     Snarfed,
+    /// The probe wrote the bytes of the audio pattern to `/dev/audio`.
+    Audio(usize),
     /// The probe stops.
     End,
     /// The probe failed.
@@ -293,6 +299,7 @@ fn event(text: &str) -> Option<Event> {
         "ready" => Event::Ready,
         "end" => Event::End,
         "snarfed" => Event::Snarfed,
+        "audio" => Event::Audio(words.next()?.parse().ok()?),
         "snarf" => Event::Snarf(unhex(words.next().unwrap_or(""))?),
         "error" => Event::Error(words.collect::<Vec<_>>().join(" ")),
         "kbd" => {
@@ -389,10 +396,78 @@ fn split<'a, T, W>(got: &'a [T], want: &[(&str, Vec<W>)]) -> Vec<&'a [T]> {
     parts
 }
 
-/// The checks of the events of the probe for the plan. `pasted` is the host clipboard after the
-/// probe wrote to `/dev/snarf`.
+/// The number of 16-bit stereo frames of the audio pattern, as `Audioframes` of the probe.
+const AUDIO_FRAMES: u16 = 8192;
+
+/// The bytes that the probe writes to `/dev/audio`: sample `k` is `k*7919+12345` in 16 bits,
+/// little endian.
 #[must_use]
-pub fn evaluate(events: &[Event], plan: &Plan, pasted: Option<&str>) -> Vec<Check> {
+pub fn audio_pattern() -> Vec<u8> {
+    (0..2 * AUDIO_FRAMES)
+        .flat_map(|k| k.wrapping_mul(7919).wrapping_add(12345).to_le_bytes())
+        .collect()
+}
+
+/// The size of the header of the WAV file of the monitor.
+const WAV_HEADER: usize = 44;
+
+/// The problem of the audio check, or None when the samples of the probe are in the WAV file
+/// `wav`.
+fn audio_problem(events: &[Event], wav: Option<&[u8]>) -> Option<String> {
+    let want = audio_pattern();
+    let wrote = events.iter().find_map(|e| match e {
+        Event::Audio(n) => Some(*n),
+        _ => None,
+    });
+    match wrote {
+        None => return Some("the probe did not write to /dev/audio".into()),
+        Some(n) if n != want.len() => {
+            return Some(format!(
+                "the probe wrote {n} bytes to /dev/audio, and it must write {}",
+                want.len()
+            ));
+        }
+        Some(_) => {}
+    }
+    let Some(wav) = wav else {
+        return Some("the monitor wrote no WAV file".into());
+    };
+    if wav.len() < WAV_HEADER || &wav[..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+        return Some(format!("the WAV file has no header ({} bytes)", wav.len()));
+    }
+    let data = &wav[WAV_HEADER..];
+    if data.windows(want.len()).any(|w| w == want.as_slice()) {
+        return None;
+    }
+    let head = &want[..64];
+    Some(match data.windows(head.len()).position(|w| w == head) {
+        Some(at) => {
+            let same = data[at..]
+                .iter()
+                .zip(&want)
+                .take_while(|(a, b)| a == b)
+                .count();
+            format!(
+                "the WAV file has the first {same} of the {} bytes of the pattern",
+                want.len()
+            )
+        }
+        None => format!(
+            "the WAV file has {} bytes of samples, and not the pattern of the probe",
+            data.len()
+        ),
+    })
+}
+
+/// The checks of the events of the probe for the plan. `pasted` is the host clipboard after the
+/// probe wrote to `/dev/snarf`, and `wav` is the WAV file of the monitor.
+#[must_use]
+pub fn evaluate(
+    events: &[Event],
+    plan: &Plan,
+    pasted: Option<&str>,
+    wav: Option<&[u8]>,
+) -> Vec<Check> {
     let mut checks = Vec::new();
     let typed: Vec<u32> = events
         .iter()
@@ -473,6 +548,7 @@ pub fn evaluate(events: &[Event], plan: &Plan, pasted: Option<&str>) -> Vec<Chec
             None => Some("the host clipboard was not read".into()),
         },
     ));
+    checks.push(Check::new("audio", audio_problem(events, wav)));
     checks
 }
 
@@ -1158,6 +1234,9 @@ pub fn run(req: &h9boot::Request, driver: &mut dyn Driver) -> Result<Record, Str
     }
     req.hostfs = Some(hostfs);
     req.snap = Some(work.join("screen.png"));
+    let wav_path = work.join("audio.wav");
+    let _ = std::fs::remove_file(&wav_path);
+    req.audio = Some(wav_path.clone());
     let (w, h) = gui::SCREEN;
     let plan = plan(w, h);
     let saved = paste().ok();
@@ -1176,7 +1255,8 @@ pub fn run(req: &h9boot::Request, driver: &mut dyn Driver) -> Result<Record, Str
     let console = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
     let events = events(&console);
     let pasted = result.as_ref().ok().cloned().flatten();
-    let checks = evaluate(&events, &plan, pasted.as_deref());
+    let wav = std::fs::read(&wav_path).ok();
+    let checks = evaluate(&events, &plan, pasted.as_deref(), wav.as_deref());
     let errors: Vec<String> = events
         .iter()
         .filter_map(|e| match e {
@@ -1262,8 +1342,19 @@ mod tests {
         }
         e.push(Event::Snarf(HOST_SNARF.as_bytes().to_vec()));
         e.push(Event::Snarfed);
+        e.push(Event::Audio(audio_pattern().len()));
         e.push(Event::End);
         e
+    }
+
+    /// A WAV file of the monitor with silence, the pattern of the probe and silence.
+    fn good_wav() -> Vec<u8> {
+        let mut w = b"RIFF\0\0\0\0WAVEfmt ".to_vec();
+        w.resize(WAV_HEADER, 0);
+        w.extend([0u8; 400]);
+        w.extend(audio_pattern());
+        w.extend([0u8; 400]);
+        w
     }
 
     #[test]
@@ -1303,7 +1394,7 @@ mod tests {
     #[test]
     fn a_good_probe_passes_each_check() {
         let p = plan(1024, 768);
-        let checks = evaluate(&good(&p), &p, Some(PROBE_SNARF));
+        let checks = evaluate(&good(&p), &p, Some(PROBE_SNARF), Some(&good_wav()));
         let names: Vec<&str> = checks.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(
             names,
@@ -1317,7 +1408,8 @@ mod tests {
                 "buttons",
                 "wheel",
                 "snarf in",
-                "snarf out"
+                "snarf out",
+                "audio"
             ]
         );
         assert!(checks.iter().all(|c| c.passed), "{checks:?}");
@@ -1333,7 +1425,7 @@ mod tests {
             .unwrap();
         e[at] = Event::Kbd('c', vec![u32::from('a')]);
         e.push(Event::Kbd('k', vec![0xf016]));
-        let checks = evaluate(&e, &p, Some("other"));
+        let checks = evaluate(&e, &p, Some("other"), Some(&good_wav()));
         let failed: Vec<(&str, &str)> = checks
             .iter()
             .filter(|c| !c.passed)
@@ -1353,6 +1445,30 @@ mod tests {
     }
 
     #[test]
+    fn the_audio_check_finds_the_pattern_in_the_wav_file() {
+        let pattern = audio_pattern();
+        assert_eq!(pattern.len(), 4 * usize::from(AUDIO_FRAMES));
+        assert_eq!(pattern[..4], [0x39, 0x30, 0x28, 0x4f]);
+        let e = [Event::Audio(pattern.len())];
+        assert_eq!(audio_problem(&e, Some(&good_wav())), None);
+        let mut cut = good_wav();
+        cut.truncate(WAV_HEADER + 400 + 1000);
+        assert_eq!(
+            audio_problem(&e, Some(&cut)).unwrap(),
+            "the WAV file has the first 1000 of the 32768 bytes of the pattern"
+        );
+        assert_eq!(
+            audio_problem(&[], Some(&good_wav())).unwrap(),
+            "the probe did not write to /dev/audio"
+        );
+        assert_eq!(
+            audio_problem(&e, None).unwrap(),
+            "the monitor wrote no WAV file"
+        );
+        assert_eq!(events("R9-PROBE audio 32768\r\n"), e);
+    }
+
+    #[test]
     fn a_lost_click_fails_the_mouse_check() {
         let p = plan(1024, 768);
         let mut e = good(&p);
@@ -1361,7 +1477,7 @@ mod tests {
             .position(|x| *x == Event::Mouse(512, 384, 2))
             .unwrap();
         e.remove(at);
-        let checks = evaluate(&e, &p, Some(PROBE_SNARF));
+        let checks = evaluate(&e, &p, Some(PROBE_SNARF), Some(&good_wav()));
         let b = checks.iter().find(|c| c.name == "buttons").unwrap();
         assert_eq!(
             b.detail,

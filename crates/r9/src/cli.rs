@@ -382,8 +382,9 @@ usage:
       pbcopy and pbpaste. With --host wayland, the input goes through the sway compositor of
       WAYLAND_DISPLAY with the virtual keyboard and pointer of 9h vinput, and the clipboard uses
       wl-copy and wl-paste. With --host control, the input goes on the control socket of the monitor, and
-      only the guest and r9 are checked. The work goes to DIR (work/hostcheck by default), with
-      console.log and hostcheck.json. The command keeps the text of the host clipboard, and puts
+      only the guest and r9 are checked. At the end, the probe writes a pattern to /dev/audio, and
+      r9 looks for it in the WAV file of the monitor, audio.wav. The check makes no sound. The
+      work goes to DIR (work/hostcheck by default), with console.log and hostcheck.json. The command keeps the text of the host clipboard, and puts
       it back at the end.
   r9 census FILE [--side R|G]
       Count what reached the compiler slot in one build, from the compile.jsonl that r9-cc
