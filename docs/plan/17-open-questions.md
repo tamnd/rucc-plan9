@@ -125,6 +125,13 @@ If they changed rarely, ship it as experimental, with a check in `r9 9h verify` 
 
 **Deadline.** P8, or 02.7 records the row as unclaimed.
 
+**Decision.** There is no arm64 Linux builder at P8, so 02.6 and 02.7 record the Linux arm64 row of `9h` as unclaimed. The facts:
+- The hosted arm64 runner of GitHub Actions (`ubuntu-24.04-arm`) is a Neoverse-N2 virtual machine on Azure. Its GIC is a GICv3, but the kernel says `kvm: HYP mode not available`, and it has no `/dev/kvm`. The runner cannot run a guest.
+- The Raspberry Pi 5 has a GIC-400, which is a GICv2, so KVM cannot give a guest a GICv3 there.
+- No Ampere host is available to the project.
+
+The monitor builds on Linux arm64, and its tests pass there, in the job `9h monitor on linux arm64` of each change. The row can join the claim when a host with `/dev/kvm` and a GICv3 runs `r9 9h boot` and the GUI scripts.
+
 ## 7. Whether a weekly pin is right for `front`
 
 **Belief.** 9front commits to `front` most days. A weekly pin, advanced only when G passes its baseline three times (04.1), is frequent enough to find rucc regressions against new code within a week. It is also slow enough that G's three baseline runs fit.
