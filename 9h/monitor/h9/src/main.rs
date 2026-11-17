@@ -942,6 +942,18 @@ mod backend {
             self.0.dump_regs();
             Ok(())
         }
+
+        /// The window does the event, and then the guest reads the input that it made.
+        fn post(&mut self, e: h9_gui::HostEvent) -> Result<(), String> {
+            h9_gui::post(e)?;
+            match e {
+                h9_gui::HostEvent::Key { .. } | h9_gui::HostEvent::Flags { .. } => {
+                    self.drain(keys_pending);
+                }
+                _ => self.drain(mouse_pending),
+            }
+            Ok(())
+        }
     }
 
     /// The host of the window (`h9-gui`): the screen, the keyboard and the mouse of the machine.

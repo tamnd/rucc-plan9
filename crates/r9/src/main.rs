@@ -408,13 +408,20 @@ fn run_hostcheck(args: &Args) -> Result<ExitCode, String> {
     let mut x11 = r9::hostcheck::X11::default();
     let mut control = r9::hostcheck::Control::default();
     let mut wayland = r9::hostcheck::Wayland::new(&req.monitor);
-    let driver: &mut dyn r9::hostcheck::Driver = match args.get("host").unwrap_or("x11") {
+    let mut cocoa = r9::hostcheck::Cocoa::default();
+    let default = if cfg!(target_os = "macos") {
+        "cocoa"
+    } else {
+        "x11"
+    };
+    let driver: &mut dyn r9::hostcheck::Driver = match args.get("host").unwrap_or(default) {
         "x11" => &mut x11,
         "wayland" => &mut wayland,
+        "cocoa" => &mut cocoa,
         "control" => &mut control,
         h => {
             return Err(format!(
-                "--host {h}: the hosts are x11, wayland and control"
+                "--host {h}: the hosts are x11, wayland, cocoa and control"
             ));
         }
     };

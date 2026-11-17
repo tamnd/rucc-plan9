@@ -3,10 +3,13 @@
 //! the window, and the target of a timer that shows the screen 60 times a second. The layer of
 //! the view holds the screen as a `CGImage`, and it scales the image with the nearest pixel.
 
-use super::{COMMAND, Held, Host, KeyEvent, Scroll, buttons, key_rune, screen_point};
+use super::{
+    COMMAND, Held, Host, HostEvent, KeyEvent, Scroll, buttons, key_rune, screen_point, view_point,
+};
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_void};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::Duration;
 
 type Id = *mut c_void;
 type Sel = *const c_void;
@@ -78,6 +81,11 @@ unsafe extern "C" {
         intent: i32,
     ) -> *const c_void;
     fn CGImageRelease(i: *const c_void);
+    fn CGEventCreateKeyboardEvent(source: *const c_void, code: u16, down: bool) -> *mut c_void;
+    fn CGEventCreateCopy(e: *const c_void) -> *mut c_void;
+    fn CGEventSetFlags(e: *mut c_void, flags: u64);
+    fn CGEventSetType(e: *mut c_void, kind: u32);
+    fn CGEventSetIntegerValueField(e: *mut c_void, field: u32, value: i64);
 }
 
 /// `kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst`: a little-endian word of
@@ -89,6 +97,25 @@ const STYLE: usize = 1 | 2 | 4 | 8;
 const BUFFERED: usize = 2;
 /// `NSEventTypeApplicationDefined`.
 const APP_DEFINED: usize = 15;
+/// `kCGEventFlagsChanged`.
+const FLAGS_CHANGED: u32 = 12;
+/// `kCGEventScrollWheel`.
+const SCROLL_WHEEL: u32 = 22;
+/// `kCGMouseEventButtonNumber`.
+const BUTTON_NUMBER: u32 = 3;
+/// `kCGScrollWheelEventDeltaAxis1`, the lines of the vertical wheel.
+const WHEEL_LINES: u32 = 11;
+/// `kCGScrollWheelEventIsContinuous`: 0 for a mouse wheel.
+const WHEEL_CONTINUOUS: u32 = 88;
+/// The field of a key event with the type of the keyboard, and the type of an ANSI keyboard.
+/// The layout reads the key codes for this type: on a JIS keyboard, key 24 gives '^' and not '='.
+const KEYBOARD_TYPE: u32 = 10;
+const KEYBOARD_ANSI: i64 = 40;
+/// `NSEventTypeMouseMoved`.
+const MOUSE_MOVED: usize = 5;
+/// The types of the button events of `NSEvent`: the left, right and other buttons, down and up.
+const BUTTON_DOWN: [usize; 3] = [1, 3, 25];
+const BUTTON_UP: [usize; 3] = [2, 4, 26];
 
 /// Send the message `$sel` to `$obj` with the arguments of the given types, and give the result
 /// of the type `$ret`. On arm64, `objc_msgSend` takes the arguments and gives the result as a C
@@ -135,6 +162,9 @@ struct State {
     size: (u32, u32),
     /// The last point and buttons that went to the machine.
     at: (u16, u16, u8),
+    /// The buttons of the host that are down, as in `NSEvent.pressedMouseButtons`: bit 0 for the
+    /// left button, bit 1 for the right and bit 2 for the middle.
+    pressed: u64,
     scroll: Scroll,
     /// The keys and the modifiers that are down.
     held: Held,
@@ -146,6 +176,136 @@ thread_local! {
 
 fn host() -> Option<&'static Arc<dyn Host>> {
     HOST.get()
+}
+
+/// The events of [`post`] that wait for the timer, and the count of the events that the window
+/// did.
+#[derive(Default)]
+struct Posts {
+    queue: Vec<HostEvent>,
+    given: u64,
+    done: u64,
+}
+
+static POSTS: Mutex<Posts> = Mutex::new(Posts {
+    queue: Vec::new(),
+    given: 0,
+    done: 0,
+});
+static POSTED: Condvar = Condvar::new();
+
+/// Give `e` to the window, and wait until the window did it. The timer of the view makes the
+/// event of `AppKit` on the main thread and gives it to `NSApplication`, as the event loop does
+/// with an event of the window server. Thus the event goes through the window to the view.
+pub fn post(e: HostEvent) -> Result<(), String> {
+    if host().is_none() {
+        return Err("the window is not open".into());
+    }
+    let mut p = POSTS.lock().map_err(|_| "the window failed")?;
+    p.queue.push(e);
+    p.given += 1;
+    let mine = p.given;
+    let (p, wait) = POSTED
+        .wait_timeout_while(p, Duration::from_secs(5), |p| p.done < mine)
+        .map_err(|_| "the window failed")?;
+    if wait.timed_out() && p.done < mine {
+        return Err("the window did not take the event in 5 s".into());
+    }
+    Ok(())
+}
+
+/// Make the `AppKit` event of `e` for `view`, and give it to the application.
+unsafe fn dispatch(view: Id, event: HostEvent) {
+    // SAFETY: each message goes to an object of a class that has the method. Each CGEvent made
+    // here is released after NSEvent took its own copy.
+    unsafe {
+        let app = msg![Id; class(c"NSApplication"), c"sharedApplication"];
+        let cg = match event {
+            HostEvent::Key { code, down, flags } => {
+                let c = CGEventCreateKeyboardEvent(std::ptr::null(), code, down);
+                if !c.is_null() {
+                    CGEventSetFlags(c, flags);
+                    CGEventSetIntegerValueField(c, KEYBOARD_TYPE, KEYBOARD_ANSI);
+                }
+                c
+            }
+            HostEvent::Flags { code, flags } => {
+                let c = CGEventCreateKeyboardEvent(std::ptr::null(), code, true);
+                if !c.is_null() {
+                    CGEventSetType(c, FLAGS_CHANGED);
+                    CGEventSetFlags(c, flags);
+                    CGEventSetIntegerValueField(c, KEYBOARD_TYPE, KEYBOARD_ANSI);
+                }
+                c
+            }
+            HostEvent::Button { x, y, .. }
+            | HostEvent::Move { x, y }
+            | HostEvent::Wheel { x, y, .. } => {
+                let (kind, button) = match event {
+                    HostEvent::Button { button, down, .. } => {
+                        let i = usize::from(button.min(2));
+                        (if down { BUTTON_DOWN[i] } else { BUTTON_UP[i] }, button)
+                    }
+                    _ => (MOUSE_MOVED, 0),
+                };
+                let window = msg![Id; view, c"window"];
+                let bounds = msg![Rect; view, c"bounds"];
+                let (width, height) = STATE.with(|s| s.borrow().size);
+                let (px, py) = view_point(x, y, bounds.size.w, bounds.size.h, width, height);
+                let at = msg![Point; view, c"convertPoint:toView:", Point { x: px, y: py } => Point,
+                    std::ptr::null_mut::<c_void>() => Id];
+                let info = msg![Id; class(c"NSProcessInfo"), c"processInfo"];
+                let ev = msg![Id; class(c"NSEvent"),
+                    c"mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:",
+                    kind => usize, at => Point, 0usize => usize,
+                    msg![f64; info, c"systemUptime"] => f64,
+                    msg![isize; window, c"windowNumber"] => isize,
+                    std::ptr::null_mut::<c_void>() => Id, 0isize => isize, 1isize => isize,
+                    1.0f32 => f32];
+                if ev.is_null() {
+                    return;
+                }
+                // NSEvent cannot make the event of a middle button or of the wheel, so the
+                // CGEvent of a mouse event gets the button number, or the type and the lines of
+                // the wheel.
+                let c = CGEventCreateCopy(msg![*const c_void; ev, c"CGEvent"]);
+                if !c.is_null() {
+                    CGEventSetIntegerValueField(c, BUTTON_NUMBER, i64::from(button));
+                    if let HostEvent::Wheel { up, .. } = event {
+                        CGEventSetType(c, SCROLL_WHEEL);
+                        CGEventSetIntegerValueField(c, WHEEL_LINES, if up { 1 } else { -1 });
+                        CGEventSetIntegerValueField(c, WHEEL_CONTINUOUS, 0);
+                    }
+                }
+                c
+            }
+        };
+        if cg.is_null() {
+            return;
+        }
+        let ev =
+            msg![Id; class(c"NSEvent"), c"eventWithCGEvent:", cg.cast_const() => *const c_void];
+        CFRelease(cg);
+        if !ev.is_null() {
+            msg![(); app, c"sendEvent:", ev => Id];
+        }
+    }
+}
+
+/// Do the events of [`post`] that wait, in order, and wake the threads that wait for them.
+fn do_posts(view: Id) {
+    let events = match POSTS.lock() {
+        Ok(mut p) => std::mem::take(&mut p.queue),
+        Err(_) => return,
+    };
+    for &e in &events {
+        // SAFETY: the timer runs on the main thread, and `view` is the view of the window.
+        unsafe { dispatch(view, e) };
+    }
+    if let Ok(mut p) = POSTS.lock() {
+        p.done += events.len() as u64;
+        POSTED.notify_all();
+    }
 }
 
 pub fn run(title: &str, width: u32, height: u32, h: Arc<dyn Host>) -> Result<(), String> {
@@ -281,6 +441,7 @@ extern "C" fn tick(view: Id, _: Sel, _: Id) {
         }
         return;
     }
+    do_posts(view);
     STATE.with(|s| {
         let s = &mut *s.borrow_mut();
         if let Some((w, hgt)) = h.frame(&mut s.generation, &mut s.pixels)
@@ -347,19 +508,37 @@ unsafe fn point(view: Id, ev: Id) -> (u16, u16) {
 
 extern "C" fn mouse(view: Id, _: Sel, ev: Id) {
     let Some(host) = host() else { return };
+    // The buttons come from the type and the button number of each event, and not from
+    // `pressedMouseButtons`. That is the state of the mouse now, which can be after the event,
+    // and it does not see an event that a test gives.
     // SAFETY: `ev` is a mouse event.
-    let (x, y, b) = unsafe {
+    let (x, y, kind, number, flags) = unsafe {
         let (x, y) = point(view, ev);
-        let pressed = msg![usize; class(c"NSEvent"), c"pressedMouseButtons"];
-        let flags = msg![usize; ev, c"modifierFlags"];
-        (x, y, buttons(pressed as u64, flags as u64))
+        (
+            x,
+            y,
+            msg![usize; ev, c"type"],
+            msg![isize; ev, c"buttonNumber"],
+            msg![usize; ev, c"modifierFlags"] as u64,
+        )
     };
-    STATE.with(|s| {
+    let bit = u32::try_from(number)
+        .ok()
+        .filter(|&n| n < 64)
+        .map_or(0, |n| 1u64 << n);
+    let b = STATE.with(|s| {
         let s = &mut *s.borrow_mut();
+        if BUTTON_DOWN.contains(&kind) {
+            s.pressed |= bit;
+        } else if BUTTON_UP.contains(&kind) {
+            s.pressed &= !bit;
+        }
+        let b = buttons(s.pressed, flags);
         if b & !s.at.2 != 0 {
             s.held.mouse_down();
         }
         s.at = (x, y, b);
+        b
     });
     host.mouse(x, y, b);
 }
@@ -405,7 +584,8 @@ extern "C" fn key_down(_: Id, _: Sel, ev: Id) {
             }
             return;
         }
-        let code = u32::from(msg![u16; ev, c"keyCode"]);
+        let key = msg![u16; ev, c"keyCode"];
+        let code = u32::from(key);
         let chars = msg![Id; ev, c"characters"];
         let n = if chars.is_null() {
             0
@@ -418,7 +598,7 @@ extern "C" fn key_down(_: Id, _: Sel, ev: Id) {
             return;
         }
         let first = msg![u16; chars, c"characterAtIndex:", 0usize => usize];
-        let rune = match key_rune(first) {
+        let rune = match key_rune(first, key) {
             Some(r) => Some(r),
             None if n == 1 => char::from_u32(u32::from(first)).map(u32::from),
             None => None,

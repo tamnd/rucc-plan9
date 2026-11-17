@@ -14,6 +14,12 @@
 //! - `wayland` gives the input with a virtual keyboard and a virtual pointer through `9h vinput`,
 //!   finds the window with `swaymsg`, and uses the clipboard with `wl-copy` and `wl-paste`. It
 //!   needs `WAYLAND_DISPLAY` and sway, and it is the check of the Wayland back end on Linux;
+//! - `cocoa` gives the input as events of the window system of macOS, with the key codes of
+//!   the US layout, through the `post` step of the control socket. The window of the monitor does
+//!   each event as an event of a person: the event goes from `NSApplication` through the window
+//!   to the view, and the view makes the input of the machine. The clipboard uses `pbcopy` and
+//!   `pbpaste`. It is the check of the `AppKit` back end on macOS. The events do not go through
+//!   the window server, because that needs the permission of Accessibility for the process;
 //! - `control` gives the input on the control socket of the monitor. It does not go through the
 //!   window of the host, so it checks only the probe, the guest and this command. It uses the
 //!   clipboard with `pbcopy` and `pbpaste` on macOS, and on Linux with `wl-copy` and
@@ -935,6 +941,145 @@ impl Driver for Control {
     }
 }
 
+/// The key code of macOS for the key with the X keysym name `sym`, on the US layout (ANSI).
+#[must_use]
+pub fn mac_key_code(sym: &str) -> Option<u16> {
+    const LETTERS: [u16; 26] = [
+        0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46, 45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16,
+        6,
+    ];
+    const DIGITS: [u16; 10] = [29, 18, 19, 20, 21, 23, 22, 26, 28, 25];
+    let mut chars = sym.chars();
+    if let (Some(c), None) = (chars.next(), chars.next()) {
+        if c.is_ascii_lowercase() {
+            return Some(LETTERS[usize::from(c as u8 - b'a')]);
+        }
+        if c.is_ascii_digit() {
+            return Some(DIGITS[usize::from(c as u8 - b'0')]);
+        }
+    }
+    Some(match sym {
+        "equal" => 24,
+        "minus" => 27,
+        "bracketright" => 30,
+        "bracketleft" => 33,
+        "Return" => 36,
+        "apostrophe" => 39,
+        "semicolon" => 41,
+        "backslash" => 42,
+        "comma" => 43,
+        "slash" => 44,
+        "period" => 47,
+        "Tab" => 48,
+        "space" => 49,
+        "grave" => 50,
+        "BackSpace" => 51,
+        "Escape" => 53,
+        "Shift" => MAC_SHIFT,
+        "Control" => MAC_CONTROL,
+        _ => return None,
+    })
+}
+
+/// The key codes of macOS of the left Shift key and the left Control key.
+const MAC_SHIFT: u16 = 56;
+const MAC_CONTROL: u16 = 59;
+
+/// The driver of the window of macOS. It gives the input as events of `AppKit` with the `post`
+/// step of the control socket, and uses the clipboard with `pbcopy` and `pbpaste`.
+#[derive(Debug, Default)]
+pub struct Cocoa {
+    /// The modifiers that are down, as words of the `post` step.
+    mods: Vec<&'static str>,
+}
+
+impl Cocoa {
+    fn code(sym: &str) -> Result<u16, String> {
+        mac_key_code(sym).ok_or_else(|| format!("no key code for {sym}"))
+    }
+
+    /// The `post` line that pushes or releases a modifier key.
+    fn modifier(&mut self, code: u16, word: &'static str, down: bool) -> String {
+        self.mods.retain(|&m| m != word);
+        if down {
+            self.mods.push(word);
+        }
+        format!("post flags {code} {}", self.mods.join(" "))
+            .trim_end()
+            .to_string()
+    }
+
+    /// The `post` line of a key down or up, with the modifiers that are down.
+    fn key(&self, code: u16, down: bool) -> String {
+        let dir = if down { "down" } else { "up" };
+        format!("post key {code} {dir} {}", self.mods.join(" "))
+            .trim_end()
+            .to_string()
+    }
+}
+
+impl Driver for Cocoa {
+    fn name(&self) -> &'static str {
+        "cocoa"
+    }
+
+    fn start(&mut self, control: &Path) -> Result<(), String> {
+        if !cfg!(target_os = "macos") {
+            return Err("the cocoa driver needs macOS".into());
+        }
+        let (w, h) = gui::SCREEN;
+        gui::give(control, &[format!("post move {} {}", w / 2, h / 2)])
+    }
+
+    fn act(&mut self, act: &Act, control: &Path) -> Result<(), String> {
+        let lines = match act {
+            Act::Tap { sym, shift, ctrl } => {
+                let code = Cocoa::code(sym)?;
+                let mut lines = Vec::new();
+                if *ctrl {
+                    lines.push(self.modifier(MAC_CONTROL, "control", true));
+                }
+                if *shift {
+                    lines.push(self.modifier(MAC_SHIFT, "shift", true));
+                }
+                lines.push(self.key(code, true));
+                lines.push(self.key(code, false));
+                if *shift {
+                    lines.push(self.modifier(MAC_SHIFT, "shift", false));
+                }
+                if *ctrl {
+                    lines.push(self.modifier(MAC_CONTROL, "control", false));
+                }
+                lines
+            }
+            Act::Down(sym) if sym == "Shift" => vec![self.modifier(MAC_SHIFT, "shift", true)],
+            Act::Up(sym) if sym == "Shift" => vec![self.modifier(MAC_SHIFT, "shift", false)],
+            Act::Down(sym) => vec![self.key(Cocoa::code(sym)?, true)],
+            Act::Up(sym) => vec![self.key(Cocoa::code(sym)?, false)],
+            Act::Click(x, y, b) => {
+                let mut lines = vec![format!("post move {x} {y}")];
+                match b {
+                    // The button numbers of macOS: 0 left, 1 right and 2 middle.
+                    1..=3 => {
+                        let n = [0, 2, 1][usize::from(b - 1)];
+                        lines.push(format!("post down {x} {y} {n}"));
+                        lines.push(format!("post up {x} {y} {n}"));
+                    }
+                    4 => lines.push(format!("post wheel {x} {y} up")),
+                    _ => lines.push(format!("post wheel {x} {y} down")),
+                }
+                lines
+            }
+            Act::Copy(text) => {
+                copy(text)?;
+                Vec::new()
+            }
+            Act::Wait(_) | Act::Paste => Vec::new(),
+        };
+        gui::give(control, &lines)
+    }
+}
+
 /// The lines for the control socket that start the probe in a window that covers the screen,
 /// from the console window of `rio`.
 #[must_use]
@@ -1077,6 +1222,30 @@ pub fn report(record: &Record) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mac_key_codes_are_those_of_the_us_layout() {
+        assert_eq!(mac_key_code("a"), Some(0));
+        assert_eq!(mac_key_code("z"), Some(6));
+        assert_eq!(mac_key_code("q"), Some(12));
+        assert_eq!(mac_key_code("0"), Some(29));
+        assert_eq!(mac_key_code("9"), Some(25));
+        assert_eq!(mac_key_code("Return"), Some(36));
+        assert_eq!(mac_key_code("BackSpace"), Some(51));
+        assert_eq!(mac_key_code("F1"), None);
+        for k in keys() {
+            assert!(mac_key_code(&k.sym).is_some(), "{}", k.sym);
+        }
+    }
+
+    #[test]
+    fn the_cocoa_driver_holds_the_modifiers() {
+        let mut c = Cocoa::default();
+        assert_eq!(c.modifier(MAC_SHIFT, "shift", true), "post flags 56 shift");
+        assert_eq!(c.key(0, true), "post key 0 down shift");
+        assert_eq!(c.modifier(MAC_SHIFT, "shift", false), "post flags 56");
+        assert_eq!(c.key(0, false), "post key 0 up");
+    }
 
     /// The events of a probe that got the input of the plan as it must.
     fn good(plan: &Plan) -> Vec<Event> {
