@@ -1,9 +1,9 @@
-# ktrans changes typed Latin letters to the letters of another language. It reads the keyboard of rio from /dev/kbdtap and writes the result back to it. In Japanese, the window of ktrans shows the words of the dictionary for the kana that are typed. The script types "nihon", and the window shows the words for the kana of nihon. ktrans draws its window before it reads the dictionaries, and it reads the keyboard only after that. Thus the run line waits until ktrans has the processes of the keyboard, and then writes the ready mark. The Del key in the window of ktrans stops it.
+# ktrans changes typed Latin letters to the letters of another language. It reads the keyboard of rio from /dev/kbdtap and writes the result back to it. In Japanese, the window of ktrans shows the words of the dictionary for the kana that are typed. The script types "nihon", and the window shows the words for the kana of nihon. ktrans draws its window before it reads the dictionaries, and it reads the keyboard only after that. Thus the run line waits until ktrans has the processes of the keyboard, and then writes the ready mark. On TCG, the words of the dictionary come some seconds after the last key, so the quiet step waits until the window did not change for 3 seconds. The Del key in the window of ktrans stops it.
 class exact
 window 400x200
 run ktrans -l jp </dev/kbdtap >/dev/kbdtap & while(test `{ps | grep -c ktrans} -lt 4) sleep 1; echo R9-GUI^-READY > '#c/cons'; wait; echo -n
 ready 300
 keys "nihon"
-quiet
+quiet 3000 60
 snap words
 exit "\x7f"
