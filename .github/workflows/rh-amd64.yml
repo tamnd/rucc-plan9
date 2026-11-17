@@ -28,7 +28,7 @@ permissions:
 env:
   R9_CACHE: /mnt/r9
   # The commit of tamnd/rucc that builds the R user space.
-  RUCC_PIN: 570665d2a547355c83ac0f40788069e611bffbea
+  RUCC_PIN: ead210602789e45bc5593fc42265d048efefef55
 
 jobs:
   rh:
