@@ -125,6 +125,13 @@ If they changed rarely, ship it as experimental, with a check in `r9 9h verify` 
 
 **Deadline.** P8, or 02.7 records the row as unclaimed.
 
+**Decision.** There is no arm64 Linux builder at P8, so 02.6 and 02.7 record the Linux arm64 row of `9h` as unclaimed. The facts:
+- The hosted arm64 runner of GitHub Actions (`ubuntu-24.04-arm`) is a Neoverse-N2 virtual machine on Azure. Its GIC is a GICv3, but the kernel says `kvm: HYP mode not available`, and it has no `/dev/kvm`. The runner cannot run a guest.
+- The Raspberry Pi 5 has a GIC-400, which is a GICv2, so KVM cannot give a guest a GICv3 there.
+- No Ampere host is available to the project.
+
+The monitor builds on Linux arm64, and its tests pass there, in the job `9h monitor on linux arm64` of each change. The row can join the claim when a host with `/dev/kvm` and a GICv3 runs `r9 9h boot` and the GUI scripts.
+
 ## 7. Whether a weekly pin is right for `front`
 
 **Belief.** 9front commits to `front` most days. A weekly pin, advanced only when G passes its baseline three times (04.1), is frequent enough to find rucc regressions against new code within a week. It is also slow enough that G's three baseline runs fit.
@@ -237,6 +244,8 @@ If the cost is too high, the alternative is to copy the guest's `/sys/include` a
 **How to find out.** At P8's midpoint, count the exact and masked scripts with real time on G/H. Build the clock only if the count is short.
 
 **Deadline.** P8.
+
+**Decision.** The virtual clock is not built. Of the 82 scripts of `gui/`, 61 are `class exact` and 21 are `class smoke`. With real time on G/H on the M4, all 82 give the same result as on G/Q, so 61 programs are exact, and the count is not short. No script needs a mask. R/H on the M4 also gives all 82, with the 61 exact scripts the same as G/Q. A script of a program that shows the time sets the clock of the machine first: `clock` writes a fixed time to `/dev/time`. The programs that change with wall time, such as `catclock`, `doom`, `life` and `stats`, are smoke scripts. The question can open again if a new script cannot be exact or masked with real time.
 
 ## 15. Reporting upstream
 

@@ -102,7 +102,7 @@ No rucc process may use more than 1 GB.
 | Order | `objtype` | Q (boot and tests) | H (`9h`) |
 |---|---|---|---|
 | 1 | `amd64` | QEMU/KVM on gpc and server3 | Linux amd64 (KVM) |
-| 2 | `arm64` | QEMU TCG on gpc; QEMU/HVF on the M4 | macOS arm64 (HVF), Linux arm64 (KVM) |
+| 2 | `arm64` | QEMU TCG on gpc; QEMU/HVF on the M4 | macOS arm64 (HVF); Linux arm64 (KVM) is not claimed (open question 6) |
 | 3 | `386` | QEMU/KVM | none |
 | 4 | `arm` | QEMU TCG (`virt`, if 9front's arm kernels boot there; open question 9) | none |
 
@@ -129,7 +129,7 @@ That is 83 programs, 80 of them in the claim. `r9 census --gui` regenerates the 
 **On which hosts.**
 - macOS 15 or later on Apple Silicon, running arm64 binaries;
 - Linux 6.8 or later on amd64, running amd64 binaries;
-- Linux on arm64, running arm64 binaries, when an arm64 Linux builder exists (open question 6).
+- Linux on arm64 is not in the claim. No arm64 Linux builder with KVM exists, and the hosted arm64 runners have no `/dev/kvm` (open question 6). The monitor builds and passes its tests on Linux arm64, and the row joins the claim when a builder exists.
 
 A host runs binaries of its own architecture. Running amd64 Plan 9 binaries on Apple Silicon is not claimed: Rosetta translates only Mach-O and Linux ELF (17, question 5).
 
