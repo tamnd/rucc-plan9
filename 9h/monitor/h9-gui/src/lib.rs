@@ -240,13 +240,19 @@ impl Held {
     }
 }
 
-/// The rune of `keyboard.h` for the first UTF-16 unit `c` of the characters of a key of
-/// `AppKit`, or None when the key has no rune of its own and the characters go as they are.
-/// The function keys of `AppKit` are from 0xF700 (`NSUpArrowFunctionKey`).
+/// The key code of macOS of the Enter key of the keypad.
+pub const KEYPAD_ENTER: u16 = 76;
+
+/// The rune of `keyboard.h` for the first UTF-16 unit `c` of the characters of the key `code`
+/// of `AppKit`, or None when the key has no rune of its own and the characters go as they are.
+/// The function keys of `AppKit` are from 0xF700 (`NSUpArrowFunctionKey`). The Enter key of the
+/// keypad gives 0x03 (`NSEnterCharacter`), and Control with C gives 0x03 too: only the key code
+/// tells them apart.
 #[must_use]
-pub fn key_rune(c: u16) -> Option<u32> {
+pub fn key_rune(c: u16, code: u16) -> Option<u32> {
     Some(match c {
-        0x0D | 0x03 => u32::from(b'\n'),
+        0x0D => u32::from(b'\n'),
+        0x03 if code == KEYPAD_ENTER => u32::from(b'\n'),
         0x7F => 0x08,
         0xF700 => k::UP,
         0xF701 => k::DOWN,
@@ -325,6 +331,90 @@ pub fn screen_point(x: f64, y: f64, vw: f64, vh: f64, width: u32, height: u32) -
     )
 }
 
+/// The point of a view of `vw` by `vh` points, with y up, at the centre of the pixel (x, y) of a
+/// screen of `width` by `height` pixels. [`screen_point`] gives the pixel again.
+#[must_use]
+pub fn view_point(x: u16, y: u16, vw: f64, vh: f64, width: u32, height: u32) -> (f64, f64) {
+    if width == 0 || height == 0 {
+        return (0.0, 0.0);
+    }
+    (
+        (f64::from(x) + 0.5) * vw / f64::from(width),
+        vh - (f64::from(y) + 0.5) * vh / f64::from(height),
+    )
+}
+
+/// An event of the window system of the host, which a test gives to the window (plan 11.9). The
+/// window does the event as it does an event of a person. `r9 hostcheck --host cocoa` gives these
+/// events on the control socket of the monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostEvent {
+    /// The key of the key code `code` of the host goes down, or up, with the modifier flags
+    /// `flags` ([`SHIFT`], [`CONTROL`], [`OPTION`] and [`COMMAND`]).
+    Key {
+        /// The key code of the host.
+        code: u16,
+        /// True for a push, false for a release.
+        down: bool,
+        /// The modifier flags.
+        flags: u64,
+    },
+    /// The modifier key of the key code `code` went down or up, and the modifier flags are now
+    /// `flags`.
+    Flags {
+        /// The key code of the modifier key.
+        code: u16,
+        /// The modifier flags after the change.
+        flags: u64,
+    },
+    /// The button `button` of the host goes down, or up, at the pixel (x, y) of the screen. The
+    /// button numbers are those of the host: 0 is the left button, 1 the right and 2 the middle.
+    Button {
+        /// The column of the pixel.
+        x: u16,
+        /// The row of the pixel.
+        y: u16,
+        /// The button number of the host.
+        button: u8,
+        /// True for a push, false for a release.
+        down: bool,
+    },
+    /// The pointer moves to the pixel (x, y) of the screen.
+    Move {
+        /// The column of the pixel.
+        x: u16,
+        /// The row of the pixel.
+        y: u16,
+    },
+    /// The wheel turns one line, up or down, at the pixel (x, y) of the screen.
+    Wheel {
+        /// The column of the pixel.
+        x: u16,
+        /// The row of the pixel.
+        y: u16,
+        /// True for up, false for down.
+        up: bool,
+    },
+}
+
+/// Give `e` to the window as an event of the window system of the host, and wait until the
+/// window did the event. Only the `AppKit` back end has this. On the other hosts, the test of the
+/// back end gives the input through the window system (`xdotool` or `9h vinput`).
+///
+/// # Errors
+///
+/// When the host has no such back end, when the window is not open, or when the window does not
+/// take the event in 5 seconds.
+pub fn post(e: HostEvent) -> Result<(), String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return cocoa::post(e);
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        let _ = e;
+        Err("only the window of macOS takes events on the control socket".into())
+    }
+}
+
 /// The lines of scroll that a trackpad gives in small steps. Each full line is one click of
 /// button 4 (up) or button 5 (down).
 #[derive(Debug, Default)]
@@ -364,8 +454,8 @@ impl Scroll {
 #[cfg(test)]
 mod tests {
     use super::{
-        COMMAND, CONTROL, Held, OPTION, SHIFT, Scroll, buttons, is_modifier, k, key_rune,
-        rune_utf8, screen_point,
+        COMMAND, CONTROL, Held, KEYPAD_ENTER, OPTION, SHIFT, Scroll, buttons, is_modifier, k,
+        key_rune, rune_utf8, screen_point, view_point,
     };
 
     #[test]
@@ -452,16 +542,18 @@ mod tests {
 
     #[test]
     fn the_keys_of_the_host_give_the_runes_of_plan_9() {
-        assert_eq!(key_rune(0x0D), Some(0x0A));
-        assert_eq!(key_rune(0x7F), Some(0x08));
-        assert_eq!(key_rune(0xF700), Some(0xF00E));
-        assert_eq!(key_rune(0xF701), Some(0x80));
-        assert_eq!(key_rune(0xF704), Some(0xF001));
-        assert_eq!(key_rune(0xF70F), Some(0xF00C));
-        assert_eq!(key_rune(u16::from(b'a')), None);
+        assert_eq!(key_rune(0x0D, 0), Some(0x0A));
+        assert_eq!(key_rune(0x03, KEYPAD_ENTER), Some(0x0A));
+        assert_eq!(key_rune(0x03, 8), None);
+        assert_eq!(key_rune(0x7F, 0), Some(0x08));
+        assert_eq!(key_rune(0xF700, 0), Some(0xF00E));
+        assert_eq!(key_rune(0xF701, 0), Some(0x80));
+        assert_eq!(key_rune(0xF704, 0), Some(0xF001));
+        assert_eq!(key_rune(0xF70F, 0), Some(0xF00C));
+        assert_eq!(key_rune(u16::from(b'a'), 0), None);
         assert_eq!(rune_utf8(0xF00E), "\u{F00E}".as_bytes());
         assert!(rune_utf8(0).is_empty());
-        assert_eq!(key_rune(0xF730).map(rune_utf8), Some(vec![]));
+        assert_eq!(key_rune(0xF730, 0).map(rune_utf8), Some(vec![]));
     }
 
     #[test]
@@ -488,6 +580,26 @@ mod tests {
         );
         assert_eq!(screen_point(-5.0, 900.0, 1024.0, 768.0, 1024, 768), (0, 0));
         assert_eq!(screen_point(1.0, 1.0, 0.0, 0.0, 1024, 768), (0, 0));
+    }
+
+    #[test]
+    fn a_view_point_gives_its_pixel_again() {
+        for (vw, vh) in [
+            (1024.0, 768.0),
+            (512.0, 384.0),
+            (1536.0, 1152.0),
+            (1000.0, 700.0),
+        ] {
+            for (x, y) in [(0, 0), (1023, 767), (20, 747), (512, 384), (1003, 20)] {
+                let (px, py) = view_point(x, y, vw, vh, 1024, 768);
+                assert_eq!(
+                    screen_point(px, py, vw, vh, 1024, 768),
+                    (x, y),
+                    "{vw}x{vh} {x},{y}"
+                );
+            }
+        }
+        assert_eq!(view_point(5, 5, 100.0, 100.0, 0, 768), (0.0, 0.0));
     }
 
     #[test]

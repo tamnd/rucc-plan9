@@ -17,6 +17,12 @@
 //!   (X1, Y1), to FILE as a PNG file;
 //! - `regs` makes each vCPU write its registers to the standard error of the monitor, for a guest
 //!   that stops;
+//! - `post EVENT` gives an event of the window system of the host to the window of the machine,
+//!   which does it as an event of a person (plan 11.9). Only the window of macOS takes it. EVENT
+//!   is `key CODE down|up [MODS]`, `flags CODE [MODS]`, `down X Y BUTTON`, `up X Y BUTTON`,
+//!   `move X Y` or `wheel X Y up|down`. CODE is a key code of the host, MODS are the words
+//!   `shift`, `control`, `option` and `command`, (X, Y) is a pixel of the screen, and BUTTON is
+//!   a button of the host: 0 left, 1 right and 2 middle;
 //! - `quit` ends the session, and the script passes.
 //!
 //! TEXT is the rest of the line with the spaces at its two ends removed, or a string in double quotes with the escapes `\n`, `\r`, `\t`,
@@ -49,6 +55,8 @@ pub enum Step {
     Snap(String, Option<[u16; 4]>),
     /// Make each vCPU write its registers to the standard error.
     Regs,
+    /// Give an event of the window system of the host to the window.
+    Post(h9_gui::HostEvent),
     /// End the session.
     Quit,
 }
@@ -79,6 +87,11 @@ pub trait Target {
     /// Make each vCPU write its registers to the standard error.
     fn regs(&mut self) -> Result<(), String> {
         Err("the machine cannot write its registers".into())
+    }
+    /// Give the event `e` of the host to the window of the machine.
+    fn post(&mut self, e: h9_gui::HostEvent) -> Result<(), String> {
+        let _ = e;
+        Err("the machine has no window".into())
     }
 }
 
@@ -115,6 +128,57 @@ fn quiet_step(arg: &str) -> Option<Step> {
         ),
         _ => return None,
     })
+}
+
+/// The modifier flags of the words `shift`, `control`, `option` and `command`.
+fn mods(words: &[&str]) -> Option<u64> {
+    let mut f = 0;
+    for w in words {
+        f |= match *w {
+            "shift" => h9_gui::SHIFT,
+            "control" => h9_gui::CONTROL,
+            "option" => h9_gui::OPTION,
+            "command" => h9_gui::COMMAND,
+            _ => return None,
+        };
+    }
+    Some(f)
+}
+
+/// The `post` step of the words after `post`.
+fn post_step(arg: &str) -> Option<Step> {
+    use h9_gui::HostEvent;
+    let w: Vec<&str> = arg.split_whitespace().collect();
+    let n = |i: usize| w.get(i).and_then(|v| v.parse::<u16>().ok());
+    let e = match w[..] {
+        ["key", _, dir, ref m @ ..] => HostEvent::Key {
+            code: n(1)?,
+            down: match dir {
+                "down" => true,
+                "up" => false,
+                _ => return None,
+            },
+            flags: mods(m)?,
+        },
+        ["flags", _, ref m @ ..] => HostEvent::Flags {
+            code: n(1)?,
+            flags: mods(m)?,
+        },
+        [dir @ ("down" | "up"), _, _, b] => HostEvent::Button {
+            x: n(1)?,
+            y: n(2)?,
+            button: b.parse().ok().filter(|&b: &u8| b < 32)?,
+            down: dir == "down",
+        },
+        ["move", _, _] => HostEvent::Move { x: n(1)?, y: n(2)? },
+        ["wheel", _, _, dir @ ("up" | "down")] => HostEvent::Wheel {
+            x: n(1)?,
+            y: n(2)?,
+            up: dir == "up",
+        },
+        _ => return None,
+    };
+    Some(Step::Post(e))
 }
 
 /// The `snap` step of the words after `snap`.
@@ -259,6 +323,11 @@ pub fn parse(src: &str) -> Result<Vec<(usize, Step)>, String> {
             "snap" => snap_step(arg)
                 .ok_or_else(|| format!("line {n}: give snap FILE or snap FILE X0 Y0 X1 Y1"))?,
             "regs" if arg.is_empty() => Step::Regs,
+            "post" => post_step(arg).ok_or_else(|| {
+                format!(
+                    "line {n}: give post key CODE down|up [MODS], post flags CODE [MODS], post down|up X Y BUTTON, post move X Y or post wheel X Y up|down"
+                )
+            })?,
             "quit" if arg.is_empty() => Step::Quit,
             _ => return Err(format!("line {n}: the step {line:?} is not known")),
         };
@@ -351,7 +420,7 @@ impl Watch {
 
 /// Do one line that a host program wrote on the socket of `--control`, and give the reply: `ok`,
 /// or `error: ` and the reason. The line has the steps `send`, `mouse`, `click`, `pause`, `quiet`,
-/// `snap` and `regs`, and `wait`, `absent` and `timeout` when `watch` has the console output. The monitor does all
+/// `snap`, `regs` and `post`, and `wait`, `absent` and `timeout` when `watch` has the console output. The monitor does all
 /// the steps of the line before it replies, so a program that waits for the reply knows that the
 /// input is in the machine.
 pub fn control(line: &str, t: &mut impl Target, mut watch: Option<&mut Watch>) -> String {
@@ -386,6 +455,7 @@ pub fn control(line: &str, t: &mut impl Target, mut watch: Option<&mut Watch>) -
             Step::Quiet(still, limit, r) => quiet(t, *still, *limit, *r),
             Step::Snap(f, r) => t.snap(f, *r),
             Step::Regs => t.regs(),
+            Step::Post(e) => t.post(*e),
             Step::Wait(text) => match watch.as_deref_mut() {
                 Some(w) => match w.log.find(text, w.seen, Instant::now() + w.timeout) {
                     Some(at) => {
@@ -454,6 +524,7 @@ pub fn run(steps: &[(usize, Step)], log: &Transcript, t: &mut impl Target) -> Re
             }
             Step::Snap(f, r) => t.snap(f, *r).map_err(|e| format!("line {n}: {f}: {e}"))?,
             Step::Regs => t.regs().map_err(|e| format!("line {n}: {e}"))?,
+            Step::Post(e) => t.post(*e).map_err(|e| format!("line {n}: {e}"))?,
             Step::Quit => break,
         }
     }
@@ -465,6 +536,73 @@ mod tests {
     use super::{Input, Step, Target, Tee, Transcript, control, parse, run};
     use std::io::Write;
     use std::time::Duration;
+
+    #[test]
+    fn the_post_steps_are_read() {
+        use h9_gui::{CONTROL, HostEvent, SHIFT};
+        let s = parse(
+            "post key 0 down shift control\npost key 9 up\npost flags 56 shift\npost flags 56\npost down 10 20 2\npost up 10 20 0\npost move 1023 767\npost wheel 5 6 up\npost wheel 5 6 down\n",
+        )
+        .unwrap();
+        let steps: Vec<Step> = s.into_iter().map(|(_, s)| s).collect();
+        assert_eq!(
+            steps,
+            vec![
+                Step::Post(HostEvent::Key {
+                    code: 0,
+                    down: true,
+                    flags: SHIFT | CONTROL
+                }),
+                Step::Post(HostEvent::Key {
+                    code: 9,
+                    down: false,
+                    flags: 0
+                }),
+                Step::Post(HostEvent::Flags {
+                    code: 56,
+                    flags: SHIFT
+                }),
+                Step::Post(HostEvent::Flags { code: 56, flags: 0 }),
+                Step::Post(HostEvent::Button {
+                    x: 10,
+                    y: 20,
+                    button: 2,
+                    down: true
+                }),
+                Step::Post(HostEvent::Button {
+                    x: 10,
+                    y: 20,
+                    button: 0,
+                    down: false
+                }),
+                Step::Post(HostEvent::Move { x: 1023, y: 767 }),
+                Step::Post(HostEvent::Wheel {
+                    x: 5,
+                    y: 6,
+                    up: true
+                }),
+                Step::Post(HostEvent::Wheel {
+                    x: 5,
+                    y: 6,
+                    up: false
+                }),
+            ]
+        );
+        for bad in [
+            "post",
+            "post key a down",
+            "post key 0 sideways",
+            "post key 0 down hyper",
+            "post down 10 20",
+            "post down 10 20 40",
+            "post move 70000 1",
+            "post wheel 1 2 left",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        let mut none = |_: Input| {};
+        assert!(control("post move 1 2", &mut none, None).contains("no window"));
+    }
 
     #[test]
     fn a_script_is_read() {
