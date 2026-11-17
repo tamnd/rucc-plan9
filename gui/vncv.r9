@@ -1,8 +1,8 @@
-# vncv shows the screen of a VNC server. The machine has no network, so the script adds the loopback interface first. Then it starts vncs on the display :1 of the machine, with a screen that runs colors and with no authentication. Then vncv connects to it on the loopback address. After 15 seconds, vncs -k stops the server, and vncv stops when the connection closes. Then the exit status of vncv is the note die vnc kin, which the script accepts.
+# vncv shows the screen of a VNC server. The machine has no network, so the script adds the loopback interface first. Then it starts vncs on the display :1 of the machine, with a screen that runs colors and with no authentication. Then vncv connects to it on the loopback address. After 40 seconds, vncs -k stops the server, and vncv stops when the connection closes. Then the exit status of vncv is the note die vnc kin, which the script accepts. On TCG, vncv can take some seconds to connect and draw, so the script waits 10 seconds and then waits until the window did not change for 3 seconds.
 class exact
 window 400x300
-run ip/ipconfig loopback /dev/null 127.1; vncs -A -g 400x300 -d :1 /bin/colors; sleep 2; {sleep 15; vncs -k :1} & vncv 127.0.0.1:1; ~ $status *'die vnc kin'
-pause 3
-quiet
+run ip/ipconfig loopback /dev/null 127.1; vncs -A -g 400x300 -d :1 /bin/colors; sleep 2; {sleep 40; vncs -k :1} & vncv 127.0.0.1:1; ~ $status *'die vnc kin'
+pause 10
+quiet 3000 25
 snap open
 exit none
