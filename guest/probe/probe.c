@@ -11,8 +11,12 @@
  *	R9-PROBE snarf HEX	the bytes of /dev/snarf, at Ctrl-V
  *	R9-PROBE snarfed	after Ctrl-C wrote r9-probe-snarf
  *				to /dev/snarf
- *	R9-PROBE end		when all keys are up after Ctrl-D,
- *				before the probe stops
+ *	R9-PROBE audio N	after it wrote N bytes of the
+ *				pattern of the audio check to
+ *				/dev/audio, when all keys are up
+ *				after Ctrl-D
+ *	R9-PROBE end		after the audio, before the probe
+ *				stops
  *	R9-PROBE error TEXT	a file did not open
  */
 #include <u.h>
@@ -21,6 +25,7 @@
 enum {
 	Mousemsg	= 1+4*12,	/* m, then 4 numbers of 12 bytes */
 	Snarfmax	= 1024,
+	Audioframes	= 8192,	/* 16-bit stereo frames of the pattern */
 };
 
 static int cons;
@@ -118,9 +123,49 @@ kbdmsg(char *m)
 	return first;
 }
 
+/*
+ * Write the pattern of the audio check to /dev/audio: sample k of
+ * the 2*Audioframes samples is k*7919+12345, in 16 bits, little
+ * endian. r9 looks for the same bytes in the WAV file of the
+ * monitor.
+ */
+static void
+play(void)
+{
+	uchar *b;
+	ushort v;
+	int fd, k, n;
+
+	n = 4*Audioframes;
+	b = malloc(n);
+	if(b == nil){
+		out("error audio %r");
+		return;
+	}
+	for(k = 0; k < 2*Audioframes; k++){
+		v = k*7919 + 12345;
+		b[2*k] = v;
+		b[2*k+1] = v>>8;
+	}
+	fd = open("/dev/audio", OWRITE);
+	if(fd < 0){
+		out("error audio %r");
+		free(b);
+		return;
+	}
+	if(write(fd, b, n) != n){
+		out("error audio write %r");
+		n = 0;
+	}
+	close(fd);
+	free(b);
+	out("audio %d", n);
+}
+
 void
 stop(int pid)
 {
+	play();
 	out("end");
 	postnote(PNPROC, pid, "kill");
 	exits(nil);

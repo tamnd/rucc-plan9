@@ -372,19 +372,20 @@ usage:
       --got directory by default).
   r9 hostcheck --kernel FILE --root IMAGE [--host x11|wayland|cocoa|control] [--cpus N]
           [--mem MIB] [--timeout SECS] [--out DIR] [--monitor PATH] [--keep]
-      Run the host checks of plan 11.9. The 9h kernel boots with its screen in a window of the
-      host and with the host clipboard. A probe in a window of rio writes each message of
-      /dev/kbd and /dev/mouse to the console. Then r9 gives keys, clicks and clipboard text to
-      the window of the host, and compares the lines of the probe with them. With --host x11 (the
-      default on Linux), the input goes through the X server of DISPLAY with xdotool, and the
-      clipboard uses xclip. With --host cocoa (the default on macOS), the input goes to the
-      window as events of AppKit with the key codes of the US layout, and the clipboard uses
-      pbcopy and pbpaste. With --host wayland, the input goes through the sway compositor of
-      WAYLAND_DISPLAY with the virtual keyboard and pointer of 9h vinput, and the clipboard uses
-      wl-copy and wl-paste. With --host control, the input goes on the control socket of the monitor, and
-      only the guest and r9 are checked. The work goes to DIR (work/hostcheck by default), with
-      console.log and hostcheck.json. The command keeps the text of the host clipboard, and puts
-      it back at the end.
+      Run the host checks of plan 11.9. The 9h kernel boots with its screen in a window of the host
+      and with the host clipboard. A probe in a window of rio writes each message of /dev/kbd and
+      /dev/mouse to the console. Then r9 gives keys, clicks and clipboard text to the window of the
+      host, and compares the lines of the probe with them. With --host x11 (the default on Linux), the
+      input goes through the X server of DISPLAY with xdotool, and the clipboard uses xclip. With
+      --host cocoa (the default on macOS), the input goes to the window as events of AppKit with the
+      key codes of the US layout, and the clipboard uses pbcopy and pbpaste. With --host wayland, the
+      input goes through the sway compositor of WAYLAND_DISPLAY with the virtual keyboard and pointer
+      of 9h vinput, and the clipboard uses wl-copy and wl-paste. With --host control, the input goes
+      on the control socket of the monitor, and only the guest and r9 are checked. At the end, the
+      probe writes a pattern to /dev/audio, and then r9 looks for it in the WAV file of the monitor,
+      audio.wav. The check makes no sound. The work goes to DIR (work/hostcheck by default), with
+      console.log and hostcheck.json. The command keeps the text of the host clipboard, and puts it
+      back at the end.
   r9 census FILE [--side R|G]
       Count what reached the compiler slot in one build, from the compile.jsonl that r9-cc
       wrote: the calls by origin and by compiler, the calls that failed, the calls from pcc,
