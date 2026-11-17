@@ -447,6 +447,37 @@ pub fn crop(img: &Image, r: Option<[u32; 4]>) -> Image {
     }
 }
 
+/// True when `img` is a new rio window before its program draws: a border of 4 pixels, a white
+/// inside and the gray line of the scroll bar at x = 16. The pointer can cover some pixels.
+#[must_use]
+pub fn blank_window(img: &Image) -> bool {
+    const BORDER: u32 = 4;
+    const SCROLL_X: u32 = 16;
+    const WHITE: [u8; 3] = [255, 255, 255];
+    const GRAY: [u8; 3] = [153, 153, 153];
+    // The pixels of the pointer and of the text cursor.
+    const OTHER: usize = 512;
+    let (w, h) = (img.width, img.height);
+    if w <= 2 * SCROLL_X || h <= 4 * BORDER {
+        return false;
+    }
+    let (mut scroll, mut other) = (0, 0);
+    for (i, p) in img.rgb.as_chunks::<3>().0.iter().enumerate() {
+        let (x, y) = (i % w as usize, i / w as usize);
+        let inside = (BORDER as usize..(w - BORDER) as usize).contains(&x)
+            && (BORDER as usize..(h - BORDER) as usize).contains(&y);
+        if !inside {
+            continue;
+        }
+        if x == SCROLL_X as usize && *p == GRAY {
+            scroll += 1;
+        } else if *p != WHITE {
+            other += 1;
+        }
+    }
+    scroll * 10 >= (h as usize - 2 * BORDER as usize) * 9 && other <= OTHER
+}
+
 /// The machine that the lines drive: QEMU with its QMP socket and its console log.
 pub struct Machine {
     qmp: Qmp,
@@ -649,14 +680,21 @@ impl Machine {
                 let limit = Duration::from_secs(u64::from(num(1, Some(30))?));
                 let r = rect_of(words.get(2..).unwrap_or_default())?;
                 let start = Instant::now();
-                let mut last = crop(&self.screen()?, r).sha256();
+                let mut img = crop(&self.screen()?, r);
+                let mut last = img.sha256();
                 let mut since = Instant::now();
-                while since.elapsed() < still {
+                // On TCG, a program such as fontsel can take many seconds before it draws, and its
+                // window is still and blank in that time. A blank window is thus not still.
+                while since.elapsed() < still || blank_window(&img) {
                     if start.elapsed() > limit {
+                        if blank_window(&img) {
+                            break;
+                        }
                         return Err(format!("the screen did not stop in {} s", limit.as_secs()));
                     }
                     std::thread::sleep(LOOK_GAP);
-                    let now = crop(&self.screen()?, r).sha256();
+                    img = crop(&self.screen()?, r);
+                    let now = img.sha256();
                     if now != last {
                         last = now;
                         since = Instant::now();
@@ -869,6 +907,40 @@ mod tests {
             text(&gui::send("q\n\u{f018}".as_bytes())[5..]).unwrap(),
             "q\n\u{f018}".as_bytes()
         );
+    }
+
+    #[test]
+    fn a_blank_window() {
+        let (w, h) = (100u32, 60u32);
+        let mut rgb = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let border = x < 4 || y < 4 || x >= w - 4 || y >= h - 4;
+                let scroll = x == 16 && (5..h - 5).contains(&y);
+                rgb.extend_from_slice(match (border, scroll) {
+                    (true, _) => &[85, 170, 170],
+                    (false, true) => &[153, 153, 153],
+                    _ => &[255, 255, 255],
+                });
+            }
+        }
+        let mut img = Image {
+            width: w,
+            height: h,
+            rgb,
+        };
+        assert!(blank_window(&img));
+        for p in img
+            .rgb
+            .as_chunks_mut::<3>()
+            .0
+            .iter_mut()
+            .skip(30 * 100)
+            .take(600)
+        {
+            p.copy_from_slice(&[0, 0, 0]);
+        }
+        assert!(!blank_window(&img));
     }
 
     #[test]

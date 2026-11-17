@@ -23,6 +23,10 @@
 //!   more than 10 seconds;
 //! - `keys TEXT` types TEXT, a quoted string with the escapes `\n`, `\t`, `\\`, `\"` and `\xHH`;
 //! - `pause SECS` waits;
+//! - `ready SECS` waits no more than SECS seconds until the run command writes `R9-GUI-READY`
+//!   to the console with `echo R9-GUI^-READY > '#c/cons'`. It is for a command that does slow
+//!   work, such as a build, before it starts the program. The window is still during that work,
+//!   so `quiet` cannot see it;
 //! - `mask X0 Y0 X1 Y1` adds a rectangle of the window that `r9 gui compare` does not compare in
 //!   the next snaps, and `mask none` removes all of them;
 //! - `exit KEY` types KEY (`Del`, `Esc` or a quoted string), and then the program must stop with
@@ -52,6 +56,11 @@ pub const CONSOLE_POINT: (u32, u32) = (100, 400);
 /// it. The run file writes it as `R9-GUI^-EXIT`, so that the line that the console window types
 /// does not have it.
 pub const EXIT_MARK: &str = "R9-GUI-EXIT";
+
+/// The text that the run command of a script writes to the console when it starts the program,
+/// for the `ready` step. The command writes it as `R9-GUI^-READY`, for the same reason as
+/// [`EXIT_MARK`].
+pub const READY_MARK: &str = "R9-GUI-READY";
 
 /// The time in seconds that the program can take to stop after `exit`.
 const EXIT_SECS: u32 = 60;
@@ -98,6 +107,8 @@ pub enum Step {
     Keys(Vec<u8>),
     /// Wait for the seconds.
     Pause(u64),
+    /// Wait no more than the seconds for [`READY_MARK`] on the console.
+    Ready(u64),
     /// Add a mask, or remove all of them with None.
     Mask(Option<[u32; 4]>),
     /// Type the bytes, and then the program must stop.
@@ -224,6 +235,7 @@ fn step(verb: &str, rest: &str) -> Option<Step> {
         ("drag", [b, p, q]) => Step::Drag(button(b)?, point(p)?, point(q)?),
         ("keys", [_, ..]) => Step::Keys(quoted(rest)?),
         ("pause", [n]) => Step::Pause(n.parse().ok()?),
+        ("ready", [n]) => Step::Ready(n.parse().ok()?),
         ("mask", ["none"]) => Step::Mask(None),
         ("mask", _) => match numbers(&words)?[..] {
             [x0, y0, x1, y1] if x0 < x1 && y0 < y1 => Step::Mask(Some(
@@ -439,6 +451,7 @@ pub fn control_lines(step: &Step, rect: [u32; 4], snaps: &Path) -> Vec<String> {
             .chain(keys(k).map(send))
             .collect(),
         Step::Pause(s) => vec![format!("pause {s}")],
+        Step::Ready(s) => vec![format!("timeout {s}"), format!("wait {READY_MARK}")],
         Step::Mask(_) => Vec::new(),
     }
 }
@@ -950,6 +963,7 @@ quiet 200 5
 snap look
 mask none
 drag 1 10,10 20,20
+ready 600
 exit Del
 "#;
 
@@ -975,6 +989,7 @@ exit Del
                 Step::Snap("look".into()),
                 Step::Mask(None),
                 Step::Drag(1, (10, 10), (20, 20)),
+                Step::Ready(600),
                 Step::Exit(vec![0x7f]),
             ]
         );
@@ -1086,6 +1101,10 @@ exit Del
         assert_eq!(
             l(Step::Exit(vec![0x7f])),
             vec!["absent R9-GUI-EXIT", "send \"\\x7f\""]
+        );
+        assert_eq!(
+            l(Step::Ready(600)),
+            vec!["timeout 600", "wait R9-GUI-READY"]
         );
         assert_eq!(
             parse("run a\nexit none").unwrap().steps[1].1,
