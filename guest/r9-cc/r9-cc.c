@@ -20,6 +20,11 @@
  * The record then has the origin rucc. When rucc fails and $r9bringup has cc:auto, r9-cc runs
  * the real compiler, and the record has the origin ref-c.
  *
+ * A call to r9 ccd has a time limit of Callms. When the limit comes first, a blocked dial, write
+ * or read stops, and the call is lost, as when the host stops the guest. r9-cc then sends the
+ * call again. With KVM and 4 processors, a call can stop before r9 ccd gets all of it, and
+ * without the limit, mk waits for it with no end.
+ *
  * r9-build also puts a copy for each of 6a, 7a, 8a, 5a and va (plan 07.5). An assembler call
  * goes to r9 ccd the same way. When the real assembler of the guest runs, the record has the
  * origin ref-as.
@@ -37,6 +42,7 @@ enum {
 	Maxfiles = 256,
 	Hexlen = 2*SHA2_256dlen+1,
 	Tries = 3,	/* calls to r9 ccd before a lost call goes to kencc */
+	Callms = 120*1000,	/* the time limit of one call to r9 ccd */
 	Lockms = 10,	/* the wait before the next open of the records */
 	Locktries = 6000,	/* one minute of waits */
 };
@@ -409,6 +415,13 @@ copyout(Biobuf *b, int fd, long n, int save)
  * *status, or -1 with the reason in *status. Standard error goes to errfd. The files of a
  * reply with an empty status are written in the guest.
  */
+/* An alarm note stops the blocked system call of forward, and the program continues. */
+int
+onalarm(void*, char *note)
+{
+	return strcmp(note, "alarm") == 0;
+}
+
 int
 forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, char *in, long nin, int errfd, char **status)
 {
@@ -418,18 +431,22 @@ forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, c
 	Biobuf b;
 
 	id = smprint("%d.%lld", getpid(), nsec());
+	alarm(Callms);
 	efd = dial(addr, nil, nil, nil);
 	if(efd < 0){
+		alarm(0);
 		*status = smprint("r9-cc: dial %s: %r", addr);
 		return -1;
 	}
 	fprint(efd, "9p %s\n", id);
 	switch(rfork(RFPROC|RFFDG|RFNOWAIT)){
 	case -1:
+		alarm(0);
 		*status = smprint("r9-cc: fork: %r");
 		close(efd);
 		return -1;
 	case 0:
+		alarm(0);
 		dup(efd, 0);
 		dup(efd, 1);
 		close(efd);
@@ -440,6 +457,7 @@ forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, c
 
 	cfd = dial(addr, nil, nil, nil);
 	if(cfd < 0){
+		alarm(0);
 		*status = smprint("r9-cc: dial %s: %r", addr);
 		return -1;
 	}
@@ -483,12 +501,14 @@ forward(char *addr, char *cc, char *objtype, char *dir, int argc, char **argv, c
 		if(i < 0)
 			goto bad;
 	}
+	alarm(0);
 	Bterm(&b);
 	close(cfd);
 	return 0;
 bad:
 	*status = incomplete;
 out:
+	alarm(0);
 	Bterm(&b);
 	close(cfd);
 	return -1;
@@ -581,6 +601,7 @@ main(int argc, char **argv)
 			fd = 2;
 		}else
 			fprint(fd, "== %s %s\n", cc, dir);
+		atnotify(onalarm, 1);
 		for(i = 0; i < Tries; i++){
 			if(forward(ccd, cc, objtype, dir, argc, argv, text, ntext, fd, &status) == 0)
 				break;
