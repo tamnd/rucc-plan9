@@ -119,6 +119,7 @@ name = "r9"
 version = "0.1.1"
 dependencies = [
  "r9-pins",
+ "r9-rusage",
  "serde",
  "serde_json",
  "sha2",
@@ -134,6 +135,10 @@ dependencies = [
  "sha2",
  "toml",
 ]
+
+[[package]]
+name = "r9-rusage"
+version = "0.1.1"
 
 [[package]]
 name = "serde"

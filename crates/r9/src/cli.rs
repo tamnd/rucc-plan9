@@ -166,6 +166,11 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             values: &["with", "top"],
             switches: &[],
         },
+        "speed" => Accepts {
+            positional: true,
+            values: &["tree", "cc", "runs", "jobs", "top", "out"],
+            switches: &["gcc"],
+        },
         "tree-diff" => Accepts {
             positional: true,
             values: &["with", "top"],
@@ -423,6 +428,21 @@ usage:
       G gives, which is lost checking, and those that only R gives, which is noise, with the
       count of each class and the count of the varargck format warnings. Show up to N units (20
       by default). This is a report, and it fails only when a file cannot be read.
+  r9 speed FILE --gcc [--tree DIR] [--cc PATH] [--runs N] [--jobs N] [--top N] [--out DIR]
+      Compare the compile time of rucc with the compile time of GCC 16 on the host (plan 13.5).
+      FILE is the compile.jsonl of a build. Each C call of the build is a unit. DIR holds the
+      sys/src, sys/include and OBJTYPE/include of the pinned tree. With no --tree, r9 writes
+      them from the history clone in the cache to the tree directory in --out. GCC (PATH, or
+      gcc-16) and rucc (R9_RUCC, or rucc on the path) compile each unit with
+      -fplan9-extensions -std=gnu99 -O2 -c for the host, with the -I and -D flags of the call.
+      Each unit runs N times on each side (3 by default), and the median CPU time from wait4
+      is kept. The units run on --jobs threads (1 by default). The gate is on the units that
+      GCC compiles: rucc must compile each of them, the sum of the CPU time of rucc divided by
+      the sum for GCC must be at most 0.5, and no rucc process can use more than 1 GiB. The
+      report has the percentiles of the ratio of each unit, and the --top units (50 by default)
+      with the largest ratio and the size of their preprocessed text. It goes to speed.txt in
+      --out (work/speed by default), and each unit goes to speed.json. Exit with failure when
+      the gate fails.
   r9 tree-diff A --with B [--top N] [--names]
       Compare the files that two builds wrote. A and B are the directories of two builds, or
       their changed.sha256 files. Print the files that only one build wrote, the files with

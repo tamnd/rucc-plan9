@@ -121,6 +121,17 @@ pub fn base_flags(objtype: &str) -> Vec<String> {
 pub fn rucc_command(rucc: &[String], root: &Path, r: &Record) -> Vec<String> {
     let mut c = rucc.to_vec();
     c.extend(base_flags(&r.objtype));
+    c.extend(unit_flags(root, r));
+    c
+}
+
+/// The flags of one unit for a host compiler, to run in the unit's directory under `root`: the
+/// quoted include directory of the source, the `-I` and `-D` flags of the kencc call with the
+/// paths of the guest moved under `root`, the sources, and the kencc default include
+/// directories. The other kencc flags are dropped.
+#[must_use]
+pub fn unit_flags(root: &Path, r: &Record) -> Vec<String> {
+    let mut c = Vec::new();
     let host = |p: &str| {
         if p.starts_with('/') {
             root.join(p.trim_start_matches('/')).display().to_string()
