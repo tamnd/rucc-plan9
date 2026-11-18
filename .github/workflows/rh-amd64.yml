@@ -3,12 +3,12 @@
 #
 # The job rh builds rucc at the pin below, makes the g-base image, and builds the 9h kernel with
 # r9 build --side G and the target 9h.amd64. r9 build --side R --keep then builds the amd64 user
-# space with rucc and -O2, and the root image of that build is the R root. The job runs each GUI
-# script on 9h with the 9h kernel and the R root. The job gq runs each GUI script on the 9front
-# kernel under QEMU with the g-base image. The job compare compares the snaps of the two runs of
-# each script with r9 gui compare. It fails when a run fails, when two runs are different, or when
-# fewer than 60 scripts of the class exact or masked are the same. The summary of the job has the
-# result of each script.
+# space with rucc and -O2, and the root image of that build is the R root. The job runs the smoke
+# suite with r9 9h smoke --snap, and then each GUI script, on 9h with the 9h kernel and the R
+# root. The job gq runs each GUI script on the 9front kernel under QEMU with the g-base image. The
+# job compare compares the snaps of the two runs of each script with r9 gui compare. It fails
+# when a run fails, when two runs are different, or when fewer than 60 scripts of the class exact
+# or masked are the same. The summary of the job has the result of each script.
 
 name: rh amd64
 
@@ -93,6 +93,11 @@ jobs:
           grep '; try ' /mnt/r9/r/collected/rucc.err | head -20 || true
           grep -E '^(passed|calls|failed_calls|rucc_calls|kencc_calls) ' /mnt/r9/r/build.toml
           grep -qx 'kencc_calls = 0' /mnt/r9/r/build.toml
+      - name: r9 9h smoke --snap on the R root
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/rh"
+          target/release/r9 9h smoke --kernel "$RUNNER_TEMP/k/collected/9h/amd64/99h" --root /mnt/r9/r/root.qcow2 --cpus 4 --snap "$RUNNER_TEMP/rh/smoke.png" --timeout 900 --out "$RUNNER_TEMP/smoke" | tee "$RUNNER_TEMP/rh/smoke.txt"
       - name: r9 gui run on 9h
         run: |
           mkdir -p "$RUNNER_TEMP/rh"
