@@ -77,7 +77,7 @@ jobs:
         if: always()
         run: |
           mkdir -p "$RUNNER_TEMP/out"
-          cp /mnt/r9/r/build.toml /mnt/r9/r/console.log "$RUNNER_TEMP/out/" || true
+          cp /mnt/r9/r/build.toml /mnt/r9/r/console.log /mnt/r9/r/qemu.cmd /mnt/r9/r/qemu.stderr "$RUNNER_TEMP/out/" || true
           cp /mnt/r9/r/collected/mk.log /mnt/r9/r/collected/rucc.err "$RUNNER_TEMP/out/" || true
           grep -E '^(GRADED|UNGRADED|build passed)' "$RUNNER_TEMP/out/build.txt" >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/upload-artifact@v7.0.1
