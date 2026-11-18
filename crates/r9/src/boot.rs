@@ -175,8 +175,10 @@ pub fn qemu_command(req: &Request) -> Vec<String> {
     if req.net {
         c.push("-netdev".into());
         c.push("user,id=net0".into());
+        // No option ROM: the guest boots from its disk, and Ubuntu's qemu-system-arm does not
+        // ship efi-virtio.rom, so QEMU stops at once when it looks for one.
         c.push("-device".into());
-        c.push(format!("virtio-net-pci,netdev=net0{modern}"));
+        c.push(format!("virtio-net-pci,netdev=net0,romfile={modern}"));
     }
     c
 }
@@ -868,7 +870,7 @@ mod tests {
         req.net = true;
         let c = qemu_command(&req).join(" ");
         assert!(c.ends_with(
-            "-netdev user,id=net0 -device virtio-net-pci,netdev=net0,disable-legacy=on"
+            "-netdev user,id=net0 -device virtio-net-pci,netdev=net0,romfile=,disable-legacy=on"
         ));
     }
 
