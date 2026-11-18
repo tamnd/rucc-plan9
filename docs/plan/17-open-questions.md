@@ -245,7 +245,7 @@ If the cost is too high, the alternative is to copy the guest's `/sys/include` a
 
 **Deadline.** P8.
 
-**Decision.** The virtual clock is not built. Of the 82 scripts of `gui/`, 61 are `class exact` and 21 are `class smoke`. With real time on G/H on the M4, all 82 give the same result as on G/Q, so 61 programs are exact, and the count is not short. No script needs a mask. R/H on the M4 also gives all 82, with the 61 exact scripts the same as G/Q. A script of a program that shows the time sets the clock of the machine first: `clock` writes a fixed time to `/dev/time`. The programs that change with wall time, such as `catclock`, `doom`, `life` and `stats`, are smoke scripts. The question can open again if a new script cannot be exact or masked with real time.
+**Decision.** The virtual clock is not built. Of the 82 scripts of `gui/`, 60 are `class exact`, 1 is `class masked` and 21 are `class smoke`. With real time on G/H on the M4, all 82 give the same result as on G/Q, so 61 programs are exact or masked, and the count is not short. The masked script is `zuke`. Its mask covers the volume, because the volume comes from `/dev/volume` of the audio device: it is 100% on `9h` and 0% under QEMU, which has no audio device. R/H on the M4 and R/H on amd64 with KVM also give all 82, with the 61 exact or masked scripts the same as G/Q. A script of a program that shows the time sets the clock of the machine first: `clock` writes a fixed time to `/dev/time`. The programs that change with wall time, such as `catclock`, `doom`, `life` and `stats`, are smoke scripts. The question can open again if a new script cannot be exact or masked with real time.
 
 ## 15. Reporting upstream
 
