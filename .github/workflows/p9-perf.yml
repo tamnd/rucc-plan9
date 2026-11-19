@@ -1,0 +1,114 @@
+# The performance gates of P9 on amd64 with KVM (plan 13). The hosted runners stand in for
+# server3, which has no /dev/kvm.
+#
+# The job builds rucc at the pin below and builds the amd64 user space with rucc and -O2, and
+# keeps the image. r9 bench then boots the g-base image and the R image in turn and compares the
+# times of the benchmarks of plan 13.2. r9 speed --gcc compiles each C unit of the R build with
+# GCC 16 and with rucc on the runner, and compares the CPU time. GCC 16 comes from the
+# ubuntu-toolchain-r PPA.
+
+name: p9 perf
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/p9-perf.yml
+      - bench/**
+      - crates/r9/src/bench.rs
+      - crates/r9/src/speed.rs
+      - crates/r9-rusage/**
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: the runs of each side for r9 bench
+        default: "5"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  R9_CACHE: /mnt/r9
+  # The commit of tamnd/rucc that builds the R user space. It has the fix of tamnd/rucc#4625,
+  # which r9 speed needs.
+  RUCC_PIN: efa5df981660ce6941a2f9d01ca80d5686d4ff5a
+  RUNS: ${{ inputs.runs || '5' }}
+
+jobs:
+  perf:
+    name: r9 bench and r9 speed on amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: tamnd/rucc
+          ref: ${{ env.RUCC_PIN }}
+          path: rucc
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: |
+            . -> target
+            rucc -> target
+      - name: let the runner user open /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: QEMU and GCC 16
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update -q
+          sudo apt-get install -qy --no-install-recommends qemu-utils qemu-system-x86 gcc-16
+          gcc-16 --version | head -1
+          sudo mkdir -p /mnt/r9 && sudo chown "$USER" /mnt/r9
+      - name: cargo build
+        run: |
+          cargo build --release --locked -p r9
+          (cd rucc && cargo build --release --locked -p rucc)
+      - uses: actions/cache@v6.1.0
+        with:
+          path: /mnt/r9/images
+          key: r9-images-amd64-${{ hashFiles('pins.toml') }}
+          restore-keys: r9-images-amd64-
+      - name: r9 fetch
+        run: target/release/r9 fetch --row amd64
+      - name: r9 image build
+        run: target/release/r9 image build --row amd64 --accel kvm --out "$RUNNER_TEMP/image"
+      - name: r9 build --side R
+        env:
+          R9_RUCC: ${{ github.workspace }}/rucc/target/release/rucc
+          R9_OPT: -O2
+        run: |
+          target/release/r9 build --side R --row amd64 --accel kvm --keep --timeout 5400 --out /mnt/r9/r
+          grep -E '^(passed|calls|failed_calls|rucc_calls|kencc_calls) ' /mnt/r9/r/build.toml
+          grep -qx 'kencc_calls = 0' /mnt/r9/r/build.toml
+      - name: r9 bench
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          target/release/r9 bench --r /mnt/r9/r/root.qcow2 --row amd64 --accel kvm --runs "$RUNS" --out "$RUNNER_TEMP/out/bench"
+      - name: r9 speed --gcc
+        if: always()
+        env:
+          R9_RUCC: ${{ github.workspace }}/rucc/target/release/rucc
+        run: |
+          target/release/r9 speed /mnt/r9/r/collected/compile.jsonl --gcc --cc gcc-16 --runs 3 --jobs "$(nproc)" --out /mnt/r9/speed
+          mkdir -p "$RUNNER_TEMP/out/speed"
+          cp /mnt/r9/speed/speed.txt /mnt/r9/speed/speed.json "$RUNNER_TEMP/out/speed/"
+      - name: gather the results
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/out/r"
+          cp /mnt/r9/r/build.toml /mnt/r9/r/console.log "$RUNNER_TEMP/out/r/" || true
+          tail -2 "$RUNNER_TEMP/out/bench/bench.txt" >> "$GITHUB_STEP_SUMMARY" || true
+          grep -E '^(CPU time|r9 speed)' /mnt/r9/speed/speed.txt >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: p9-perf-amd64
+          path: ${{ runner.temp }}/out
+          retention-days: 30
