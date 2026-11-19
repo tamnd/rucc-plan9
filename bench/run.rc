@@ -1,0 +1,5 @@
+# Run the benchmarks of plan 13.2 once. r9 bench gives bench/guest with --in.
+mkdir -p /tmp/r9in && cd /tmp/r9in && tar xf $r9in
+ip/ipconfig -g 127.0.0.1 loopback /dev/null 127.1 >[2]/dev/null
+cat /net/ipselftab | sed 5q
+rc /tmp/r9in/r9-bench /tmp/r9in

@@ -92,7 +92,7 @@ pub fn accepted(command: &str) -> Option<Accepts> {
             ],
             switches: &[],
         },
-        "diffrun" => Accepts {
+        "diffrun" | "bench" => Accepts {
             positional: false,
             values: &[
                 "row", "r", "g", "runs", "accel", "timeout", "firmware", "out",
@@ -300,6 +300,16 @@ usage:
       that r9 build --side R --keep left. The G image is the g-base image of the row by default.
       A case is compared only when each G run gives the same value. Write DIR/diffrun.txt
       (work/diffrun by default). The command fails when a case differs.
+  r9 bench --r FILE [--g FILE] [--row OBJTYPE] [--runs N] [--accel kvm|hvf|tcg]
+          [--timeout SECS] [--firmware PATH] [--out DIR]
+      Run the benchmarks of plan 13.2 on an R image and a G image, and compare the times (plan
+      13.3). FILE is an image of r9 build --side R --keep. The G image is the g-base image of
+      the row by default. Each image boots N times (10 by default), in turn. In the guest,
+      bench/run.rc builds the programs in bench/guest with the compiler of the image and runs
+      them. For each benchmark, the time of a side is the median of its runs, and the ratio is R
+      over G. A benchmark is gated when it ran on each run and its coefficient of variation on G
+      is at most 1%. The command fails when the geometric mean of the gated ratios is more than
+      1.00. Write DIR/bench.txt and DIR/bench.json (work/bench by default).
   r9 2x2 SUITE --r FILE [--g FILE] [--kernel FILE] [--both FILE] [--row OBJTYPE] [--runs N]
           [--accel kvm|hvf|tcg] [--timeout SECS] [--firmware PATH] [--out DIR]
       Run SUITE (boot, smoke, test or diffrun) on the cells of plan 12.7, and name the half of

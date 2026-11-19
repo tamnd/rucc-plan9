@@ -1,0 +1,87 @@
+#!/bin/rc
+# r9-bench: the benchmarks of plan 13.2. Each benchmark prints one line on the console:
+#
+#	bench NAME NS OPS
+#
+# NS is the time of OPS operations in nanoseconds. A benchmark that cannot run prints
+# "skip NAME: reason". r9-bench builds the programs in c with the compiler of the image,
+# and they link the libraries of the image. The time of the libraries, the tools and the kernel
+# is then the time of the build under test. The inputs come from r9gen, and they are the same on
+# each run. The last line is "bench done".
+#
+# usage: r9-bench [dir]
+# dir holds c and loop.rc, and is the directory of this script by default.
+
+rfork e
+here=`{basename -d $0}
+if(! ~ $#* 0)
+	here=$1
+switch($cputype){
+case amd64
+	O=6
+case arm64
+	O=7
+case *
+	echo skip setup: no compiler for $cputype
+	exit setup
+}
+t=/tmp/r9bench
+bin=/tmp/r9bench.bin
+rm -rf $t $bin
+mkdir -p $t $bin /n/r9ram /n/r9ex
+
+# Build the programs.
+for(p in r9bench r9chan r9gen){
+	cd $bin
+	if(! $O^c -FTVw $here/c/$p.c >[2=1] || ! $O^l -o $p $p.$O >[2=1]){
+		echo skip setup: cannot build $p
+		exit setup
+	}
+}
+B=$bin/r9bench
+G=$bin/r9gen
+
+# The inputs. They are not timed.
+$G log $t/log 3
+$G lines $t/lines 20000
+mkdir -p $t/tree
+$G tree $t/tree 10
+@{cd $t && tar cf tree.tar tree} && rm -rf $t/tree
+$G big $t/big 20
+ramfs -m /n/r9ram
+
+# System calls, processes, memory, files, network and libraries.
+$B errstr pipe1 open dirstat rendezvous
+$B rforkmem exec switch sem
+$B fault segattach malloc
+$bin/r9chan
+$B ramfs
+mkdir -p $t/x
+cd $t/x && $B -x tarx /bin/tar xf $t/tree.tar
+$B -x du /bin/du -a /sys/src
+rm -rf $t/x
+$B exportfs
+cd /sys/src/cmd && $B -x mkn /bin/mk -n
+$B tcp udp
+$B qsort strtod printg regexp memmove rsa sha256 aes
+
+# Tools.
+$B -x rc /bin/rc $here/loop.rc
+$B -x awk /bin/awk '{n += length($0); w[$5]++} END {for(k in w) print k, w[k]; print n}' $t/log
+$B -x sed /bin/sed 's/[0-9][0-9]*/N/g' $t/log
+$B -x grep /bin/rc -c 'grep -c ramfs '^$t^'/log && grep -c ''[0-9]+\.[0-9]+ ms$'' '^$t^'/log'
+$B -x sort /bin/sort $t/lines
+$B -x gzip /bin/gzip -9 -c $t/log
+$B -x bzip2 /bin/bzip2 -c $t/log
+$B -x troff /bin/rc -c 'cd /sys/man && for(f in 1/[a-b]*) troff -man $f'
+
+# Graphics. The guest has no screen, so only libmemdraw runs.
+$B memdraw
+echo skip drawdev: the guest has no screen
+echo skip acme: the guest has no screen
+echo skip doom: the guest has no screen and no doom1.wad
+
+unmount /n/r9ram >[2]/dev/null
+cd /
+rm -rf $t $bin
+echo bench done
