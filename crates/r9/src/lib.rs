@@ -42,6 +42,7 @@ pub mod repo;
 pub mod rtt;
 pub mod sdiff;
 pub mod sets;
+pub mod speed;
 pub mod tar;
 pub mod treediff;
 pub mod twobytwo;
